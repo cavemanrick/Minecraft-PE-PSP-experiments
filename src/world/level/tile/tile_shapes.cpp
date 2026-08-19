@@ -23,6 +23,34 @@ void trapdoorShape(unsigned char data, float out[6]) {
     out[0] = x0; out[1] = y0; out[2] = z0; out[3] = x1; out[4] = y1; out[5] = z1;
 }
 
+// Cocoa: a small pod bulging off one side of the block, flush against the
+// jungle log it's attached to, not a full-block-centered cube. Size grows
+// with age (same 4/16 -> 8/16 progression the old centered AABB used) and
+// the pod hangs a little below block-center rather than floating dead
+// center, matching a hanging seed pod. dir encodes which neighbor holds
+// the supporting log (see cocoaCanSurvive), so the pod sits flush against
+// that side and bulges into the block's own open space on the other.
+void cocoaShape(unsigned char data, float out[6]) {
+    int dir = data & COCOA_DIR_MASK;
+    int age = (data >> COCOA_AGE_SHIFT) & COCOA_AGE_MASK;
+    float size = 4.0f / 16.0f + age * (2.0f / 16.0f);
+
+    float cx0 = 0.5f - size * 0.5f, cx1 = 0.5f + size * 0.5f;
+    float top = 0.9375f;                 // 15/16 -- hangs just under the log above
+    float bot = top - size;
+
+    float x0 = cx0, x1 = cx1, z0 = cx0, z1 = cx1;
+    // dir tells us which neighbor is the supporting log; the pod sits
+    // flush against that face (offset all the way to the block edge on
+    // that side) rather than centered through the whole block.
+    if      (dir == 0) { z1 = 1.0f;      z0 = 1.0f - size; } // log at z+1: flush on +Z
+    else if (dir == 1) { x0 = 0.0f;      x1 = size;        } // log at x-1: flush on -X
+    else if (dir == 2) { z0 = 0.0f;      z1 = size;        } // log at z-1: flush on -Z
+    else                { x1 = 1.0f;      x0 = 1.0f - size; } // log at x+1: flush on +X
+
+    out[0] = x0; out[1] = bot; out[2] = z0; out[3] = x1; out[4] = top; out[5] = z1;
+}
+
 static bool stairLockAttached(const World* w, int x, int y, int z, unsigned char myData) {
     unsigned char nb = worldBlock(w, x, y, z);
     if (isStairs(nb)) {
@@ -317,11 +345,9 @@ int tileShapeBoxes(const World* w, int x, int y, int z, unsigned char id,
         return 1;
     } else if (id == BLOCK_COCOA) {
 
-        int age = (data >> COCOA_AGE_SHIFT) & COCOA_AGE_MASK;
-        float size = 4.0f/16.0f + age * (2.0f/16.0f);
-        float half = size / 2.0f;
-        SET(out[0], x + 0.5f - half, y + 0.5f - half, z + 0.5f - half,
-                    x + 0.5f + half, y + 0.5f + half, z + 0.5f + half);
+        float sh[6];
+        cocoaShape(data, sh);
+        SET(out[0], x + sh[0], y + sh[1], z + sh[2], x + sh[3], y + sh[4], z + sh[5]);
         return 1;
     } else if (id == BLOCK_REEDS) {
 

@@ -15,6 +15,30 @@ bool isTreeClear(unsigned char b);
 bool treeSpaceClear(World* w, int x, int y, int z, int treeHeight,
                     int (*radiusAt)(int layer, int treeHeight, int arg), int arg);
 
+// Shared 2x2 mega-trunk support, for any tree type with a real four-column
+// trunk (vanilla mega jungle trees and dark oak both use this footprint,
+// as opposed to a single thick 1x1 column). (x,z) is always the
+// "northwestern" corner log, matching vanilla's own 2x2-sapling placement
+// convention -- the other three columns are at +1 in x and/or z from there.
+extern const int kTrunk2x2Dx[4];
+extern const int kTrunk2x2Dz[4];
+
+// Ensures dirt sits under all four trunk columns (the caller is expected to
+// have already validated/placed dirt under the northwestern corner itself,
+// typically as part of its own treeSpaceClear-adjacent setup).
+void trunk2x2BaseDirt(World* w, int x, int y, int z);
+
+// Writes one height-level of a 2x2 trunk (all four log columns at y).
+void trunk2x2PlaceLevel(World* w, int x, int y, int z, unsigned char logData);
+
+// For cardinal offset (ddx,ddz) -- a unit vector in whatever direction
+// convention the caller's own table uses -- returns which of the two 2x2
+// trunk column indices actually faces outward in that direction, so
+// branches/decorations visibly originate from the trunk's outer edge
+// rather than always the same corner log regardless of trunk width.
+// Picks randomly between the two columns sharing that face.
+int trunk2x2OutwardColumn(Random& random, int ddx, int ddz);
+
 void treeBasic(World* w, Random& random, int x, int y, int z,
                int minHeight, unsigned char leafData, unsigned char logData);
 

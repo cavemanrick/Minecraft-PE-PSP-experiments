@@ -8,6 +8,7 @@
 #include "client/gui/screens/menu.h"
 #include "client/gui/screens/screen.h"
 #include "platform/audio/sound.h"
+#include "platform/audio/music.h"
 #include "gpu/sprite.h"
 #include "client/gui/hud.h"
 #include "platform/path.h"
@@ -71,9 +72,10 @@ static const OptionRowDef g_optionRows[OPT_CATEGORIES][OPT_MAX_ROWS] = {
     {
 
         { "Audio", "Sound Volume", {0, 0, 0, 0}, 11, 10, true, 0, 10 },
+        { 0,       "Music Volume", {0, 0, 0, 0}, 11, 10, true, 0, 10 },
     },
 };
-static const int g_optionRowCount[OPT_CATEGORIES] = { 5, 6, 10, 1 };
+static const int g_optionRowCount[OPT_CATEGORIES] = { 5, 6, 10, 2 };
 static const char* g_optionCategoryNames[OPT_CATEGORIES] = { "Game", "Controls", "Graphics", "Audio" };
 static int g_optionValueIdx[OPT_CATEGORIES][OPT_MAX_ROWS];
 
@@ -137,6 +139,7 @@ static int renderDistChoices() { return g_lowMemPsp ? 2 : 4; }
 
 #define CAT_AUDIO       3
 #define ROW_SOUNDVOL    0
+#define ROW_MUSICVOL    1
 static const int kAutosaveTicks[4] = { 0, 18000, 24000, 36000 };
 
 unsigned int optionsValueSig() {
@@ -171,6 +174,7 @@ static void optionsApply() {
     g_autoJump     = g_optionValueIdx[CAT_CONTROLS][ROW_AUTOJUMP];
     g_difficulty  = g_optionValueIdx[CAT_GAME][ROW_DIFFICULTY];
     soundSetVolume(g_optionValueIdx[CAT_AUDIO][ROW_SOUNDVOL] / 10.0f);
+    musicSetVolume(g_optionValueIdx[CAT_AUDIO][ROW_MUSICVOL] / 10.0f);
 
     g_sensitivity = g_optionValueIdx[CAT_CONTROLS][ROW_SENS] / 10.0f;
 

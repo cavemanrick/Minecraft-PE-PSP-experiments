@@ -252,7 +252,7 @@ static inline bool isNoMipLayerId(unsigned char id) {
     return isCrossShaped(id) || id == BLOCK_WHEAT || id == BLOCK_MELON_STEM
         || id == BLOCK_FIRE || isLadder(id) || id == BLOCK_BED || isTorch(id)
         || isPane(id) || isDoor(id) || isTrapdoor(id)
-        || id == BLOCK_CACTUS || isGlass(id) || id == BLOCK_CAKE;
+        || id == BLOCK_CACTUS || isGlass(id) || id == BLOCK_CAKE || id == BLOCK_COCOA;
 }
 
 bool sectionCannotEmit(const World* w, int ox, int oz, int si) {
@@ -395,6 +395,12 @@ int meshPass(const World* w, int ox, int oz, int y0, int y1, ChunkVertex* out, i
         if (layer == 3 && id == BLOCK_CAKE) {
             if (out && n + 36 > cap) return -1;
             n = emitCake(w, gx, y, gz, id, worldData(w, gx, y, gz), out, n);
+            continue;
+        }
+
+        if (layer == 3 && id == BLOCK_COCOA) {
+            if (out && n + 36 > cap) return -1;
+            n = emitCocoa(w, gx, y, gz, id, worldData(w, gx, y, gz), out, n);
             continue;
         }
 
@@ -622,6 +628,12 @@ int meshSectionSink(const World* w, int ox, int oz, int y0, int y1,
         if (id == BLOCK_CAKE) {
             if (!sinkReserve(&sk, 3, 36)) return -1;
             nn = emitCake(w, gx, y, gz, id, worldData(w, gx, y, gz), sk.buf[3], nn);
+            continue;
+        }
+
+        if (id == BLOCK_COCOA) {
+            if (!sinkReserve(&sk, 3, 36)) return -1;
+            nn = emitCocoa(w, gx, y, gz, id, worldData(w, gx, y, gz), sk.buf[3], nn);
             continue;
         }
 

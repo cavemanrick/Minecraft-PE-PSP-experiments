@@ -275,9 +275,16 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             break;
         }
         case BLOCK_CLAY:      *col = 8; *row = 4;  break;
-        case BLOCK_LOG:
-
-            if (f == F_TOP || f == F_DOWN) { *col = 5; *row = 1; }
+        case BLOCK_LOG: {
+            int axis = (data >> LOG_AXIS_SHIFT) & LOG_AXIS_MASK;
+            // Ring-cap faces depend on which axis the log lies along;
+            // every other face gets the bark texture. Default (Y) is a
+            // normal standing trunk; X/Z are for logs lying on their side
+            // (e.g. a fallen jungle tree).
+            bool capFace = (axis == LOG_AXIS_X) ? (f == F_LEFT || f == F_RIGHT)
+                         : (axis == LOG_AXIS_Z) ? (f == F_BACK || f == F_FORWARD)
+                         :                        (f == F_TOP  || f == F_DOWN);
+            if (capFace) { *col = 5; *row = 1; }
             else switch (data & LOG_TYPE_MASK) {
                 case LOG_SPRUCE: *col = 4; *row = 7; break;
                 case LOG_BIRCH:  *col = 5; *row = 7; break;
@@ -285,6 +292,7 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
                 default:         *col = 4; *row = 1; break;
             }
             break;
+        }
         case BLOCK_LEAVES:
             switch (data & LEAF_TYPE_MASK) {
                 case LEAF_SPRUCE: *col = 4; *row = 8; *tint = 0xFF2BAE3Du; break;
@@ -894,7 +902,8 @@ struct VineTile : GrowerTile { VineTile(unsigned char i) : GrowerTile(i) {}
         while (worldBlock(w, x, y - length, z) == BLOCK_VINE) length++;
         if (length >= 6) return;
         if (rand() % 4 == 0)
-            worldSetTileUpdate(w, x, y - 1, z, BLOCK_VINE, 0);
+            // Continue hanging on the same wall face as the parent vine.
+            worldSetTileUpdate(w, x, y - 1, z, BLOCK_VINE, worldData(w, x, y, z));
     } };
 
 struct CocoaTile : GrowerTile { CocoaTile(unsigned char i) : GrowerTile(i) {}
@@ -995,11 +1004,13 @@ static bool rawCube(unsigned char id) {
     if (id == BLOCK_CACTUS || id == BLOCK_TOPSNOW || id == BLOCK_TORCH) return false;
     if (isFence(id) || isFenceGate(id) || isPane(id)) return false;
     if (isStairs(id) || isSlab(id)) return false;
-    if (id == BLOCK_TRAPDOOR || isDoor(id) || id == BLOCK_LADDER || id == BLOCK_TORCH || isBed(id)) return false;
+    if (id == BLOCK_TRAPDOOR || isDoor(id) || id == BLOCK_LADDER || id == BLOCK_VINE ||
+        id == BLOCK_TORCH || isBed(id)) return false;
     if (id == BLOCK_FIRE) return false;
     if (isSign(id)) return false;
     if (id == BLOCK_CHEST) return false;
     if (id == BLOCK_CAKE) return false;
+    if (id == BLOCK_COCOA) return false;
     return true;
 }
 static bool rawOpaque(unsigned char id) {
@@ -1008,7 +1019,7 @@ static bool rawOpaque(unsigned char id) {
            !isCrossShaped(id) && id != BLOCK_CACTUS && id != BLOCK_TOPSNOW && id != BLOCK_REEDS &&
            !isSlab(id) && !isStairs(id) && id != BLOCK_FENCE && id != BLOCK_LADDER && id != BLOCK_TORCH &&
            !isDoor(id) && !isTrapdoor(id) && !isFenceGate(id) && !isBed(id) && id != BLOCK_FARMLAND &&
-           id != BLOCK_CHEST && !isSign(id) && id != BLOCK_FIRE && id != BLOCK_CAKE;
+           id != BLOCK_CHEST && !isSign(id) && id != BLOCK_FIRE && id != BLOCK_CAKE && id != BLOCK_COCOA;
 }
 static bool rawReplaceable(unsigned char id) {
 
@@ -1026,7 +1037,7 @@ static int rawLightOpacity(unsigned char id) {
         isFence(id) || isStairs(id) || isSlab(id) || isDoor(id) ||
         isTrapdoor(id) || isFenceGate(id) || id == BLOCK_LADDER || id == BLOCK_TORCH || isBed(id) ||
         id == BLOCK_FARMLAND || isSign(id) || id == BLOCK_FIRE ||
-        id == BLOCK_CHEST || id == BLOCK_CAKE) return 0;
+        id == BLOCK_CHEST || id == BLOCK_CAKE || id == BLOCK_COCOA) return 0;
     return 15;
 }
 static int rawLightEmit(unsigned char id) {

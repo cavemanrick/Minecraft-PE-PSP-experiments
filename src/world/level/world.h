@@ -592,4 +592,6 @@ BlockHit worldPick(const World* w, float px, float py, float pz, float yaw, floa
 
 int worldSelectionBoxes(const World* w, int x, int y, int z, float boxes[3][6]);
 
+long worldGetSeed(void);
+
 #endif

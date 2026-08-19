@@ -497,6 +497,19 @@ int emitCake(const World* w, int gx, int y, int gz, unsigned char id, unsigned c
                           boxBoundaryMask(x0, y0, z0, x1, y1, z1), 0, out, n, true);
 }
 
+int emitCocoa(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n) {
+    float sh[6];
+    cocoaShape(data, sh);
+    float x0 = sh[0], y0 = sh[1], z0 = sh[2], x1 = sh[3], y1 = sh[4], z1 = sh[5];
+
+    // The pod never actually reaches a block boundary on any face (it's a
+    // small box offset in from all sides), so boxBoundaryMask is 0 here --
+    // every face renders regardless of neighbors, which is correct for a
+    // free-floating attached bump rather than a block-filling shape.
+    return emitPartialBox(w, gx, y, gz, id, data, x0, y0, z0, x1, y1, z1,
+                          0, 0, out, n, true);
+}
+
 static inline int emitGateBox(const World* w, int gx, int y, int gz,
                               unsigned char id, unsigned char data,
                               float x0, float y0, float z0, float x1, float y1, float z1,

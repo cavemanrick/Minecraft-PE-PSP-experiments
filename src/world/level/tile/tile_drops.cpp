@@ -6,6 +6,8 @@
 #include "world/level/levelgen/Random.h"
 #include "world/inventory/inventory.h"
 #include "world/entity/item_entity.h"
+#include "world/item/item_instance.h"
+#include "world/item/item.h"
 #include <pspkernel.h>
 
 void Tile::popResource(int x, int y, int z, const ItemInstance& item) {
@@ -23,6 +25,15 @@ void worldSpawnResources(World* w, int x, int y, int z, unsigned char id, int da
     if (g_level.isClientSide) return;
 
     if (g_level.player->inventory->isCreative()) return;
+
+    // Vine only drops as an item when cut with shears, like leaves/cobweb
+    // in vanilla; breaking it any other way (or via explosion/falling
+    // block/etc, where there's no held item to check) yields nothing.
+    if (id == BLOCK_VINE) {
+        ItemInstance* held = g_level.player->inventory->getSelected();
+        if (!held || held->id != ITEM_SHEARS) return;
+    }
+
     static Random rng((long)sceKernelGetSystemTimeLow());
     Tile::tiles[id]->spawnResources(w, x, y, z, data, rng);
 }

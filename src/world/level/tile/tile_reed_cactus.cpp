@@ -21,9 +21,27 @@ bool bambooCanSurvive(World* w, int x, int y, int z) {
     return below == BLOCK_BAMBOO || below == BLOCK_GRASS || below == BLOCK_DIRT;
 }
 
+// Vine faces reuse the ladder direction convention (2=+Z quad/-Z wall,
+// 3=-Z quad/+Z wall, 4=+X quad/-X wall, 5=-X quad/+X wall). A vine survives
+// if the wall block behind its attached face is solid/leaves, OR if it's
+// directly beneath another vine/solid/leaf block (hanging continuation).
+static bool vineWallSolid(World* w, int x, int y, int z, int data) {
+    unsigned char wallBlock;
+    switch (data) {
+        case 2: wallBlock = worldBlock(w, x, y, z - 1); break;
+        case 3: wallBlock = worldBlock(w, x, y, z + 1); break;
+        case 4: wallBlock = worldBlock(w, x - 1, y, z); break;
+        case 5: wallBlock = worldBlock(w, x + 1, y, z); break;
+        default: return false;
+    }
+    return isSolidPhys(wallBlock) || isLeaf(wallBlock);
+}
+
 bool vineCanSurvive(World* w, int x, int y, int z) {
     unsigned char above = worldBlock(w, x, y + 1, z);
-    return above == BLOCK_VINE || isSolidPhys(above) || isLeaf(above);
+    if (above == BLOCK_VINE || isSolidPhys(above) || isLeaf(above)) return true;
+    int data = worldData(w, x, y, z);
+    return vineWallSolid(w, x, y, z, data);
 }
 
 static inline bool isJungleLog(World* w, int x, int y, int z) {

@@ -85,6 +85,10 @@ enum { DSLAB_STONE = 0, DSLAB_SAND = 1, DSLAB_WOOD = 2, DSLAB_COBBLE = 3,
        DSLAB_BRICK = 4, DSLAB_SMOOTHBRICK = 5, DSLAB_QUARTZ = 6, DSLAB_MAT_MASK = 7 };
 
 enum { LOG_OAK = 0, LOG_SPRUCE = 1, LOG_BIRCH = 2, LOG_JUNGLE = 3, LOG_TYPE_MASK = 3 };
+// Axis a log lies along, packed into bits 2-3 (same packed-byte pattern as
+// cocoa's dir/age split). Default 0 (Y/vertical) is what every standing
+// tree trunk already uses; X/Z are for fallen logs lying on their side.
+enum { LOG_AXIS_Y = 0, LOG_AXIS_X = 1, LOG_AXIS_Z = 2, LOG_AXIS_SHIFT = 2, LOG_AXIS_MASK = 3 };
 enum { SS_DEFAULT = 0, SS_CHISELED = 1, SS_SMOOTH = 2 };
 
 enum { TG_DEAD_SHRUB = 0, TG_TALL_GRASS = 1, TG_FERN = 3 };
@@ -109,7 +113,10 @@ static inline bool isFenceGate(unsigned char id){ return id == BLOCK_FENCE_GATE;
 static inline bool isDoor(unsigned char id)   { return id == BLOCK_DOOR_WOOD || id == BLOCK_DOOR_IRON; }
 static inline bool isBed(unsigned char id)    { return id == BLOCK_BED; }
 static inline bool isTrapdoor(unsigned char id) { return id == BLOCK_TRAPDOOR; }
-static inline bool isLadder(unsigned char id) { return id == BLOCK_LADDER; }
+// Vines share ladder behavior: climbable physics (Mob::onLadder), a thin
+// wall-hugging quad render (emitLadder), and a thin wall-hugging AABB
+// (tile_shapes.cpp) all key off this single flag.
+static inline bool isLadder(unsigned char id) { return id == BLOCK_LADDER || id == BLOCK_VINE; }
 static inline bool isTorch(unsigned char id)  { return id == BLOCK_TORCH; }
 static inline bool isSign(unsigned char id)   { return id == BLOCK_SIGN || id == BLOCK_WALL_SIGN; }
 
@@ -160,11 +167,13 @@ extern float g_brightRamp[16];
 void chunkInitBrightRamp(void);
 
 static inline bool isCrossShaped(unsigned char id) {
+    // Vine is NOT cross-shaped: it renders as a flat wall-hugging quad via
+    // the ladder path (isLadder), not a floating X-sprite.
     return id == BLOCK_FLOWER || id == BLOCK_ROSE ||
            id == BLOCK_MUSHROOM_BROWN || id == BLOCK_MUSHROOM_RED ||
            id == BLOCK_REEDS || id == BLOCK_SAPLING ||
            id == BLOCK_WHEAT || id == BLOCK_MELON_STEM ||
-           id == BLOCK_TALLGRASS || id == BLOCK_BAMBOO || id == BLOCK_VINE ||
+           id == BLOCK_TALLGRASS || id == BLOCK_BAMBOO ||
            id == BLOCK_COBWEB;
 }
 
@@ -240,6 +249,7 @@ int emitDoor(const World* w, int gx, int y, int gz, unsigned char id, unsigned c
 int emitTrapdoor(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n);
 int emitFenceGate(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n);
 int emitCake(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n);
+int emitCocoa(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n);
 int emitTorch(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n);
 int emitBed(const World* w, int gx, int y, int gz, unsigned char id, unsigned char data, ChunkVertex* out, int n);
 int emitMelonStem(const World* w, ChunkVertex* out, int n, int gx, int y, int gz, unsigned char data, unsigned int bright);

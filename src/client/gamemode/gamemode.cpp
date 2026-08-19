@@ -226,12 +226,20 @@ static void breakTargetedBlock(const BlockHit& hit) {
         if (shearedLeaf)
             Tile::popResource(hit.x, hit.y, hit.z,
                               ItemInstance(BLOCK_LEAVES, 1, (short)(brokenData & 3)));
+
+        // Vine only yields an item when cut with shears, same rule as leaves.
+        bool isVine = (brokenId == BLOCK_VINE);
+        bool shearedVine = (isVine && sel && sel->id == ITEM_SHEARS &&
+                            !g_gameMode->isCreative());
+        if (shearedVine)
+            Tile::popResource(hit.x, hit.y, hit.z, ItemInstance(BLOCK_VINE, 1, 0));
+
         bool couldDestroy = true;
         if (!g_gameMode->isCreative() && tileNeedsTool(brokenId, brokenData)) {
             Item* it = (sel && sel->id > 0 && sel->id < 4096) ? Item::items[sel->id] : nullptr;
             couldDestroy = it && it->canDestroySpecial(brokenId);
         }
-        if (couldDestroy && !shearedLeaf)
+        if (couldDestroy && !shearedLeaf && !isVine)
             worldSpawnResources(&g_world, hit.x, hit.y, hit.z, brokenId, brokenData);
 
         if (couldDestroy && brokenId == BLOCK_TOPSNOW && !g_gameMode->isCreative())

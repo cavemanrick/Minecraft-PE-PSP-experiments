@@ -8,6 +8,7 @@ int tileShapeBoxes(const World* w, int x, int y, int z, unsigned char id,
                    unsigned char data, float out[3][6]);
 
 void trapdoorShape(unsigned char data, float out[6]);
+void cocoaShape(unsigned char data, float out[6]);
 
 int  stairShapeBoxes(const World* w, int gx, int y, int gz, unsigned char data, float out[3][6]);
 
