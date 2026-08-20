@@ -4,7 +4,7 @@
 
 struct World;
 
-enum { WORLD_TYPE_OLD = 0, WORLD_TYPE_FLAT = 1, WORLD_TYPE_COUNT = 2 };
+enum { WORLD_TYPE_OLD = 0, WORLD_TYPE_FLAT = 1, WORLD_TYPE_DEBUG = 2, WORLD_TYPE_COUNT = 3 };
 
 class LevelSource {
 public:

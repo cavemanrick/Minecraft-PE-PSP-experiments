@@ -36,6 +36,7 @@ struct MenuState {
     int  newWorldGamemode;
     int  newWorldType;
     int  newWorldGenMask;
+    int  newWorldSizePreset; // 0=infinite, 1=512x512, 2=1024x1024 -- see WORLD_SIZE_PRESET_* in screen_create.cpp
     char newWorldName[64];
     char newWorldSeed[64];
     int  uiRow;

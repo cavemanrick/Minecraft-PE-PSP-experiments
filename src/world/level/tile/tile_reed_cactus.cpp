@@ -21,17 +21,22 @@ bool bambooCanSurvive(World* w, int x, int y, int z) {
     return below == BLOCK_BAMBOO || below == BLOCK_GRASS || below == BLOCK_DIRT;
 }
 
-// Vine faces reuse the ladder direction convention (2=+Z quad/-Z wall,
-// 3=-Z quad/+Z wall, 4=+X quad/-X wall, 5=-X quad/+X wall). A vine survives
-// if the wall block behind its attached face is solid/leaves, OR if it's
-// directly beneath another vine/solid/leaf block (hanging continuation).
+// Vine faces reuse the ladder direction convention exactly as ladder itself
+// defines it (see LadderTile::getAABB / getPlacedOnFaceDataValue and the
+// matching isLadder branch in tile_shapes.cpp): data encodes where the
+// support wall is, and the quad is drawn flush against that same side --
+// data=2: wall/quad at z+1  data=3: wall/quad at z-1
+// data=4: wall/quad at x+1  data=5: wall/quad at x-1
+// Getting this backwards is exactly what caused vines to render on the
+// face opposite their actual support (floating in open air on one side,
+// sky visible through the "attached" side) plus a hitbox on the wrong side.
 static bool vineWallSolid(World* w, int x, int y, int z, int data) {
     unsigned char wallBlock;
     switch (data) {
-        case 2: wallBlock = worldBlock(w, x, y, z - 1); break;
-        case 3: wallBlock = worldBlock(w, x, y, z + 1); break;
-        case 4: wallBlock = worldBlock(w, x - 1, y, z); break;
-        case 5: wallBlock = worldBlock(w, x + 1, y, z); break;
+        case 2: wallBlock = worldBlock(w, x, y, z + 1); break;
+        case 3: wallBlock = worldBlock(w, x, y, z - 1); break;
+        case 4: wallBlock = worldBlock(w, x + 1, y, z); break;
+        case 5: wallBlock = worldBlock(w, x - 1, y, z); break;
         default: return false;
     }
     return isSolidPhys(wallBlock) || isLeaf(wallBlock);

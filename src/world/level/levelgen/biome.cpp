@@ -24,14 +24,28 @@ static float s_seedX[N_BIOMES];
 static float s_seedZ[N_BIOMES];
 static PerlinNoise* s_borderNoise = 0;
 
-static void ensureBiomeSeeds(long worldSeed) {
+static void ensureBiomeSeeds(long worldSeed, const World* w) {
     if (s_seedsReady && s_seedsForWorldSeed == worldSeed) return;
 
     Random seedRandom(worldSeed ^ 0x610E5EEDL);
 
+    // Infinite worlds (w->sizeX == 0) have no fixed span to spread seeds
+    // across -- there's nothing for "the whole world" to mean. Fall back
+    // to a large-but-bounded span (same [0, span] convention the finite
+    // case already uses below, not double-sided) so biome seeds still
+    // land somewhere sane near where a fresh world's spawn actually is,
+    // instead of every seed collapsing to (0,0) (worldSpanX/Z would be
+    // zero otherwise, and dividing the grid across a zero span put every
+    // single seed at the exact same point regardless of world seed). This
+    // span is arbitrary but generous -- 2048 chunks per axis, comfortably
+    // larger than either pre-generated option -- since an infinite world
+    // can always stream biome territory further out than this if the
+    // player actually walks that far; classifyBiomeSpatial's nearest-seed
+    // math doesn't require the seeds to bound where the player can go,
+    // only to be spread out relative to each other.
     const int cols = 4, rows = 3; // 12 grid cells, 11 used
-    float worldSpanX = (float)(WORLD_SIZE_CHUNKS * CHUNK_SX);
-    float worldSpanZ = (float)(WORLD_SIZE_CHUNKS * CHUNK_SZ);
+    float worldSpanX = (float)((w->sizeX ? w->sizeX : 2048) * CHUNK_SX);
+    float worldSpanZ = (float)((w->sizeZ ? w->sizeZ : 2048) * CHUNK_SZ);
     float cellW = worldSpanX / cols;
     float cellD = worldSpanZ / rows;
 
@@ -54,8 +68,8 @@ static void ensureBiomeSeeds(long worldSeed) {
     s_seedsReady = true;
 }
 
-BiomeId classifyBiomeSpatial(long worldSeed, int worldX, int worldZ) {
-    ensureBiomeSeeds(worldSeed);
+BiomeId classifyBiomeSpatial(long worldSeed, const World* w, int worldX, int worldZ) {
+    ensureBiomeSeeds(worldSeed, w);
 
     float bx = (float)worldX, bz = (float)worldZ;
     int best = 0;

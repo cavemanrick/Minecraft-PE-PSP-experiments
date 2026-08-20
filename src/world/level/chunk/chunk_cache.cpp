@@ -142,7 +142,7 @@ static bool finishStep(World* w) {
 
 void worldGetChunk(World* w, int cx, int cz) {
 
-    if (!worldChunkInBounds(cx, cz)) return;
+    if (!worldChunkInBounds(w, cx, cz)) return;
     if (worldChunkReady(w, cx, cz)) return;
     claim(w, cx, cz);
     {
@@ -257,7 +257,7 @@ int worldStream(World* w, float px, float pz, int budgetMs) {
         for (int dz = -R; dz <= R; dz++)
             for (int dx = -R; dx <= R; dx++) {
                 int cx = pcx + dx, cz = pcz + dz;
-                if (!worldChunkInBounds(cx, cz)) continue;
+                if (!worldChunkInBounds(w, cx, cz)) continue;
                 if (worldChunkReady(w, cx, cz)) continue;
                 int d = dx * dx + dz * dz;
                 if (d < bestD) { bestD = d; bestX = cx; bestZ = cz; }
@@ -297,5 +297,38 @@ void worldSaveResident(World* w) {
         LevelChunk* c = &w->slots[i];
 
         if (c->resident && c->unsaved && !worldSlotBusy(c)) chunkStorageSave(w, c->x, c->z);
+    }
+}
+
+void worldPreGenerateSweep(World* w, int x0, int z0, int x1, int z1) {
+    if (x1 <= x0 || z1 <= z0) return;
+
+    const long long totalChunks = (long long)(x1 - x0) * (long long)(z1 - z0);
+    long long doneChunks = 0;
+
+    // Reverse row-major: highest z first, and within each row, highest x
+    // first. See the header comment on worldPreGenerateSweep for why this
+    // ordering is what makes immediate per-chunk eviction safe.
+    for (int cz = z1 - 1; cz >= z0; cz--) {
+        for (int cx = x1 - 1; cx >= x0; cx--) {
+
+            // worldGetChunk is already the full claim -> generate ->
+            // decorate -> finish pipeline in one synchronous call (see its
+            // own definition above) -- exactly the unit of work this sweep
+            // needs per chunk, so there's no separate generate-only step
+            // to call first.
+            worldGetChunk(w, cx, cz);
+
+            // Safe to evict immediately: by construction (reverse order,
+            // forward-only decoration spillover), nothing left in this
+            // sweep can ever write back into this chunk.
+            int slot = worldSlotIndex(w, cx, cz);
+            if (w->slots[slot].isAt(cx, cz)) evict(w, slot);
+
+            doneChunks++;
+            g_terrainProgress = (int)((doneChunks * 100) / totalChunks);
+
+            sceKernelDelayThread(100);
+        }
     }
 }

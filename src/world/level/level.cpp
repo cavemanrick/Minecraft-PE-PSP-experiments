@@ -162,6 +162,30 @@ std::vector<AABB>& Level::getCubes(Entity* , const AABB& box) {
                     if (a.intersects(box)) out.push_back(a);
                 }
             }
+
+    // Reserved Nether/End regions (1024x1024 preset only -- see
+    // WORLD_NETHER_*/WORLD_END_* in world.h) sit beyond the overworld's
+    // own extent in the same flat coordinate space, but are portal-
+    // teleport-only and must never be walkable into from the overworld
+    // side. Rather than build a separate movement-blocking system, this
+    // injects a synthetic full-height, full-depth solid wall AABB at the
+    // overworld/reserved boundary whenever the collision query box
+    // touches it -- Entity::move's existing clipXCollide already treats
+    // any AABB returned here exactly like a real block, so a player is
+    // physically stopped at the line the same way they'd be stopped by a
+    // wall, with no new collision-resolution code needed. Only injected
+    // for worlds actually created at the 1024 preset (w->sizeX matches
+    // its exact total); every other world size has no reserved regions
+    // and this never fires.
+    if (w->sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS) {
+        const float boundaryX = (float)(WORLD_PRESET_1024_CHUNKS * CHUNK_SX);
+        if (box.x1 > boundaryX && box.x0 < boundaryX + 1.0f) {
+            AABB wall(boundaryX, -64.0f, 0.0f, boundaryX + 1.0f, (float)WORLD_H + 64.0f,
+                      (float)(WORLD_PRESET_1024_CHUNKS * CHUNK_SZ));
+            if (wall.intersects(box)) out.push_back(wall);
+        }
+    }
+
     return out;
 }
 

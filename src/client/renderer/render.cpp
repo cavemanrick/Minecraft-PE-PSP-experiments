@@ -31,6 +31,8 @@
 #include <cmath>
 #include <malloc.h>
 #include "world/level/levelgen/Random.h"
+#include "world/level/levelgen/level_source.h"
+#include "world/level/levelgen/features.h"
 #include <cstdlib>
 #include <pspgu.h>
 #include <pspgum.h>
@@ -1086,7 +1088,8 @@ void gameRender(MenuState& s) {
 
                     { int sx, sz, feetY; worldFindSpawn(a->w, &sx, &sz, &feetY);
                       g_level.player->x = sx + 0.5f; g_level.player->z = sz + 0.5f;
-                      g_level.player->y = feetY + PLAYER_EYE; }
+                      g_level.player->y = feetY + PLAYER_EYE;
+                      if (a->worldType == WORLD_TYPE_DEBUG) placeDebugSpawnContent(a->w, sx, sz, feetY); }
                     g_genPhase = 1;
                     g_saveShowProgress = false;
                     LevelStorage::save(a->w, a->dir, a->seed, a->gamemode, a->name, true);
@@ -1113,7 +1116,9 @@ void gameRender(MenuState& s) {
 
                     { int sx, sz, feetY; worldFindSpawn(&g_world, &sx, &sz, &feetY);
                       g_level.player->x = sx + 0.5f; g_level.player->z = sz + 0.5f;
-                      g_level.player->y = feetY + PLAYER_EYE; }
+                      g_level.player->y = feetY + PLAYER_EYE;
+                      if (LevelStorage::getActiveWorldType() == WORLD_TYPE_DEBUG)
+                          placeDebugSpawnContent(&g_world, sx, sz, feetY); }
                     g_genPhase = 1;
                     g_saveShowProgress = false;
                     LevelStorage::save(&g_world, tArgs.dir, seedVal, tArgs.gamemode, tArgs.name, true);

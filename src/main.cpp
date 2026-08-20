@@ -309,7 +309,7 @@ int main(int argc, char* argv[]) {
                        : (pressed | (repeat & (PSP_CTRL_LEFT | PSP_CTRL_RIGHT))), pad);
 
             if (s.screen == SCREEN_GAME && g_worldBuilt && g_level.player) {
-                BiomeId curBiome = classifyBiomeSpatial(worldGetSeed(),
+                BiomeId curBiome = classifyBiomeSpatial(worldGetSeed(), &g_world,
                                                          (int)floorf(g_level.player->x),
                                                          (int)floorf(g_level.player->z));
                 musicUpdate(curBiome);

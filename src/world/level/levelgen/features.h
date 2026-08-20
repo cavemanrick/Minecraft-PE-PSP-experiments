@@ -56,4 +56,9 @@ void springFeature(World* w, int x, int y, int z, unsigned char tile);
 void lakeFeature(World* w, Random& random, int x, int y, int z, unsigned char tile);
 void snowCap(World* w, int chunkX, int chunkZ, float* mTemp);
 
+// Debug world only (WORLD_TYPE_DEBUG) -- places whatever's currently being
+// tested right at the player's real spawn point. See
+// debug_spawn_content.cpp for the actual content and how to change it.
+void placeDebugSpawnContent(World* w, int sx, int sz, int feetY);
+
 #endif

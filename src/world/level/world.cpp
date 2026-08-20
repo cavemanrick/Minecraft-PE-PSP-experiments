@@ -114,9 +114,11 @@ bool worldAllocArrays(World* w) {
     return true;
 }
 
-bool worldInitTerrain(World* w, long seed, int worldType) {
+bool worldInitTerrain(World* w, long seed, int worldType, int sizeX, int sizeZ) {
     g_terrainProgress = 0;
     g_terrainThreadDone = false;
+    w->sizeX = sizeX;
+    w->sizeZ = sizeZ;
     if (!worldAllocArrays(w)) return false;
 
     g_worldSeed = seed;
@@ -125,6 +127,53 @@ bool worldInitTerrain(World* w, long seed, int worldType) {
 #endif
 
     levelSourceFor(worldType).buildTerrain(w, seed);
+
+    // A finite world (sizeX != 0) too large to fit in the resident window
+    // is one of the two pre-generated presets (512x512, 1024x1024, the
+    // latter's logical bound wider still to fit reserved Nether/End space
+    // -- see WORLD_PRESET_* in this header) -- RandomLevelSource's own
+    // buildTerrain only handles the small-world case where the whole
+    // world already fits resident (WORLD_CHUNKS_X-sized path in
+    // worldGenerateMCPE) or the normal lazy-streaming case; neither of
+    // those touches more than a small window's worth of chunks, which is
+    // wrong here since a pre-generated world needs every chunk in its
+    // full logical bound actually built before play begins, not just a
+    // window around the origin. worldPreGenerateSweep does the real work:
+    // generate, decorate, save, and evict every chunk across the full
+    // bound, one at a time, so nothing stays resident that doesn't need
+    // to. Infinite worlds (sizeX == 0) and worlds that DO fit the window
+    // are untouched by this and keep their existing behavior exactly.
+    //
+    // Restricted to WORLD_TYPE_OLD specifically: Flat and Debug both
+    // write their terrain directly as raw block columns across the whole
+    // WORLD_W x WORLD_D grid in buildTerrain, never going through
+    // worldGetChunk/chunk slots at all -- if the sweep ran for those
+    // types it would find no chunk slot ever marked "ready" and call
+    // chunkGenerateTerrain on every chunk, silently overwriting the flat
+    // ground that was just correctly written with real procedural
+    // terrain instead. Large flat/debug worlds aren't a real use case
+    // today (nothing offers that combination), but this guard is here so
+    // it can't silently corrupt one if that ever changes.
+    //
+    // The sweep only ever covers the OVERWORLD portion of sizeX/sizeZ,
+    // never the full logical bound directly. For the 512 preset those are
+    // the same thing (no reserved regions exist). For the 1024 preset
+    // they're not: sizeX/sizeZ include the reserved Nether/End strips
+    // beyond the overworld's own 1024x1024 extent (see WORLD_NETHER_*/
+    // WORLD_END_* constants), and those strips must NOT run through
+    // normal overworld terrain generation -- they're reserved for a
+    // future, separate Nether/End generator that doesn't exist yet (same
+    // "keep the coordinate layout correct now, build the actual generator
+    // later" pattern used elsewhere in this project). Left untouched here,
+    // those chunks simply stay whatever a freshly allocated World defaults
+    // to (air) rather than either real overworld content or a
+    // half-built stand-in.
+    if (worldType == WORLD_TYPE_OLD && sizeX != 0 && !worldFitsInWindow(w)) {
+        int overworldX = (sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS) ? WORLD_PRESET_1024_CHUNKS : sizeX;
+        int overworldZ = (sizeZ == WORLD_PRESET_1024_TOTAL_Z_CHUNKS && sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS)
+                        ? WORLD_PRESET_1024_CHUNKS : sizeZ;
+        worldPreGenerateSweep(w, 0, 0, overworldX, overworldZ);
+    }
 
     g_terrainProgress = 60;
     worldInitLight(w);

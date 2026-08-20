@@ -52,7 +52,6 @@ OBJS = \
 	src/platform/png_loader.o \
 	src/platform/malloc_lock.o \
 	src/platform/audio/sound.o \
-	src/platform/audio/music.o \
 	src/world/level/storage/external_servers.o \
 	src/world/level/storage/worldlist.o \
 	src/world/level/storage/region_file.o \
@@ -177,6 +176,7 @@ OBJS = \
 	src/world/level/levelgen/feature_spring.o \
 	src/world/level/levelgen/feature_lake.o \
 	src/world/level/levelgen/feature_snow.o \
+	src/world/level/levelgen/debug_spawn_content.o \
 	src/world/level/levelgen/caves.o
 
 INCDIR = src
@@ -188,7 +188,7 @@ INCDIR = src
 # offsets). -MP adds a dummy rule per header so a DELETED header doesn't wedge
 # make with "no rule to make target".
 CFLAGS = -O2 -G0 -Wall -MMD -MP
-CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti -DWORLD_SIZE_CHUNKS=32
+CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS = $(CFLAGS)
 
 LIBDIR =

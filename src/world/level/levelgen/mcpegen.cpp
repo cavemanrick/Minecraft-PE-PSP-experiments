@@ -193,7 +193,7 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
         for (int z = 0; z < 16; z++) {
             float temp = 1;
 
-            BiomeId biome = classifyBiomeSpatial(worldSeed, xOffs * 16 + x, zOffs * 16 + z);
+            BiomeId biome = classifyBiomeSpatial(worldSeed, w, xOffs * 16 + x, zOffs * 16 + z);
             unsigned char bTop, bMat;
             biomeSurface(biome, &bTop, &bMat);
 
@@ -254,7 +254,17 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     switch (phase) {
     case 0: {
     computeBiome(chunkX, chunkZ);
-    mPhaseBiome = (int)classifyBiomeSpatial(worldSeed, xo + 8, zo + 8);
+    mPhaseBiome = (int)classifyBiomeSpatial(worldSeed, w, xo + 8, zo + 8);
+
+    // Jungle generation is temporarily disabled: jungle-classified territory
+    // is redirected to forest instead, so nothing jungle-specific (trees,
+    // vines, cocoa, oak-mixing, fern/litter, the boosted tree density) ever
+    // actually generates. This is a single redirect right after the real
+    // classification, not a removal -- every jungle-specific code path
+    // below is untouched and fully intact, ready to work again the moment
+    // this redirect (and its twin in the per-column re-check further down,
+    // and the one in the fern/bamboo block) is reverted.
+    if (mPhaseBiome == (int)B_JUNGLE) mPhaseBiome = (int)B_FOREST;
 
     random.setSeed(worldSeed);
     int xScale = random.nextInt() / 2 * 2 + 1;
@@ -427,15 +437,43 @@ bool chunkPostProcessPhase(World* w, int cx, int cz, int phase) {
 void worldGenerateMCPE(World* w, long seed, int genMask) {
     worldGenInit(seed, genMask);
 
-    const int side = worldFitsInWindow(w) ? WORLD_SIZE_CHUNKS : WORLD_CHUNKS_X;
-    int totalChunks = side * side;
-    int doneChunks = 0;
-    for (int cz = 0; cz < side; cz++)
-    for (int cx = 0; cx < side; cx++) {
-        worldGetChunk(w, cx, cz);
-        doneChunks++;
-        g_terrainProgress = (doneChunks * 50) / totalChunks;
+    // Three cases:
+    //  - World fits entirely in the resident window: generate exactly
+    //    that (unchanged from before, just using the runtime sizeX/sizeZ
+    //    instead of the old compile-time square WORLD_SIZE_CHUNKS).
+    //  - Infinite world (sizeX == 0): touch a small window's worth of
+    //    chunks around the origin so there's something for spawn-finding
+    //    to search through immediately; the rest streams in lazily during
+    //    play via worldStream, same as always.
+    //  - Finite world too large to fit the window (the two pre-generated
+    //    presets, 512x512 / 1024x1024): do nothing here. worldInitTerrain
+    //    runs the real batch sweep (worldPreGenerateSweep) across the
+    //    world's full logical bound right after this returns, which is a
+    //    strict superset of touching just the origin window -- generating
+    //    that small window here first would be pure wasted duplicate work
+    //    the sweep immediately redoes and then evicts.
+    if (worldFitsInWindow(w)) {
+        const int sideX = w->sizeX, sideZ = w->sizeZ;
+        int totalChunks = sideX * sideZ;
+        int doneChunks = 0;
+        for (int cz = 0; cz < sideZ; cz++)
+        for (int cx = 0; cx < sideX; cx++) {
+            worldGetChunk(w, cx, cz);
+            doneChunks++;
+            g_terrainProgress = (doneChunks * 50) / totalChunks;
 
-        sceKernelDelayThread(100);
+            sceKernelDelayThread(100);
+        }
+    } else if (w->sizeX == 0) {
+        int totalChunks = WORLD_CHUNKS_X * WORLD_CHUNKS_Z;
+        int doneChunks = 0;
+        for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++)
+        for (int cx = 0; cx < WORLD_CHUNKS_X; cx++) {
+            worldGetChunk(w, cx, cz);
+            doneChunks++;
+            g_terrainProgress = (doneChunks * 50) / totalChunks;
+
+            sceKernelDelayThread(100);
+        }
     }
 }

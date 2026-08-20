@@ -2,6 +2,7 @@
 #include "world/level/levelgen/level_source.h"
 #include "world/level/levelgen/gen_features.h"
 #include "world/level/storage/level_storage.h"
+#include "world/level/world.h"
 
 #include "platform/path.h"
 
@@ -57,6 +58,8 @@ void worldListScan(WorldList* out) {
             out->worldTypes[out->count] = WORLD_TYPE_OLD;
 
             out->genMasks[out->count] = GEN_FEATURES_ALL_ON;
+            out->sizeX[out->count] = WORLD_DEFAULT_SIZE_CHUNKS;
+            out->sizeZ[out->count] = WORLD_DEFAULT_SIZE_CHUNKS;
             strncpy(out->displayNames[out->count], entry.d_name, sizeof(out->displayNames[0]) - 1);
             out->displayNames[out->count][sizeof(out->displayNames[0]) - 1] = '\0';
 
@@ -101,8 +104,25 @@ void worldListScan(WorldList* out) {
                                 out->worldTypes[out->count] = atoi(end2 + 1);
 
                                 char* end3 = strchr(end2 + 1, '\n');
-                                if (end3 && *(end3 + 1) != '\0')
+                                if (end3 && *(end3 + 1) != '\0') {
                                     out->genMasks[out->count] = atoi(end3 + 1);
+
+                                    // Older level.txt files simply end here
+                                    // -- world size defaults to the same
+                                    // WORLD_DEFAULT_SIZE_CHUNKS square every
+                                    // world used before size became a
+                                    // per-world choice, matching
+                                    // loadLevelDat's identical fallback for
+                                    // level.dat's own copy of this field.
+                                    char* end4 = strchr(end3 + 1, '\n');
+                                    if (end4 && *(end4 + 1) != '\0') {
+                                        out->sizeX[out->count] = atoi(end4 + 1);
+
+                                        char* end5 = strchr(end4 + 1, '\n');
+                                        if (end5 && *(end5 + 1) != '\0')
+                                            out->sizeZ[out->count] = atoi(end5 + 1);
+                                    }
+                                }
                             }
                         }
                         if (end) *end = '\0';
@@ -159,7 +179,7 @@ void worldListTouch(const char* absDir) {
 }
 
 bool worldListCreate(WorldList* list, const char* inName, char* outName, int gamemode, long seed,
-                     int worldType, int genMask) {
+                     int worldType, int genMask, int sizeX, int sizeZ) {
     if (list->count >= MCPSP_MAX_WORLDS)
         return false;
 
@@ -199,8 +219,8 @@ bool worldListCreate(WorldList* list, const char* inName, char* outName, int gam
     if (fd >= 0) {
         char buf[128];
 
-        snprintf(buf, sizeof(buf), "%d\n%s\n%ld\n%d\n%d\n", gamemode, displayName, seed,
-                 worldType, genMask);
+        snprintf(buf, sizeof(buf), "%d\n%s\n%ld\n%d\n%d\n%d\n%d\n", gamemode, displayName, seed,
+                 worldType, genMask, sizeX, sizeZ);
         sceIoWrite(fd, buf, strlen(buf));
         sceIoClose(fd);
     }
@@ -216,6 +236,8 @@ bool worldListCreate(WorldList* list, const char* inName, char* outName, int gam
     list->seeds[list->count] = seed;
     list->worldTypes[list->count] = worldType;
     list->genMasks[list->count] = genMask;
+    list->sizeX[list->count] = sizeX;
+    list->sizeZ[list->count] = sizeZ;
 
     strncpy(outName, candidate, 64);
     list->count++;

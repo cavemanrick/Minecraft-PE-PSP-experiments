@@ -29,18 +29,6 @@ struct TickNextTickData {
 
 #define WORLD_VIEW_DIST 64.0f
 
-#ifndef WORLD_SIZE_CHUNKS
-#define WORLD_SIZE_CHUNKS 16
-#endif
-
-static inline bool worldChunkInBounds(int cx, int cz) {
-#if WORLD_SIZE_CHUNKS
-    return cx >= 0 && cz >= 0 && cx < WORLD_SIZE_CHUNKS && cz < WORLD_SIZE_CHUNKS;
-#else
-    (void)cx; (void)cz; return true;
-#endif
-}
-
 #define LP_PAGE       128
 #define LP_BLK_PAGES  256
 #define LP_MAX_BLKS   256
@@ -80,6 +68,15 @@ struct World {
     int slotMask;
     int slotN;
 
+    // Logical world bounds in chunks (0/0 = infinite lazy-gen). See the
+    // worldChunkInBounds comment above -- these replace the old
+    // compile-time WORLD_SIZE_CHUNKS constant so world size can be a
+    // per-world runtime choice (three options at creation) instead of a
+    // single build-wide setting. Independent X/Z so a pre-generated world
+    // can reserve extra width for Nether/End beside the overworld portion.
+    int sizeX;
+    int sizeZ;
+
     BlockSection bsec[BS_SECTIONS];
     int blockPages;
     unsigned int blockPageBytes;
@@ -114,10 +111,85 @@ struct World {
     std::vector<std::vector<unsigned char> > preservedTileEntities;
 };
 
+// Logical world bounds (in chunks) are a per-world runtime value now, not a
+// compile-time constant -- the person picks one of three sizes when
+// creating a world (infinite lazy-gen, 512x512, 1024x1024, the last of
+// which also reserves extra width for the Nether/End sections), and that
+// choice has to survive being saved/reloaded like the seed or world type
+// already do. sizeX==0 (with sizeZ==0) means infinite, matching the
+// convention the old compile-time WORLD_SIZE_CHUNKS=0 used to mean before
+// this was a runtime field -- worldChunkInBounds and worldFitsInWindow
+// both key off that same "0 means unbounded" convention below. sizeX and
+// sizeZ are independent (not required to be equal) specifically so a
+// pre-generated world can be wider than it is tall to fit reserved
+// Nether/End regions beside the overworld portion, breaking the old
+// assumption that the world was always square. Defined here, after the
+// full struct World definition above, since it needs to read w->sizeX/
+// sizeZ -- it used to sit near the top of this file back when it took no
+// World* at all, but a forward declaration isn't enough once it actually
+// dereferences the struct.
+static inline bool worldChunkInBounds(const World* w, int cx, int cz) {
+    if (w->sizeX == 0) return true; // infinite: unbounded in both axes
+    return cx >= 0 && cz >= 0 && cx < w->sizeX && cz < w->sizeZ;
+}
+
 extern volatile int g_terrainProgress;
 extern volatile bool g_terrainThreadDone;
 
-bool worldInitTerrain(World* w, long seed, int worldType = WORLD_TYPE_OLD);
+// Default matches the old compile-time -DWORLD_SIZE_CHUNKS=32 Makefile
+// override (512x512), so existing behavior is unchanged for any call site
+// that doesn't yet pass an explicit size -- world-size selection is wired
+// into the create-world UI in a later step of this same project.
+#define WORLD_DEFAULT_SIZE_CHUNKS 32
+
+// The three selectable world-size presets (in chunks). "512" and "1024"
+// name the overworld's own visible/walkable extent -- what the player
+// actually perceives as the size of their world -- not the logical World
+// struct's total sizeX/sizeZ bound.
+//
+// For "512", those are the same number: no reserved regions, so
+// WORLD_PRESET_512_CHUNKS is both the overworld extent and the full
+// logical bound.
+//
+// For "1024", they are NOT the same number. Two reserved 512x512 regions
+// (future pre-generated Nether and End, portal-teleport-only, never
+// adjacent to walkable overworld -- see project discussion) sit beside
+// the overworld along +X, past its own 1024x1024 extent, not carved out
+// of it. Carving them out of a 1024x1024 total would leave the overworld
+// itself only 0 blocks wide, which is why the *logical* World bound for
+// this preset has to be wider than 1024: 1024 (overworld) + 512 (Nether)
+// + 512 (End) = 2048 wide, by 1024 deep. WORLD_PRESET_1024_CHUNKS is the
+// 64-chunk (1024 block) figure the player-facing size actually means;
+// WORLD_PRESET_1024_TOTAL_X_CHUNKS/TOTAL_Z_CHUNKS is the real logical
+// bound to pass as sizeX/sizeZ. The reserved regions themselves aren't
+// generated, rendered, or reachable by walking yet -- rope-off and
+// portal-teleport wiring is a separate, not-yet-built step -- but the
+// coordinate layout is fixed here now so that work has an unambiguous,
+// already-agreed home instead of needing the arithmetic re-derived later.
+#define WORLD_PRESET_512_CHUNKS  32   // 512 / 16
+#define WORLD_PRESET_1024_CHUNKS 64   // 1024 / 16
+
+#define WORLD_NETHER_CHUNKS 32        // 512 / 16
+#define WORLD_END_CHUNKS    32        // 512 / 16
+
+// Reserved regions sit beyond the overworld's own extent along +X, sharing
+// its Z range. Nether occupies chunk X [1024/16, 1024/16 + 32), End occupies
+// chunk X right after that; both span chunk Z [0, 1024/16) -- only using
+// the first 32 of their available 64-chunk-tall Z range, since they only
+// need to be 512 deep, not 1024; the unused Z beyond that is simply never
+// generated (harmless, same "nothing happens past the logical bound within
+// this coordinate range" behavior worldChunkInBounds already gives for any
+// out-of-bounds chunk).
+#define WORLD_NETHER_ORIGIN_CX WORLD_PRESET_1024_CHUNKS
+#define WORLD_NETHER_ORIGIN_CZ 0
+#define WORLD_END_ORIGIN_CX (WORLD_PRESET_1024_CHUNKS + WORLD_NETHER_CHUNKS)
+#define WORLD_END_ORIGIN_CZ 0
+
+#define WORLD_PRESET_1024_TOTAL_X_CHUNKS (WORLD_PRESET_1024_CHUNKS + WORLD_NETHER_CHUNKS + WORLD_END_CHUNKS)
+#define WORLD_PRESET_1024_TOTAL_Z_CHUNKS WORLD_PRESET_1024_CHUNKS
+
+bool worldInitTerrain(World* w, long seed, int worldType = WORLD_TYPE_OLD,
+                      int sizeX = WORLD_DEFAULT_SIZE_CHUNKS, int sizeZ = WORLD_DEFAULT_SIZE_CHUNKS);
 
 bool worldAllocArrays(World* w);
 
@@ -158,7 +230,7 @@ static inline bool worldSlotBusy(const LevelChunk* c) { return c->generating || 
 
 static inline bool worldNeighbourSettled(const World* w, int cx, int cz) {
 
-    return !worldChunkInBounds(cx, cz) || worldChunkReady(w, cx, cz);
+    return !worldChunkInBounds(w, cx, cz) || worldChunkReady(w, cx, cz);
 }
 static inline bool worldChunkMeshable(const World* w, int cx, int cz) {
     return worldNeighbourSettled(w, cx + 1, cz) && worldNeighbourSettled(w, cx - 1, cz) &&
@@ -169,11 +241,8 @@ static inline bool worldReady(const World* w, int x, int z) {
 }
 
 static inline bool worldFitsInWindow(const World* w) {
-#if WORLD_SIZE_CHUNKS
-    return WORLD_SIZE_CHUNKS <= w->slotN;
-#else
-    (void)w; return false;
-#endif
+    if (w->sizeX == 0) return false; // infinite never fits
+    return w->sizeX <= w->slotN && w->sizeZ <= w->slotN;
 }
 
 static inline void worldSlotsReset(World* w) {

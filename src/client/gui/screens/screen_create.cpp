@@ -12,6 +12,7 @@
 #include "world/level/levelgen/level_source.h"
 #include "world/level/levelgen/gen_features.h"
 #include "world/level/storage/worldlist.h"
+#include "world/level/world.h"
 
 struct CreateScreen : Screen {
     void renderContent(MenuState& s);
@@ -50,8 +51,36 @@ const char* rowLabel(int row) {
 }
 
 enum { FOCUS_TYPE_OLD = ROW_COUNT, FOCUS_TYPE_FLAT,
+       FOCUS_SIZE_INFINITE, FOCUS_SIZE_512, FOCUS_SIZE_1024,
        FOCUS_SURVIVAL, FOCUS_CREATIVE, FOCUS_CREATE,
        FOCUS_BACK, FOCUS_ADVANCED, FOCUS_COUNT };
+
+// World size presets shown in the advanced panel. Values here are the
+// actual chunk-count sizeX/sizeZ passed to worldInitTerrain/worldListCreate
+// (0 meaning infinite, matching the same convention worldChunkInBounds
+// uses) -- see world.h's WORLD_PRESET_* / WORLD_PRESET_1024_TOTAL_*
+// constants for where these numbers come from and why the 1024 preset's
+// actual sizeX isn't simply "1024/16": it reserves extra width beyond the
+// overworld's own 1024x1024 extent for the future Nether/End regions, so
+// the overworld itself is genuinely 1024x1024 rather than being shrunk to
+// fit inside a 1024 total.
+enum { WORLD_SIZE_PRESET_INFINITE = 0, WORLD_SIZE_PRESET_512 = 1, WORLD_SIZE_PRESET_1024 = 2 };
+
+void sizePresetChunks(int preset, int* outX, int* outZ) {
+    switch (preset) {
+        case WORLD_SIZE_PRESET_512:  *outX = WORLD_PRESET_512_CHUNKS;  *outZ = WORLD_PRESET_512_CHUNKS;  break;
+        case WORLD_SIZE_PRESET_1024: *outX = WORLD_PRESET_1024_TOTAL_X_CHUNKS; *outZ = WORLD_PRESET_1024_TOTAL_Z_CHUNKS; break;
+        default:                     *outX = 0; *outZ = 0; break; // infinite
+    }
+}
+
+const char* sizePresetLabel(int preset) {
+    switch (preset) {
+        case WORLD_SIZE_PRESET_512:  return "512x512";
+        case WORLD_SIZE_PRESET_1024: return "1024x1024";
+        default:                     return "Infinite";
+    }
+}
 
 const float ROW_LABEL_H = 16.0f * PX;
 const float ROW_BOX_H   = 18.0f * PX;
@@ -107,7 +136,8 @@ struct Layout {
     float headerH, btnH, hdrBtnY, backX, backW, advX, advW;
     float panelX, panelY, panelW, panelH;
     float formX, formY, formW, formH, boxW, contentH;
-    float typeY, modeY, pillW, pillH, pill0X, pill1X;
+    float typeY, sizeY, modeY, pillW, pillH, pill0X, pill1X;
+    float pillW3, pill0X3, pill1X3, pill2X3;
     float descX, descY, descW;
     float createX, createY, createW, createH;
 };
@@ -139,6 +169,14 @@ Layout layout(MenuState& s) {
     L.pill0X = L.formX;
     L.pill1X = L.formX + L.pillW + 6.0f * PX;
 
+    // Size row has three options, not two -- narrower pills so all three
+    // fit the same span the two-pill Type/Mode rows use (pill0X to
+    // pill1X+pillW), rather than reusing pillW verbatim and overflowing.
+    L.pillW3  = (L.pillW * 2.0f - 4.0f * PX) / 3.0f;
+    L.pill0X3 = L.formX;
+    L.pill1X3 = L.pill0X3 + L.pillW3 + 3.0f * PX;
+    L.pill2X3 = L.pill1X3 + L.pillW3 + 3.0f * PX;
+
     L.descX = VW * 0.52f;
     L.descW = VW * 0.44f;
 
@@ -148,13 +186,15 @@ Layout layout(MenuState& s) {
 
     if (s_advanced) {
 
-        L.typeY   = L.panelY + L.panelH * 0.42f;
-        L.modeY   = L.panelY + L.panelH * 0.72f;
+        L.typeY   = L.panelY + L.panelH * 0.34f;
+        L.sizeY   = L.panelY + L.panelH * 0.52f;
+        L.modeY   = L.panelY + L.panelH * 0.78f;
         L.createY = L.modeY;
         L.descY   = 0.0f;
         L.formH   = L.typeY - LABEL_GAP / UI_SCALE - 4.0f * PX - L.formY;
     } else {
         L.typeY   = 0.0f;
+        L.sizeY   = 0.0f;
         L.modeY   = L.panelY + L.panelH * 0.52f;
         L.createY = L.panelY + L.panelH - L.createH - 6.0f * PX;
         L.descY   = L.modeY;
@@ -184,19 +224,24 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
     if (pressed & PSP_CTRL_TRIANGLE) {
         s_advanced = !s_advanced;
         if (!s_advanced && (sel == ROW_SEED || rowIsToggle(sel) ||
-                            sel == FOCUS_TYPE_OLD || sel == FOCUS_TYPE_FLAT))
+                            sel == FOCUS_TYPE_OLD || sel == FOCUS_TYPE_FLAT ||
+                            sel == FOCUS_SIZE_INFINITE || sel == FOCUS_SIZE_512 || sel == FOCUS_SIZE_1024))
             sel = ROW_NAME;
     }
 
     const bool locked = gameModeLocked(s);
     const int  modePill = effectiveGameMode(s) ? FOCUS_CREATIVE : FOCUS_SURVIVAL;
     const int  typePill = (s.newWorldType == WORLD_TYPE_FLAT) ? FOCUS_TYPE_FLAT : FOCUS_TYPE_OLD;
+    const int  sizePill = (s.newWorldSizePreset == WORLD_SIZE_PRESET_1024) ? FOCUS_SIZE_1024
+                         : (s.newWorldSizePreset == WORLD_SIZE_PRESET_512) ? FOCUS_SIZE_512
+                                                                            : FOCUS_SIZE_INFINITE;
     const bool onHeader = (sel == FOCUS_BACK || sel == FOCUS_ADVANCED);
     const bool onType   = (sel == FOCUS_TYPE_OLD || sel == FOCUS_TYPE_FLAT);
+    const bool onSize   = (sel == FOCUS_SIZE_INFINITE || sel == FOCUS_SIZE_512 || sel == FOCUS_SIZE_1024);
     const bool onMode   = (sel == FOCUS_SURVIVAL || sel == FOCUS_CREATIVE);
 
     const int belowType  = locked ? FOCUS_CREATE : modePill;
-    const int aboveCreate = locked ? (s_advanced ? typePill : ROW_NAME) : modePill;
+    const int aboveCreate = locked ? (s_advanced ? sizePill : ROW_NAME) : modePill;
 
     const int firstToggle = toggleStep(s, FIELD_COUNT - 1, +1);
     const bool onToggle   = (sel >= FIELD_COUNT && sel < ROW_COUNT);
@@ -207,12 +252,14 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
         else if (sel == ROW_SEED)    sel = (firstToggle >= 0) ? firstToggle : typePill;
         else if (onToggle)           { int n = toggleStep(s, sel, +1);
                                        sel = (n >= 0) ? n : typePill; }
-        else if (onType)             sel = belowType;
+        else if (onType)             sel = sizePill;
+        else if (onSize)             sel = belowType;
         else if (onMode)             sel = FOCUS_CREATE;
     }
     if (pressed & PSP_CTRL_UP) {
         if (sel == FOCUS_CREATE)  sel = aboveCreate;
-        else if (onMode)          sel = s_advanced ? typePill : ROW_NAME;
+        else if (onMode)          sel = s_advanced ? sizePill : ROW_NAME;
+        else if (onSize)          sel = typePill;
         else if (onType)          sel = ROW_NAME;
         else if (onToggle)        { int p = toggleStep(s, sel, -1);
                                     sel = (p >= 0) ? p : ROW_SEED; }
@@ -223,6 +270,8 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
         if (sel == FOCUS_BACK)             sel = FOCUS_ADVANCED;
         else if (sel == ROW_NAME && s_advanced) sel = ROW_SEED;
         else if (sel == FOCUS_TYPE_OLD)    { sel = FOCUS_TYPE_FLAT; s.newWorldType = WORLD_TYPE_FLAT; }
+        else if (sel == FOCUS_SIZE_INFINITE) { sel = FOCUS_SIZE_512;  s.newWorldSizePreset = WORLD_SIZE_PRESET_512; }
+        else if (sel == FOCUS_SIZE_512)      { sel = FOCUS_SIZE_1024; s.newWorldSizePreset = WORLD_SIZE_PRESET_1024; }
         else if (sel == FOCUS_SURVIVAL && !locked) { sel = FOCUS_CREATIVE; s.newWorldGamemode = 1; }
         else if (sel == FOCUS_CREATIVE || (sel == FOCUS_SURVIVAL && locked)) sel = FOCUS_CREATE;
     }
@@ -231,6 +280,8 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
         else if (sel == ROW_SEED)        sel = ROW_NAME;
         else if (onToggle)               sel = ROW_NAME;
         else if (sel == FOCUS_TYPE_FLAT) { sel = FOCUS_TYPE_OLD; s.newWorldType = WORLD_TYPE_OLD; }
+        else if (sel == FOCUS_SIZE_1024)   { sel = FOCUS_SIZE_512;      s.newWorldSizePreset = WORLD_SIZE_PRESET_512; }
+        else if (sel == FOCUS_SIZE_512)    { sel = FOCUS_SIZE_INFINITE; s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE; }
         else if (sel == FOCUS_CREATIVE && !locked) { sel = FOCUS_SURVIVAL; s.newWorldGamemode = 0; }
         else if (sel == FOCUS_CREATE)    sel = aboveCreate;
     }
@@ -250,6 +301,9 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
             startOsk(row.oskTarget, row.oskPrompt, rowText(s, sel));
         } else if (sel == FOCUS_TYPE_OLD)  { s.newWorldType = WORLD_TYPE_OLD;
         } else if (sel == FOCUS_TYPE_FLAT) { s.newWorldType = WORLD_TYPE_FLAT;
+        } else if (sel == FOCUS_SIZE_INFINITE) { s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE;
+        } else if (sel == FOCUS_SIZE_512)      { s.newWorldSizePreset = WORLD_SIZE_PRESET_512;
+        } else if (sel == FOCUS_SIZE_1024)     { s.newWorldSizePreset = WORLD_SIZE_PRESET_1024;
         } else if (sel == FOCUS_SURVIVAL)  { if (!locked) s.newWorldGamemode = 0;
         } else if (sel == FOCUS_CREATIVE)  { if (!locked) s.newWorldGamemode = 1;
         } else if (sel == FOCUS_BACK)      { s.screen = SCREEN_WORLDS;
@@ -258,9 +312,22 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
             char created[64];
 
             long seed = worldSeedFromString(s.newWorldSeed);
+            // Dev-only escape hatch: typing "debug" as the seed (case
+            // sensitive, exact match) creates a WORLD_TYPE_DEBUG world
+            // instead of whatever's selected in the type toggle. This
+            // isn't wired into the type pill UI since it's a personal
+            // testing tool, not something meant for the normal
+            // create-world flow -- see debug_spawn_content.cpp for what
+            // actually gets placed at spawn.
+            int worldType = s.newWorldType;
+            if (strcmp(s.newWorldSeed, "debug") == 0) worldType = WORLD_TYPE_DEBUG;
+
+            int sizeX, sizeZ;
+            sizePresetChunks(s.newWorldSizePreset, &sizeX, &sizeZ);
+
             if (worldListCreate(&s.worlds, s.newWorldName, created,
-                                effectiveGameMode(s), seed, s.newWorldType,
-                                s.newWorldGenMask)) {
+                                effectiveGameMode(s), seed, worldType,
+                                s.newWorldGenMask, sizeX, sizeZ)) {
                 snprintf(s.statusMsg, sizeof(s.statusMsg), "Loading: %s", created);
                 s.worldSelected = s.worlds.count - 1;
                 s.screen = SCREEN_GAME;
@@ -364,6 +431,19 @@ void CreateScreen::renderContent(MenuState& s) {
                             levelSourceFor(WORLD_TYPE_FLAT).label(),
                             sel == FOCUS_TYPE_FLAT, true, TEXT_S);
         }
+
+        drawFieldLabel(font, L.formX, L.sizeY, "World Size");
+        {
+            static const int kPresets[3] = { WORLD_SIZE_PRESET_INFINITE, WORLD_SIZE_PRESET_512, WORLD_SIZE_PRESET_1024 };
+            static const int kFocus[3]   = { FOCUS_SIZE_INFINITE, FOCUS_SIZE_512, FOCUS_SIZE_1024 };
+            const float xs[3] = { L.pill0X3, L.pill1X3, L.pill2X3 };
+            for (int i = 0; i < 3; i++) {
+                const bool active = (s.newWorldSizePreset == kPresets[i]);
+                guiTButton(s, xs[i], L.sizeY, L.pillW3, L.pillH, active, BEVEL);
+                guiTButtonLabel(s, xs[i], L.sizeY, L.pillW3, L.pillH,
+                                sizePresetLabel(kPresets[i]), sel == kFocus[i], true, TEXT_S);
+            }
+        }
     }
 
     drawFieldLabel(font, L.formX, L.modeY, "Game Mode");
@@ -396,6 +476,7 @@ void createFormReset(MenuState& s) {
     s.newWorldGamemode = 0;
     s.newWorldType = WORLD_TYPE_OLD;
     s.newWorldGenMask = genFeaturesDefaultMask();
+    s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE;
     s.createScroll = 0.0f;
 }
 

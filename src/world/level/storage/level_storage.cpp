@@ -72,8 +72,8 @@ static void loadChunks(World* w, int cxCentre, int czCentre) {
     int done = 0, total = w->slotN * w->slotN;
 
     if (worldFitsInWindow(w)) {
-        for (int cz = 0; cz < WORLD_SIZE_CHUNKS; cz++)
-            for (int cx = 0; cx < WORLD_SIZE_CHUNKS; cx++) {
+        for (int cz = 0; cz < w->sizeZ; cz++)
+            for (int cx = 0; cx < w->sizeX; cx++) {
                 worldGetChunk(w, cx, cz);
                 g_terrainProgress = (++done) * 60 / total;
             }
@@ -187,6 +187,15 @@ static bool saveLevelDat(World* w, const char* absDir, long seed, int gameType, 
     root.putString("LevelName", levelName ? levelName : "World");
     root.putInt("StorageVersion", STORAGE_VERSION);
     root.putInt("Platform", 2);
+    // World size (chunks) needs to persist alongside seed/worldType so a
+    // reloaded world stays the same logical size it was created at,
+    // instead of silently reverting to the compile-time default. Saved
+    // unconditionally (including sizeX==0 for infinite) so older saves
+    // that predate this field are the only ones missing it -- loadLevelDat
+    // below falls back to the default for those via tag->contains checks,
+    // same pattern SpawnY already uses for its own optional-field case.
+    root.putInt("WorldSizeX", w->sizeX);
+    root.putInt("WorldSizeZ", w->sizeZ);
     root.putCompound("Player", buildPlayerTag(w));
 
     MemWriter mw;
@@ -244,6 +253,19 @@ static void loadLevelDat(World* w, const char* absDir, long* outSeed, int* outGa
                 if (outSeed)     *outSeed = (long)tag->getLong("RandomSeed");
                 if (outGameType) *outGameType = tag->getInt("GameType");
                 w->dayTime = (long)tag->getLong("Time");
+
+                // Older saves (before this field existed) simply won't
+                // have it -- fall back to the same WORLD_DEFAULT_SIZE_CHUNKS
+                // square that was the only option before world size became
+                // a per-world runtime choice, so an old save reloads at the
+                // same effective size it was always generated at.
+                if (tag->contains("WorldSizeX") && tag->contains("WorldSizeZ")) {
+                    w->sizeX = tag->getInt("WorldSizeX");
+                    w->sizeZ = tag->getInt("WorldSizeZ");
+                } else {
+                    w->sizeX = WORLD_DEFAULT_SIZE_CHUNKS;
+                    w->sizeZ = WORLD_DEFAULT_SIZE_CHUNKS;
+                }
 
                 if (tag->contains("SpawnY")) {
                     g_level.setSpawnPos(tag->getInt("SpawnX"),
