@@ -1053,7 +1053,7 @@ void gameRender(MenuState& s) {
             long seedVal = sel ? s.worlds.seeds[s.worldSelected] : 0;
 
             struct TerrainArgs { World* w; long seed; int gamemode; int worldType; int genMask;
-                                 char dir[320]; char name[64]; };
+                                 int sizeX; int sizeZ; char dir[320]; char name[64]; };
             static TerrainArgs tArgs;
             tArgs.w = &g_world;
             tArgs.seed = seedVal;
@@ -1061,6 +1061,17 @@ void gameRender(MenuState& s) {
             tArgs.worldType = sel ? s.worlds.worldTypes[s.worldSelected] : WORLD_TYPE_OLD;
 
             tArgs.genMask = sel ? s.worlds.genMasks[s.worldSelected] : GEN_FEATURES_ALL_ON;
+            // World size was being silently dropped here -- worldListCreate
+            // and worldListScan already read/write it correctly (see
+            // worldlist.cpp), but nothing downstream of the create-world
+            // UI ever actually read it back and passed it to
+            // worldInitTerrain, so every new world fell through to that
+            // function's own default parameter value
+            // (WORLD_DEFAULT_SIZE_CHUNKS, 512x512) regardless of what was
+            // picked -- infinite, 512, and 1024 all silently generated the
+            // same 512x512 world.
+            tArgs.sizeX = sel ? s.worlds.sizeX[s.worldSelected] : WORLD_DEFAULT_SIZE_CHUNKS;
+            tArgs.sizeZ = sel ? s.worlds.sizeZ[s.worldSelected] : WORLD_DEFAULT_SIZE_CHUNKS;
             char rel[320];
             snprintf(rel, sizeof(rel), "saves/%s", sel ? s.worlds.names[s.worldSelected] : "world");
             strncpy(tArgs.dir, assetPath(rel), sizeof(tArgs.dir) - 1);
@@ -1068,7 +1079,7 @@ void gameRender(MenuState& s) {
             strncpy(tArgs.name, sel ? s.worlds.displayNames[s.worldSelected] : "World", sizeof(tArgs.name) - 1);
             tArgs.name[sizeof(tArgs.name) - 1] = '\0';
             LevelStorage::setActiveWorld(tArgs.dir, tArgs.seed, tArgs.gamemode, tArgs.name,
-                                         tArgs.worldType, tArgs.genMask);
+                                         tArgs.worldType, tArgs.genMask, tArgs.sizeX, tArgs.sizeZ);
             worldListTouch(tArgs.dir);
 
             playerSpawnEnsure();
@@ -1084,7 +1095,7 @@ void gameRender(MenuState& s) {
                     if (!LevelStorage::load(a->w, a->dir, &s2, &gt)) g_worldAllocFailed = true;
                     g_loadedFromDisk = true;
                 } else {
-                    if (!worldInitTerrain(a->w, a->seed, a->worldType)) g_worldAllocFailed = true;
+                    if (!worldInitTerrain(a->w, a->seed, a->worldType, a->sizeX, a->sizeZ)) g_worldAllocFailed = true;
 
                     { int sx, sz, feetY; worldFindSpawn(a->w, &sx, &sz, &feetY);
                       g_level.player->x = sx + 0.5f; g_level.player->z = sz + 0.5f;
@@ -1111,7 +1122,8 @@ void gameRender(MenuState& s) {
                     if (!LevelStorage::load(&g_world, tArgs.dir, &s2, &gt)) g_worldAllocFailed = true;
                     g_loadedFromDisk = true;
                 } else {
-                    if (!worldInitTerrain(&g_world, seedVal, LevelStorage::getActiveWorldType()))
+                    if (!worldInitTerrain(&g_world, seedVal, LevelStorage::getActiveWorldType(),
+                                          LevelStorage::getActiveSizeX(), LevelStorage::getActiveSizeZ()))
                         g_worldAllocFailed = true;
 
                     { int sx, sz, feetY; worldFindSpawn(&g_world, &sx, &sz, &feetY);

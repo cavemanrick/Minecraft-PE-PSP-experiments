@@ -72,6 +72,22 @@ static void claim(World* w, int cx, int cz) {
     chunkInitLazy(&w->chunks[slot], cx * 16, cz * 16);
 }
 
+void worldClaimChunkPrebuilt(World* w, int cx, int cz) {
+    // Marks a chunk resident/populated without running chunkGenerateTerrain
+    // -- for level sources (Flat, Debug) that write real block data
+    // directly across the whole resident window in one pass (blockColumnPut
+    // in level_source.cpp) rather than going through the normal per-chunk
+    // worldGetChunk pipeline. Without this, that data is real and correctly
+    // written, but every reader that gates on chunk-claim state --
+    // worldBlock itself (returns BLOCK_INVISIBLE_BEDROCK for an unclaimed
+    // chunk regardless of what's actually stored there), isValidSpawn,
+    // collision, meshing -- treats it as if it doesn't exist, which is
+    // exactly what "flat world, player falls into nothing" looks like: a
+    // correctly-built floor nothing is allowed to see.
+    claim(w, cx, cz);
+    worldSlot(w, cx, cz)->terrainPopulated = true;
+}
+
 static bool s_pend = false;
 static int  s_pendX = 0, s_pendZ = 0;
 
@@ -154,6 +170,17 @@ void worldGetChunk(World* w, int cx, int cz) {
         if (fromDisk) {
 
             worldSlot(w, cx, cz)->terrainPopulated = populated;
+        } else if (worldChunkIsReserved(w, cx, cz)) {
+            // Reserved Nether/End space (1024 preset only) -- claim the
+            // chunk (marks it resident/ready so callers don't spin
+            // retrying) but skip real terrain generation entirely. Stays
+            // empty air until an actual Nether/End generator exists;
+            // that's a separate, not-yet-built piece. Without this guard,
+            // ANY caller reaching a reserved coordinate -- not just the
+            // pre-gen sweep, which already avoids this range structurally
+            // -- would fall through to chunkGenerateTerrain below and
+            // silently pollute reserved space with real overworld terrain.
+            worldSlot(w, cx, cz)->terrainPopulated = true;
         } else {
             profBegin(PROF_SGEN);
             chunkGenerateTerrain(w, cx, cz);
@@ -181,7 +208,12 @@ static World* volatile s_genWorld = 0;
 static int genWorker(SceSize, void*) {
     while (!g_workerQuit) {
         if (!g_jobPending) { sceKernelDelayThread(2000); continue; }
-        chunkGenerateTerrain(s_genWorld, g_jobX, g_jobZ);
+        // Same reserved-region guard as worldGetChunk -- this background
+        // worker is the async path worldStream uses for live gameplay
+        // streaming, a genuinely different call site that would otherwise
+        // bypass the guard there entirely.
+        if (!worldChunkIsReserved(s_genWorld, g_jobX, g_jobZ))
+            chunkGenerateTerrain(s_genWorld, g_jobX, g_jobZ);
         g_jobPending = false;
         g_jobDone = true;
     }
@@ -240,8 +272,15 @@ int worldStream(World* w, float px, float pz, int budgetMs) {
         g_jobDone = false;
         LevelChunk* c = worldSlot(w, g_jobX, g_jobZ);
 
-        if (c->x == g_jobX && c->z == g_jobZ && c->resident) finishBegin(w, g_jobX, g_jobZ);
-        else                                                 c->generating = false;
+        if (c->x == g_jobX && c->z == g_jobZ && c->resident) {
+            // Mirrors the worker thread's own reserved-region skip (see
+            // genWorker) -- set here on the main thread rather than from
+            // the worker itself, to avoid a cross-thread write to c.
+            if (worldChunkIsReserved(w, g_jobX, g_jobZ)) c->terrainPopulated = true;
+            finishBegin(w, g_jobX, g_jobZ);
+        } else {
+            c->generating = false;
+        }
     }
 
     if (finishStep(w)) {
@@ -278,7 +317,10 @@ int worldStream(World* w, float px, float pz, int budgetMs) {
         if (s_workerThid < 0) {
             GenScope gen(w);
             profBegin(PROF_SGEN);
-            chunkGenerateTerrain(w, bestX, bestZ);
+            if (worldChunkIsReserved(w, bestX, bestZ))
+                worldSlot(w, bestX, bestZ)->terrainPopulated = true; // see worldGetChunk's identical guard
+            else
+                chunkGenerateTerrain(w, bestX, bestZ);
             profEnd(PROF_SGEN);
             finishBegin(w, bestX, bestZ);
             return brought;

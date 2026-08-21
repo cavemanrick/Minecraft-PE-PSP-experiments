@@ -10,6 +10,9 @@
 #include "gpu/sprite.h"
 #include "platform/audio/sound.h"
 #include "gpu/gui_atlas.h"
+#include "world/level/world.h"
+#include "world/level/level.h"
+#include "client/debug_teleport.h"
 
 bool g_paused        = false;
 int  g_pauseSel      = 0;
@@ -18,10 +21,33 @@ bool g_quitConfirm   = false;
 int  g_quitConfirmSel = 1;
 bool g_optionsOpen   = false;
 
+extern World g_world;
+
+// TEMPORARY dev/testing entry -- see client/debug_teleport.*. Only shown
+// on a genuine 1024x1024-preset world (the only size with a reserved
+// Nether region to jump into at all); every other world size gets the
+// normal 4-button menu unchanged. This lives in the pause menu rather
+// than as a raw in-game button combo specifically because every single
+// button on the device is already bound to something during normal
+// gameplay (checked exhaustively against player.cpp and gamemode.cpp --
+// there is no free button or even a safely combinable pair, since
+// existing handlers check bit-membership, not exact combos, so any
+// button used here would still also trigger its normal action). The
+// pause menu is already a dedicated, deliberately-entered context with
+// no such collision risk.
+static bool debugNetherEntryAvailable() {
+    return g_world.sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS;
+}
+
 static const char* const kPauseButtons[] = {
-    "Back to game", "Options", "Save", "Quit to title",
+    "Back to game", "Options", "Save", "Quit to title", "Enter Nether (test)",
 };
-static const int PAUSE_BUTTONS = (int)(sizeof(kPauseButtons) / sizeof(kPauseButtons[0]));
+static const int PAUSE_BUTTONS_BASE = 4; // everything except the debug entry
+static const int PAUSE_BUTTONS_MAX  = (int)(sizeof(kPauseButtons) / sizeof(kPauseButtons[0]));
+
+static int pauseButtonCount() {
+    return debugNetherEntryAvailable() ? PAUSE_BUTTONS_MAX : PAUSE_BUTTONS_BASE;
+}
 
 static const float PAUSE_V2    = VW / 20.0f;
 static const float PAUSE_BTN_W = 8.0f * PAUSE_V2;
@@ -80,7 +106,7 @@ void PauseScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int )
 
     const int selBefore = g_pauseSel;
     if ((pressed & PSP_CTRL_UP)   && g_pauseSel > 0)                  g_pauseSel--;
-    if ((pressed & PSP_CTRL_DOWN) && g_pauseSel < PAUSE_BUTTONS - 1)  g_pauseSel++;
+    if ((pressed & PSP_CTRL_DOWN) && g_pauseSel < pauseButtonCount() - 1)  g_pauseSel++;
     if (g_pauseSel != selBefore) soundPlay("random.click", 1.0f, 1.0f);
 
     if (pressed & (PSP_CTRL_CIRCLE | PSP_CTRL_SELECT)) {
@@ -99,6 +125,12 @@ void PauseScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int )
                 break;
             case 2: g_saveRequested = true; g_paused = false; break;
             case 3: g_quitConfirm = true; g_quitConfirmSel = 1; break;
+            case 4:
+                if (debugNetherEntryAvailable()) {
+                    debugToggleNetherTeleport(&g_world, g_level.player);
+                    g_paused = false;
+                }
+                break;
         }
     }
 }
@@ -133,7 +165,7 @@ void PauseScreen::renderContent(MenuState& s) {
                            (PAUSE_V2 + PAUSE_BTN_W / 2.0f) * UI_SCALE - tw / 2.0f,
                            (PAUSE_BTN_Y - 11.0f) * UI_SCALE, title, 0xFFFFFFFFu, UI_SCALE);
 
-        for (int i = 0; i < PAUSE_BUTTONS; i++) {
+        for (int i = 0; i < pauseButtonCount(); i++) {
             bool hover = (g_pauseSel == i);
             float by = PAUSE_BTN_Y + i * PAUSE_PITCH;
             guiTButton(s, PAUSE_V2, by, PAUSE_BTN_W, PAUSE_BTN_H, hover);

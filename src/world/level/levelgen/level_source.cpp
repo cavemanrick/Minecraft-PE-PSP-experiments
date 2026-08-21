@@ -1,6 +1,7 @@
 #include "world/level/levelgen/level_source.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
+#include "world/level/chunk/chunk_cache.h"
 #include "world/level/levelgen/mcpegen.h"
 #include "world/level/levelgen/gen_features.h"
 #include "world/level/storage/level_storage.h"
@@ -38,6 +39,20 @@ public:
 
             if ((z & 15) == 0) sceKernelDelayThread(100);
         }
+
+        // The block data above is real and correct, but nothing is
+        // readable/solid/spawnable without this -- see the comment on
+        // worldClaimChunkPrebuilt (chunk_cache.cpp) for exactly why:
+        // worldBlock itself returns BLOCK_INVISIBLE_BEDROCK for any chunk
+        // that was never claimed through the normal per-chunk pipeline,
+        // regardless of what's actually stored there. This was the root
+        // cause of flat worlds leaving the player falling through nothing
+        // at spawn -- the floor existed, every reader just treated it as
+        // if it didn't.
+        for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++)
+        for (int cx = 0; cx < WORLD_CHUNKS_X; cx++)
+            worldClaimChunkPrebuilt(w, cx, cz);
+
         g_terrainProgress = 50;
     }
 
@@ -78,6 +93,13 @@ public:
 
             if ((z & 15) == 0) sceKernelDelayThread(100);
         }
+
+        // Same claim-after-write requirement as FlatLevelSource above --
+        // see that comment and worldClaimChunkPrebuilt (chunk_cache.cpp).
+        for (int cz = 0; cz < WORLD_CHUNKS_Z; cz++)
+        for (int cx = 0; cx < WORLD_CHUNKS_X; cx++)
+            worldClaimChunkPrebuilt(w, cx, cz);
+
         g_terrainProgress = 50;
     }
 

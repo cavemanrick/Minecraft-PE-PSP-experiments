@@ -300,6 +300,7 @@ int main(int argc, char* argv[]) {
         extern bool g_paused, g_optionsOpen;
         bool inGameMenu = g_invOpen || g_chestOpen || g_furnaceOpen || g_craftOpen ||
                           g_armorOpen || g_paused || g_optionsOpen;
+
         unsigned int pMenu = pressed | repeat;
         if (Screen* cur = menuScreen(s.screen)) {
             cur->handleInput(s, pMenu, pad.Buttons);

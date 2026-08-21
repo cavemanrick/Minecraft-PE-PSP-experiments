@@ -45,6 +45,8 @@ static long s_activeSeed = 0;
 static int  s_activeGameType = 1;
 static int  s_activeWorldType = WORLD_TYPE_OLD;
 static int  s_activeGenMask = GEN_FEATURES_ALL_ON;
+static int  s_activeSizeX = WORLD_DEFAULT_SIZE_CHUNKS;
+static int  s_activeSizeZ = WORLD_DEFAULT_SIZE_CHUNKS;
 
 extern bool g_saveShowProgress;
 static void saveChunks(World* w, bool onlyDirty) {
@@ -628,7 +630,7 @@ bool readInfo(const char* absDir, char* nameOut, int nameCap, int* outGameType, 
 }
 
 void setActiveWorld(const char* absDir, long seed, int gameType, const char* levelName,
-                    int worldType, int genMask) {
+                    int worldType, int genMask, int sizeX, int sizeZ) {
     if (absDir) strncpy(s_activeDir, absDir, sizeof(s_activeDir) - 1);
     s_activeDir[sizeof(s_activeDir) - 1] = '\0';
     if (levelName) strncpy(s_activeName, levelName, sizeof(s_activeName) - 1);
@@ -637,6 +639,8 @@ void setActiveWorld(const char* absDir, long seed, int gameType, const char* lev
     s_activeGameType = gameType;
     s_activeWorldType = worldType;
     s_activeGenMask = genMask;
+    s_activeSizeX = sizeX;
+    s_activeSizeZ = sizeZ;
 }
 
 const char* getActiveDir() { return s_activeDir; }
@@ -644,6 +648,8 @@ long getActiveSeed() { return s_activeSeed; }
 int getActiveGameType() { return s_activeGameType; }
 int getActiveWorldType() { return s_activeWorldType; }
 int getActiveGenMask() { return s_activeGenMask; }
+int getActiveSizeX() { return s_activeSizeX; }
+int getActiveSizeZ() { return s_activeSizeZ; }
 const char* getActiveName() { return s_activeName; }
 
 }

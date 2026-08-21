@@ -188,6 +188,34 @@ extern volatile bool g_terrainThreadDone;
 #define WORLD_PRESET_1024_TOTAL_X_CHUNKS (WORLD_PRESET_1024_CHUNKS + WORLD_NETHER_CHUNKS + WORLD_END_CHUNKS)
 #define WORLD_PRESET_1024_TOTAL_Z_CHUNKS WORLD_PRESET_1024_CHUNKS
 
+// True if (cx,cz) falls inside the reserved X-column range for a
+// 1024-preset world (chunk X [WORLD_PRESET_1024_CHUNKS,
+// WORLD_PRESET_1024_TOTAL_X_CHUNKS), covering both the Nether and End
+// strips). Always false for any other world size, since those have no
+// reserved regions at all and this coordinate range is either out of
+// bounds or, worse, real generated overworld territory there instead.
+//
+// Spans the FULL WORLD_PRESET_1024_CHUNKS-tall Z range (0..63), not just
+// the 32 rows Nether/End actually occupy -- deliberately more conservative
+// than their exact footprint, so the entire reserved X-column is uniformly
+// off-limits to overworld generation rather than leaving an ambiguous
+// half-reserved seam past Z=32 that a future implementer would have to
+// re-derive the meaning of.
+//
+// This is the single source of truth for "is this chunk reserved" --
+// worldGetChunk checks it before ever calling chunkGenerateTerrain (see
+// chunk_cache.cpp), so nothing that later touches a reserved chunk (a
+// debug teleport, a future Nether generator, anything) can accidentally
+// trigger real overworld terrain generation there, regardless of how it
+// got called. The pre-gen sweep's own overworld-only bound (worldInitTerrain)
+// already avoided this range structurally; this is the matching guard for
+// any *other* code path that might claim a chunk later.
+static inline bool worldChunkIsReserved(const World* w, int cx, int cz) {
+    if (w->sizeX != WORLD_PRESET_1024_TOTAL_X_CHUNKS) return false;
+    return cx >= WORLD_PRESET_1024_CHUNKS && cx < WORLD_PRESET_1024_TOTAL_X_CHUNKS &&
+           cz >= 0 && cz < WORLD_PRESET_1024_CHUNKS;
+}
+
 bool worldInitTerrain(World* w, long seed, int worldType = WORLD_TYPE_OLD,
                       int sizeX = WORLD_DEFAULT_SIZE_CHUNKS, int sizeZ = WORLD_DEFAULT_SIZE_CHUNKS);
 

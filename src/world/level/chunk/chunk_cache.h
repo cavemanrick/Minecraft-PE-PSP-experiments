@@ -6,6 +6,15 @@ struct World;
 
 void worldGetChunk(World* w, int cx, int cz);
 
+// Marks a chunk resident/populated WITHOUT running normal terrain
+// generation -- for level sources that write real block data directly
+// across the whole resident window rather than per-chunk (FlatLevelSource,
+// DebugLevelSource in level_source.cpp). See the implementation comment
+// in chunk_cache.cpp for why this is necessary, not just a convenience:
+// worldBlock and friends gate on chunk-claim state, not on whether real
+// data exists underneath.
+void worldClaimChunkPrebuilt(World* w, int cx, int cz);
+
 void worldEnsureArea(World* w, int cx, int cz, int r);
 
 int worldStream(World* w, float px, float pz, int budgetMs);

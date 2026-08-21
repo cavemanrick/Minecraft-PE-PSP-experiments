@@ -3,6 +3,7 @@ OBJS = \
 	src/main.o \
 	src/client/player/physics.o \
 	src/client/gamemode/gamemode.o \
+	src/client/debug_teleport.o \
 	src/client/player/player.o \
 	src/world/entity/mob.o \
 	src/world/entity/player.o \
