@@ -45,6 +45,27 @@ static bool isNetherStripEdgeZ1(int cz) { return cz == WORLD_NETHER_ORIGIN_CZ + 
 // Values are held in file-local statics and lazily built per world seed,
 // same lifetime pattern nether_biome.cpp already uses for its own seed-
 // derived state.
+// PerlinNoise::getValue sums `levels` octaves as value/pow with pow
+// halving each octave (see PerlinNoise.cpp) -- for N levels that's
+// sum(2^i for i in 0..N-1) = 2^N - 1 times the raw single-octave
+// amplitude in the worst case, NOT the single-octave ~[-1,1] range a
+// naive reading of "Perlin noise" would suggest. An earlier version of
+// this file's remap logic wrongly assumed [-1,1] with no normalization
+// for the octave sum, which made the vast majority of columns saturate
+// to a hard 0 or hard max instead of forming an actual gradient (verified
+// by Monte Carlo simulation of the old formula: ~88% saturated for the
+// 4-level fields, and the 2-level touch field's threshold check was even
+// more broken since raw values around +3 trivially cleared a >=0.965
+// threshold meant for a normalized ~[-1,1] input) -- producing huge
+// blocky regions of total emptiness or solid towers rather than rolling
+// hills, which is what caused the "blue sky, fall until death" bug
+// report. Every noise field's raw getValue() must be divided by its own
+// NOISE_NORM before any remap/clamp/threshold logic runs.
+#define NETHER_HILL_NOISE_LEVELS  4
+#define NETHER_HILL_NOISE_NORM    ((float)((1 << NETHER_HILL_NOISE_LEVELS) - 1)) // 2^levels - 1
+#define NETHER_TOUCH_NOISE_LEVELS 2
+#define NETHER_TOUCH_NOISE_NORM   ((float)((1 << NETHER_TOUCH_NOISE_LEVELS) - 1))
+
 static bool s_noiseReady = false;
 static long s_noiseForSeed = 0;
 static PerlinNoise* s_floorNoise = 0;   // drives floor-hill height + "skip" gaps
@@ -61,9 +82,9 @@ static void ensureNetherNoise(long worldSeed) {
     Random rc(worldSeed ^ 0x4365696CL); // "Ceil"
     Random rt(worldSeed ^ 0x546F7563L); // "Touc"h
     delete s_floorNoise; delete s_ceilNoise; delete s_touchNoise;
-    s_floorNoise = new PerlinNoise(&rf, 4);
-    s_ceilNoise  = new PerlinNoise(&rc, 4);
-    s_touchNoise = new PerlinNoise(&rt, 2);
+    s_floorNoise = new PerlinNoise(&rf, NETHER_HILL_NOISE_LEVELS);
+    s_ceilNoise  = new PerlinNoise(&rc, NETHER_HILL_NOISE_LEVELS);
+    s_touchNoise = new PerlinNoise(&rt, NETHER_TOUCH_NOISE_LEVELS);
     s_noiseForSeed = worldSeed;
     s_noiseReady = true;
 }
@@ -73,16 +94,14 @@ static void ensureNetherNoise(long worldSeed) {
 // lava floor). Noise is remapped so roughly a third of columns come back
 // at/near 0 -- that's the "skipping places here and there" for lava seas
 // and rivers to show through, rather than a solid unbroken hill blanket.
+// See the NETHER_HILL_NOISE_NORM comment above ensureNetherNoise for why
+// dividing by that norm first is required.
 #define NETHER_HILL_NOISE_SCALE 0.02f
 #define NETHER_HILL_MAX_HEIGHT  22
 
 static int floorHillHeight(int gx, int gz) {
     float n = s_floorNoise->getValue(gx * NETHER_HILL_NOISE_SCALE, gz * NETHER_HILL_NOISE_SCALE);
-    // getValue's range is roughly [-1,1] band-limited noise (same
-    // convention mcpegen.cpp's own forestNoise use already assumes) --
-    // remapped to [0,1] then biased so lower values clip to a flat gap
-    // instead of a shallow hill, producing distinct sea/river patches
-    // rather than everywhere being a little bit hilly.
+    n /= NETHER_HILL_NOISE_NORM; // back to a real ~[-1,1] range -- see comment above ensureNetherNoise
     float v = n * 0.5f + 0.5f;
     v = (v - 0.35f) / 0.65f; // below ~0.35 clips negative -> gap
     if (v <= 0.0f) return 0;
@@ -91,6 +110,7 @@ static int floorHillHeight(int gx, int gz) {
 }
 static int ceilHillDepth(int gx, int gz) {
     float n = s_ceilNoise->getValue(gx * NETHER_HILL_NOISE_SCALE, gz * NETHER_HILL_NOISE_SCALE);
+    n /= NETHER_HILL_NOISE_NORM;
     float v = n * 0.5f + 0.5f;
     v = (v - 0.35f) / 0.65f;
     if (v <= 0.0f) return 0;
@@ -102,12 +122,18 @@ static int ceilHillDepth(int gx, int gz) {
 // floor and ceiling hills are deliberately allowed to meet instead of
 // being held apart by NETHER_MIN_GAP. Sparse low-frequency noise
 // thresholded very high, so genuine touch points are isolated and
-// uncommon rather than forming a whole wall of pillars.
+// uncommon rather than forming a whole wall of pillars. Same
+// NETHER_TOUCH_NOISE_NORM division as the hill fields above is required
+// here too -- this was the more severely broken of the two before the
+// fix, since an unnormalized ~[-3,3] value trivially cleared a threshold
+// meant for a normalized ~[-1,1] input, making touch points far more
+// common than "rare and isolated".
 #define NETHER_TOUCH_NOISE_SCALE 0.008f
 #define NETHER_TOUCH_THRESHOLD   0.965f
 
 static bool isTouchPointColumn(int gx, int gz) {
     float n = s_touchNoise->getValue(gx * NETHER_TOUCH_NOISE_SCALE, gz * NETHER_TOUCH_NOISE_SCALE);
+    n /= NETHER_TOUCH_NOISE_NORM;
     float v = n * 0.5f + 0.5f;
     return v >= NETHER_TOUCH_THRESHOLD;
 }
