@@ -309,6 +309,24 @@ int worldStream(World* w, float px, float pz, int budgetMs) {
             for (int dx = -R; dx <= R; dx++) {
                 int cx = pcx + dx, cz = pcz + dz;
                 if (!worldChunkInBounds(w, cx, cz)) continue;
+                // Reserved Nether/End chunks (see worldChunkIsReserved,
+                // world.h) are structurally "in bounds" for the 1024
+                // preset -- sizeX deliberately spans the whole strip so
+                // worldGetChunk can reach it on demand for portal/debug
+                // teleport -- but this loop is the *ambient* proximity
+                // streamer, driven purely by player XZ distance every
+                // frame with no idea whether the player has ever actually
+                // crossed into the Nether. Without this guard, simply
+                // standing near the overworld/reserved seam pulls
+                // reserved chunks into render distance and generates (and
+                // draws) real Nether terrain that's visible right through
+                // Level::getCubes' invisible collision wall, even though
+                // the player can't walk into it. Portal/debug-teleport
+                // code still reaches the reserved strip fine -- they call
+                // worldGetChunk directly (see nether_portal.cpp,
+                // debug_teleport.cpp), which doesn't go through this loop
+                // at all.
+                if (worldChunkIsReserved(w, cx, cz)) continue;
                 if (worldChunkReady(w, cx, cz)) continue;
                 int d = dx * dx + dz * dz;
                 if (d < bestD) { bestD = d; bestX = cx; bestZ = cz; }

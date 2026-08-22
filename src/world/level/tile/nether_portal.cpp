@@ -179,7 +179,7 @@ bool netherPortalTryIgnite(World* w, int x, int y, int z) {
 // answering portal on first crossing.
 static const int kNetherPortalCX = WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS / 2;
 static const int kNetherPortalCZ = WORLD_NETHER_CHUNKS / 2 + 4; // offset from the debug teleport's own entry point so the two don't overlap
-static const int kNetherPortalY  = 60; // matches debug_teleport.cpp's kNetherEntryY reasoning: comfortably above the lava sea
+static const int kNetherPortalY  = 60; // safely inside the guaranteed navigable gap, see debug_teleport.cpp's identical reasoning
 
 // Last Overworld portal position a player entered through, so the return
 // trip from the Nether side knows where to send them back. Stored on

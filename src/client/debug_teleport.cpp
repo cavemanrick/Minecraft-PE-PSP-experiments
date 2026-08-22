@@ -16,12 +16,13 @@
 // silently a no-op on any other world size, so it can never misplace a
 // player into real overworld terrain on a 512 or infinite world.
 //
-// Now that chunkGenerateNether produces real terrain in this strip (solid
-// netherrack shell carved into caverns, lava sea below NETHER_LAVA_LEVEL
-// -- see nether_gen.cpp), a blind teleport-to-fixed-coordinate can no
-// longer assume it's landing in untouched air: the entry point might come
-// up inside solid netherrack, or directly over the lava sea, depending on
-// how the cavern carving happened to land there. carveSafePlatform below
+// Now that chunkGenerateNether produces real terrain in this strip
+// (floor hills rising from a lava floor, ceiling hills hanging down, a
+// guaranteed-navigable gap between them -- see nether_gen.cpp), a blind
+// teleport-to-fixed-coordinate can no longer assume it's landing in
+// untouched air: the entry point might come up inside a rare touch-point
+// pillar where floor and ceiling hills are allowed to meet, depending on
+// how generation happened to land there. carveSafePlatform below
 // clears a small landing pocket and floors it with netherrack (not
 // BLOCK_STONE, which would look visually wrong sitting inside real
 // generated Nether terrain) rather than assuming a floor already exists.
@@ -35,16 +36,18 @@ static float s_returnYRot = 0, s_returnXRot = 0;
 static const int kNetherEntryCX = WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS / 2;
 static const int kNetherEntryCZ = WORLD_NETHER_CHUNKS / 2;
 
-// Comfortably above the lava sea (NETHER_LAVA_LEVEL in nether_gen.cpp) so
-// the cleared pocket is never at risk of opening straight into the lava
-// sea from below or having its floor be a thin shell over lava.
+// Comfortably above the lava floor and safely inside the guaranteed
+// navigable gap (see NETHER_MIN_GAP in nether_gen.cpp) for any non-touch-
+// point column, so the cleared pocket only ever needs to punch through
+// the rare touch-point pillar case, never open straight into the lava
+// floor from below.
 static const int kNetherEntryY = 60;
 
 static void carveSafePlatform(World* w, int bx, int by, int bz) {
     // Real Nether terrain already exists here by the time this runs (see
     // comment above) -- this just guarantees a clear, netherrack-floored
     // pocket at the exact entry point regardless of whether the generated
-    // cavern shape happened to leave solid rock or open space there.
+    // hill-generation shape happened to leave solid rock or open space there.
     for (int dx = -2; dx <= 2; dx++)
     for (int dz = -2; dz <= 2; dz++) {
         setBlock(w, bx + dx, by - 1, bz + dz, BLOCK_NETHERRACK);

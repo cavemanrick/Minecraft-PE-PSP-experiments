@@ -2,42 +2,179 @@
 #include "world/level/levelgen/nether_biome.h"
 #include "world/level/levelgen/features.h"
 #include "world/level/levelgen/Random.h"
+#include "world/level/levelgen/PerlinNoise.h"
+#include "world/level/levelgen/mcpegen.h"
+#include "world/level/tile/fire.h"
 #include "world/level/world.h"
 
 #include <math.h>
 
 // --- Vertical shell -----------------------------------------------------
-// Classic Nether shape scaled to this engine's 128-tall column (vanilla's
-// is also 128, y=0..127, so no rescaling is actually needed): a solid
-// bedrock cap at the very top and bottom, netherrack shell in between,
-// carved into open caverns, with a lava sea flooding everything below a
-// fixed level. Kept as plain constants rather than derived from WORLD_H
-// so the numbers stay readable and match vanilla's own fixed layout.
+// Floor-hills / ceiling-hills shape (replaces the earlier tunnel-carved-
+// solid-shell approach): a sealed 100-tall bedrock box, a shallow lava
+// floor, netherrack hills rising from the floor and hanging from the
+// ceiling with gaps between them for lava seas/rivers, a guaranteed
+// navigable air gap, and a few spots where the two hill layers are
+// allowed to touch into a single pillar.
+#define NETHER_H                100    // total column height, y=0..99 (cut down from the old 128)
 #define NETHER_BEDROCK_BOTTOM   0
-#define NETHER_BEDROCK_TOP      127
-#define NETHER_FLOOR_Y          1     // netherrack starts here (above bottom bedrock)
-#define NETHER_CEILING_Y        126   // netherrack ends here (below top bedrock)
-#define NETHER_LAVA_LEVEL       31    // everything at/below this, within the shell, is lava
+#define NETHER_BEDROCK_TOP      (NETHER_H - 1)  // y=99
+#define NETHER_LAVA_FLOOR_TOP   6       // y=1..6 is the lava floor (6 blocks), y=0 is bedrock
+#define NETHER_FLOOR_BASE_Y     (NETHER_LAVA_FLOOR_TOP + 1) // y=7, hills rise from here
+#define NETHER_CEIL_BASE_Y      (NETHER_BEDROCK_TOP - 1)    // y=98, hills hang from here
+#define NETHER_MIN_GAP          20      // guaranteed navigable air thickness between the two hill layers
 
 #define MCPE_PI 3.14159265f
 
-// --- Bulk shell fill ------------------------------------------------------
+// --- Bedrock box: top, bottom, and (only at the strip's true outer
+// edges) the four side walls, replacing the old shell-fill's top/bottom-
+// only bedrock. Side walls only get written on the boundary chunks
+// themselves (checked against WORLD_NETHER_ORIGIN_CX/CZ/WORLD_NETHER_
+// CHUNKS in world.h), not every chunk -- an interior chunk has no side
+// wall to draw.
+
+static bool isNetherStripEdgeX0(int cx) { return cx == WORLD_NETHER_ORIGIN_CX; }
+static bool isNetherStripEdgeX1(int cx) { return cx == WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS - 1; }
+static bool isNetherStripEdgeZ0(int cz) { return cz == WORLD_NETHER_ORIGIN_CZ; }
+static bool isNetherStripEdgeZ1(int cz) { return cz == WORLD_NETHER_ORIGIN_CZ + WORLD_NETHER_CHUNKS - 1; }
+
+// --- Height fields --------------------------------------------------------
+// Two independent 2D noise fields sampled in *global* block coordinates
+// (not chunk-local) so hills stay continuous across chunk borders, same
+// requirement the old cave-carving code had for its own tunnel math.
+// Values are held in file-local statics and lazily built per world seed,
+// same lifetime pattern nether_biome.cpp already uses for its own seed-
+// derived state.
+static bool s_noiseReady = false;
+static long s_noiseForSeed = 0;
+static PerlinNoise* s_floorNoise = 0;   // drives floor-hill height + "skip" gaps
+static PerlinNoise* s_ceilNoise = 0;    // drives ceiling-hill depth + "skip" gaps
+static PerlinNoise* s_touchNoise = 0;   // sparse noise field picking the rare touch-point columns
+
+static void ensureNetherNoise(long worldSeed) {
+    if (s_noiseReady && s_noiseForSeed == worldSeed) return;
+    // Different XOR constants per field (and different again from
+    // nether_biome.cpp's own 0x4E45544CL) so the three noise fields and
+    // the biome placement are all independent of one another even though
+    // they share the same world seed.
+    Random rf(worldSeed ^ 0x466C6F6FL); // "Floo"r
+    Random rc(worldSeed ^ 0x4365696CL); // "Ceil"
+    Random rt(worldSeed ^ 0x546F7563L); // "Touc"h
+    delete s_floorNoise; delete s_ceilNoise; delete s_touchNoise;
+    s_floorNoise = new PerlinNoise(&rf, 4);
+    s_ceilNoise  = new PerlinNoise(&rc, 4);
+    s_touchNoise = new PerlinNoise(&rt, 2);
+    s_noiseForSeed = worldSeed;
+    s_noiseReady = true;
+}
+
+// Height (in blocks above NETHER_FLOOR_BASE_Y) of the floor hill at this
+// column, or 0 for an open gap (lava sea/river surface stays flat at the
+// lava floor). Noise is remapped so roughly a third of columns come back
+// at/near 0 -- that's the "skipping places here and there" for lava seas
+// and rivers to show through, rather than a solid unbroken hill blanket.
+#define NETHER_HILL_NOISE_SCALE 0.02f
+#define NETHER_HILL_MAX_HEIGHT  22
+
+static int floorHillHeight(int gx, int gz) {
+    float n = s_floorNoise->getValue(gx * NETHER_HILL_NOISE_SCALE, gz * NETHER_HILL_NOISE_SCALE);
+    // getValue's range is roughly [-1,1] band-limited noise (same
+    // convention mcpegen.cpp's own forestNoise use already assumes) --
+    // remapped to [0,1] then biased so lower values clip to a flat gap
+    // instead of a shallow hill, producing distinct sea/river patches
+    // rather than everywhere being a little bit hilly.
+    float v = n * 0.5f + 0.5f;
+    v = (v - 0.35f) / 0.65f; // below ~0.35 clips negative -> gap
+    if (v <= 0.0f) return 0;
+    if (v > 1.0f) v = 1.0f;
+    return (int)(v * v * NETHER_HILL_MAX_HEIGHT); // v*v: bias toward lower/rolling hills, occasional tall one
+}
+static int ceilHillDepth(int gx, int gz) {
+    float n = s_ceilNoise->getValue(gx * NETHER_HILL_NOISE_SCALE, gz * NETHER_HILL_NOISE_SCALE);
+    float v = n * 0.5f + 0.5f;
+    v = (v - 0.35f) / 0.65f;
+    if (v <= 0.0f) return 0;
+    if (v > 1.0f) v = 1.0f;
+    return (int)(v * v * NETHER_HILL_MAX_HEIGHT);
+}
+
+// True for the rare columns chosen to be touch-point pillars, where the
+// floor and ceiling hills are deliberately allowed to meet instead of
+// being held apart by NETHER_MIN_GAP. Sparse low-frequency noise
+// thresholded very high, so genuine touch points are isolated and
+// uncommon rather than forming a whole wall of pillars.
+#define NETHER_TOUCH_NOISE_SCALE 0.008f
+#define NETHER_TOUCH_THRESHOLD   0.965f
+
+static bool isTouchPointColumn(int gx, int gz) {
+    float n = s_touchNoise->getValue(gx * NETHER_TOUCH_NOISE_SCALE, gz * NETHER_TOUCH_NOISE_SCALE);
+    float v = n * 0.5f + 0.5f;
+    return v >= NETHER_TOUCH_THRESHOLD;
+}
+
+// --- Bulk fill: bedrock box, lava floor, floor hills, ceiling hills -------
 
 static void netherFillColumn(World* w, int cx, int cz) {
+    ensureNetherNoise(worldGenSeed());
+
     int xo = cx * 16, zo = cz * 16;
+    bool edgeX0 = isNetherStripEdgeX0(cx), edgeX1 = isNetherStripEdgeX1(cx);
+    bool edgeZ0 = isNetherStripEdgeZ0(cz), edgeZ1 = isNetherStripEdgeZ1(cz);
+
     for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
             int gx = xo + x, gz = zo + z;
-            for (int y = NETHER_BEDROCK_BOTTOM; y <= NETHER_BEDROCK_TOP; y++) {
+
+            // Side-wall bedrock: only the single outermost block-column
+            // on whichever of the 4 sides this chunk actually touches.
+            bool onSideWall = (edgeX0 && x == 0) || (edgeX1 && x == 15) ||
+                               (edgeZ0 && z == 0) || (edgeZ1 && z == 15);
+            if (onSideWall) {
+                for (int y = 0; y < NETHER_H; y++) blockPut(w, gx, y, gz, BLOCK_BEDROCK);
+                continue;
+            }
+
+            int floorH = floorHillHeight(gx, gz);
+            int ceilH  = ceilHillDepth(gx, gz);
+
+            bool touch = isTouchPointColumn(gx, gz);
+            if (!touch) {
+                // Hold the two hill layers apart by at least
+                // NETHER_MIN_GAP: if they'd encroach past that, shrink
+                // whichever one is taller/deeper just enough to restore
+                // the minimum gap, rather than shrinking both blindly --
+                // preserves the more prominent hill's shape.
+                int floorTopY = NETHER_FLOOR_BASE_Y + floorH;
+                int ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
+                int gap = ceilBottomY - floorTopY;
+                if (gap < NETHER_MIN_GAP) {
+                    int deficit = NETHER_MIN_GAP - gap;
+                    if (floorH >= ceilH) floorH = (floorH - deficit < 0) ? 0 : floorH - deficit;
+                    else                 ceilH  = (ceilH  - deficit < 0) ? 0 : ceilH  - deficit;
+                }
+            }
+            // touch==true columns skip the gap clamp entirely -- their
+            // floor/ceiling heights are used as-is, and since both noise
+            // fields tend toward their max near the same low-frequency
+            // peaks the touch-noise threshold selects, floor and ceiling
+            // naturally meet or nearly meet at these columns without
+            // needing to force-inflate either height field.
+
+            int floorTopY = NETHER_FLOOR_BASE_Y + floorH;
+            int ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
+
+            for (int y = 0; y < NETHER_H; y++) {
                 unsigned char id;
                 if (y == NETHER_BEDROCK_BOTTOM || y == NETHER_BEDROCK_TOP) {
                     id = BLOCK_BEDROCK;
-                } else if (y < NETHER_FLOOR_Y || y > NETHER_CEILING_Y) {
-                    id = BLOCK_AIR; // shouldn't happen given the constants above, kept for safety
-                } else if (y <= NETHER_LAVA_LEVEL) {
-                    id = BLOCK_CALM_LAVA;
+                } else if (y <= NETHER_LAVA_FLOOR_TOP) {
+                    id = BLOCK_CALM_LAVA; // the floor's lava sea, always present under every column
+                } else if (y <= floorTopY) {
+                    id = BLOCK_NETHERRACK; // floor hill
+                } else if (y >= ceilBottomY) {
+                    id = BLOCK_NETHERRACK; // ceiling hill
                 } else {
-                    id = BLOCK_NETHERRACK;
+                    id = BLOCK_AIR; // navigable gap
                 }
                 blockPut(w, gx, y, gz, id);
             }
@@ -45,188 +182,18 @@ static void netherFillColumn(World* w, int cx, int cz) {
     }
 }
 
-// --- Cavern carving ---------------------------------------------------
-// Directly reuses caves.cpp's tunnel-carving math (same ellipsoid-cross-
-// -section, same recursive branch-split shape) rather than duplicating a
-// second copy of it. The overworld version replaces BLOCK_STONE/DIRT/
-// GRASS with air (or lava below a cutoff); this version replaces
-// BLOCK_NETHERRACK and BLOCK_CALM_LAVA with air instead, since Nether
-// caverns should open up the lava sea into breathable pockets too, not
-// just the netherrack above it -- that's what makes the "heavily carved,
-// open caverns" shape actually walkable near the lava level rather than
-// just riddling the upper netherrack with holes. Radii are scaled up
-// relative to the overworld version (see NETHER_CAVE_RADIUS_MUL) for the
-// "large open caverns" brief rather than tight crawl-tunnels.
-#define NETHER_CAVE_RADIUS_MUL 2.2f
-
-static void netherCaveAddTunnel(World* w, Random& parentRandom, int xOffs, int zOffs,
-                                 float xCave, float yCave, float zCave,
-                                 float thickness, float yRot, float xRot,
-                                 int step, int dist, float yScale) {
-    float xMid = (float)(xOffs * 16 + 8);
-    float zMid = (float)(zOffs * 16 + 8);
-
-    float yRota = 0, xRota = 0;
-    Random random(parentRandom.nextLong());
-
-    if (dist <= 0) {
-        int maxDist = 8 * 16 - 16;
-        dist = maxDist - random.nextInt(maxDist / 4);
-    }
-    bool singleStep = false;
-    if (step == -1) { step = dist / 2; singleStep = true; }
-
-    int splitPoint = random.nextInt(dist / 2) + dist / 4;
-    bool steep = random.nextInt(6) == 0;
-
-    for (; step < dist; step++) {
-        float rad = (1.5f + sinf(step * MCPE_PI / dist) * thickness) * NETHER_CAVE_RADIUS_MUL;
-        float yRad = rad * yScale;
-
-        float xc = cosf(xRot), xs = sinf(xRot);
-        xCave += cosf(yRot) * xc;
-        yCave += xs;
-        zCave += sinf(yRot) * xc;
-
-        xRot *= steep ? 0.92f : 0.7f;
-        xRot += xRota * 0.1f;
-        yRot += yRota * 0.1f;
-        xRota *= 0.90f; yRota *= 0.75f;
-        xRota += (random.nextFloat() - random.nextFloat()) * random.nextFloat() * 2;
-        yRota += (random.nextFloat() - random.nextFloat()) * random.nextFloat() * 4;
-
-        if (!singleStep && step == splitPoint && thickness > 1) {
-            netherCaveAddTunnel(w, random, xOffs, zOffs, xCave, yCave, zCave,
-                                random.nextFloat() * 0.5f + 0.5f, yRot - MCPE_PI / 2, xRot / 3, step, dist, 1.0f);
-            netherCaveAddTunnel(w, random, xOffs, zOffs, xCave, yCave, zCave,
-                                random.nextFloat() * 0.5f + 0.5f, yRot + MCPE_PI / 2, xRot / 3, step, dist, 1.0f);
-            return;
-        }
-        if (!singleStep && random.nextInt(4) == 0) continue;
-
-        {
-            float xd = xCave - xMid, zd = zCave - zMid;
-            float remaining = (float)(dist - step);
-            float rr = (thickness + 2) + 16;
-            if (xd * xd + zd * zd - (remaining * remaining) > rr * rr) return;
-        }
-
-        if (xCave < xMid - 16 - rad * 2 || zCave < zMid - 16 - rad * 2 ||
-            xCave > xMid + 16 + rad * 2 || zCave > zMid + 16 + rad * 2) continue;
-
-        int x0 = (int)floorf(xCave - rad) - xOffs * 16 - 1;
-        int x1 = (int)floorf(xCave + rad) - xOffs * 16 + 1;
-        int y0 = (int)floorf(yCave - yRad) - 1;
-        int y1 = (int)floorf(yCave + yRad) + 1;
-        int z0 = (int)floorf(zCave - rad) - zOffs * 16 - 1;
-        int z1 = (int)floorf(zCave + rad) - zOffs * 16 + 1;
-
-        // Clamp within the netherrack shell (never touch the bedrock caps).
-        if (x0 < 0) x0 = 0;
-        if (x1 > 16) x1 = 16;
-        if (y0 < NETHER_FLOOR_Y) y0 = NETHER_FLOOR_Y;
-        if (y1 > NETHER_CEILING_Y) y1 = NETHER_CEILING_Y;
-        if (z0 < 0) z0 = 0;
-        if (z1 > 16) z1 = 16;
-
-        for (int xx = x0; xx < x1; xx++) {
-            float xd = ((xx + xOffs * 16 + 0.5f) - xCave) / rad;
-            for (int zz = z0; zz < z1; zz++) {
-                float zd = ((zz + zOffs * 16 + 0.5f) - zCave) / rad;
-                if (xd * xd + zd * zd >= 1) continue;
-                int gx = xOffs * 16 + xx, gz = zOffs * 16 + zz;
-                for (int yy = y1 - 1; yy >= y0; yy--) {
-                    float yd = (yy + 0.5f - yCave) / yRad;
-                    if (yd > -0.7f && xd * xd + yd * yd + zd * zd < 1) {
-                        unsigned char block = worldBlock(w, gx, yy, gz);
-                        if (block == BLOCK_NETHERRACK || block == BLOCK_CALM_LAVA || block == BLOCK_LAVA) {
-                            blockPut(w, gx, yy, gz, BLOCK_AIR);
-                        }
-                    }
-                }
-            }
-        }
-        if (singleStep) break;
-    }
-}
-
-static void netherCaveAddRoom(World* w, Random& random, int xOffs, int zOffs,
-                               float xRoom, float yRoom, float zRoom) {
-    netherCaveAddTunnel(w, random, xOffs, zOffs, xRoom, yRoom, zRoom,
-                        1 + random.nextFloat() * 6, 0, 0, -1, -1, 0.5f);
-}
-
-// Denser than the overworld's CAVE_RARITY (1-in-15 chunks) -- "heavily
-// carved, large open caverns" means most Nether chunks should have some
-// cavern passing through them, not the occasional isolated pocket.
-#define NETHER_CAVE_RARITY 3
-
-static void netherCaveAddFeature(World* w, Random& random, int x, int z, int xOffs, int zOffs) {
-    int caves = random.nextInt(random.nextInt(random.nextInt(40) + 1) + 1) + 1;
-    if (random.nextInt(NETHER_CAVE_RARITY) != 0) caves = 0;
-
-    for (int cave = 0; cave < caves; cave++) {
-        float xCave = (float)(x * 16 + random.nextInt(16));
-        float yCave = (float)(NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y));
-        float zCave = (float)(z * 16 + random.nextInt(16));
-
-        int tunnels = 1;
-        if (random.nextInt(3) == 0) {
-            netherCaveAddRoom(w, random, xOffs, zOffs, xCave, yCave, zCave);
-            tunnels += random.nextInt(4);
-        }
-        for (int i = 0; i < tunnels; i++) {
-            float yRot = random.nextFloat() * MCPE_PI * 2;
-            float xRot = ((random.nextFloat() - 0.5f) * 2) / 8;
-            float thickness = random.nextFloat() * 2 + random.nextFloat();
-            netherCaveAddTunnel(w, random, xOffs, zOffs, xCave, yCave, zCave, thickness, yRot, xRot, 0, 0, 1.0f);
-        }
-    }
-}
-
-static void netherCarveCaverns(World* w, long worldSeed, int chunkX, int chunkZ) {
-    Random random(worldSeed ^ 0x4E43415645L /* "NCAVE" */);
-    long xScale = random.nextLong() / 2 * 2 + 1;
-    long zScale = random.nextLong() / 2 * 2 + 1;
-
-    const int r = 8;
-    for (int x = chunkX - r; x <= chunkX + r; x++) {
-        for (int z = chunkZ - r; z <= chunkZ + r; z++) {
-            random.setSeed((x * xScale + z * zScale) ^ worldSeed);
-            netherCaveAddFeature(w, random, x, z, chunkX, chunkZ);
-        }
-    }
-}
 
 // --- Per-biome decoration -----------------------------------------------
-// Runs after carving, so decoration only ever lands on cavern surfaces
-// (netherrack exposed to an air pocket) rather than being buried inside
-// solid shell that never got carved out.
+// Decoration only ever lands on hill surfaces (netherrack exposed to an
+// open air pocket, per netherFillColumn's floor/ceiling hill shape above)
+// rather than being buried inside solid rock.
 
 static bool isNetherrackFace(World* w, int x, int y, int z) {
     return worldBlock(w, x, y, z) == BLOCK_NETHERRACK;
 }
 
 static void decorateWastes(World* w, Random& random, int xo, int zo) {
-    // Glowstone clusters hanging from cavern ceilings -- the one Nether
-    // Wastes light source already fully supported by the tile/render
-    // layer (see tile.cpp), so this needs no new block work at all.
-    int clusters = 2 + random.nextInt(3);
-    for (int i = 0; i < clusters; i++) {
-        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y);
-        // A ceiling spot: air here, netherrack directly above.
-        if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
-        if (!isNetherrackFace(w, x, y + 1, z)) continue;
-        int blobSize = 3 + random.nextInt(5);
-        for (int b = 0; b < blobSize; b++) {
-            int bx = x + random.nextInt(3) - 1, bz = z + random.nextInt(3) - 1;
-            if (worldBlock(w, bx, y, bz) == BLOCK_AIR && isNetherrackFace(w, bx, y + 1, bz))
-                setBlock(w, bx, y, bz, BLOCK_GLOWSTONE);
-        }
-    }
-
-    // Magma blocks scattered on cavern floors near the lava sea, same
+    // Magma blocks scattered on floor hills near the lava sea, same
     // rough placement vanilla uses (small blobs just above the lava
     // line) -- purely decorative here (no lava-damage/bubble-column
     // behavior implemented), but it reads correctly and now has a real
@@ -234,7 +201,7 @@ static void decorateWastes(World* w, Random& random, int xo, int zo) {
     int magmaBlobs = 1 + random.nextInt(2);
     for (int i = 0; i < magmaBlobs; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_LAVA_LEVEL + 1 + random.nextInt(6);
+        int y = NETHER_LAVA_FLOOR_TOP + 1 + random.nextInt(6);
         if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
         if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
         int blobSize = 2 + random.nextInt(4);
@@ -254,7 +221,7 @@ static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
     for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
             int gx = xo + x, gz = zo + z;
-            for (int y = NETHER_CEILING_Y; y >= NETHER_FLOOR_Y; y--) {
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y; y--) {
                 if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
                 if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
                 // Top-of-floor netherrack exposed to an open pocket above it.
@@ -273,7 +240,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
             int gx = xo + x, gz = zo + z;
-            for (int y = NETHER_CEILING_Y; y >= NETHER_FLOOR_Y; y--) {
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y; y--) {
                 if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
                 if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
                 setBlock(w, gx, y, gz, BLOCK_WARPED_NYLIUM);
@@ -287,7 +254,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int fungusTries = 4 + random.nextInt(4);
     for (int i = 0; i < fungusTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_FUNGUS);
@@ -296,7 +263,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int wartTries = 2 + random.nextInt(3);
     for (int i = 0; i < wartTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_WART_BLOCK);
@@ -312,7 +279,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int rootsTries = 3 + random.nextInt(4);
     for (int i = 0; i < rootsTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_ROOTS);
@@ -321,7 +288,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int sproutTries = 2 + random.nextInt(3);
     for (int i = 0; i < sproutTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_NETHER_SPROUTS);
@@ -334,7 +301,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int vineTries = 2 + random.nextInt(3);
     for (int i = 0; i < vineTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (!isNetherrackFace(w, x, y + 1, z)) continue;
         setBlock(w, x, y, z, BLOCK_TWISTING_VINES);
@@ -383,13 +350,76 @@ static void netherOreFeature(World* w, Random& random, int x, int y, int z, unsi
     }
 }
 
+// --- Ambient decoration (all biomes) --------------------------------------
+// A guaranteed light source per chunk, plus randomly-placed permanent
+// fires on floor-hill netherrack. Both look for a genuine solid-
+// netherrack-with-open-air-above spot rather than writing blindly, so
+// they never end up floating in the open gap or buried in hill rock.
+
+static void placeCeilingGlowstone(World* w, int xo, int zo, Random& random) {
+    // Applies to every biome (not just Wastes) -- per the brief, glowstone
+    // clusters on the ceiling are a blanket ambient feature of the whole
+    // Nether, not something biome-specific. Same underside-of-a-ceiling-
+    // hill search as the old Wastes-only version used.
+    int clusters = 2 + random.nextInt(3);
+    for (int i = 0; i < clusters; i++) {
+        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        // A ceiling-hill underside: air here, netherrack directly above.
+        if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
+        if (!isNetherrackFace(w, x, y + 1, z)) continue;
+        int blobSize = 3 + random.nextInt(5);
+        for (int b = 0; b < blobSize; b++) {
+            int bx = x + random.nextInt(3) - 1, bz = z + random.nextInt(3) - 1;
+            if (worldBlock(w, bx, y, bz) == BLOCK_AIR && isNetherrackFace(w, bx, y + 1, bz))
+                setBlock(w, bx, y, bz, BLOCK_GLOWSTONE);
+        }
+    }
+}
+
+static bool findFloorSurfaceSpot(World* w, int xo, int zo, Random& random, int tries, int* outX, int* outY, int* outZ) {
+    for (int t = 0; t < tries; t++) {
+        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y; y--) {
+            if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
+            if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
+            *outX = x; *outY = y + 1; *outZ = z;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void placeChunkLightSource(World* w, int xo, int zo, Random& random) {
+    int x, y, z;
+    if (findFloorSurfaceSpot(w, xo, zo, random, 8, &x, &y, &z))
+        blockPut(w, x, y, z, BLOCK_TORCH);
+    // If no valid surface spot turns up in 8 tries (a chunk that's
+    // entirely open lava sea/river with no floor hill at all), the chunk
+    // simply goes without its own torch rather than forcing one into an
+    // unsupported spot -- decorateWastes' glowstone clusters and
+    // neighboring chunks' torches still light the area.
+}
+
+static void placeAmbientFires(World* w, int xo, int zo, Random& random) {
+    // 1-3 permanent fires per chunk (infinite-burn on netherrack, see
+    // fire.cpp's infiniBurn check), scattered independently of the single
+    // light-source torch above.
+    int count = 1 + random.nextInt(3);
+    for (int i = 0; i < count; i++) {
+        int x, y, z;
+        if (!findFloorSurfaceSpot(w, xo, zo, random, 4, &x, &y, &z)) continue;
+        if (worldBlock(w, x, y, z) != BLOCK_AIR) continue; // don't stomp the torch or other decoration
+        firePlace(w, x, y, z);
+    }
+}
+
 // --- Entry point ----------------------------------------------------------
 
 void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
     int xo = cx * 16, zo = cz * 16;
 
     netherFillColumn(w, cx, cz);
-    netherCarveCaverns(w, worldSeed, cx, cz);
 
     Random random((long)(int)((unsigned int)cx * 341873128712u + (unsigned int)cz * 132897987541u + worldSeed));
 
@@ -406,6 +436,10 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
             break;
     }
 
+    placeChunkLightSource(w, xo, zo, random);
+    placeCeilingGlowstone(w, xo, zo, random);
+    placeAmbientFires(w, xo, zo, random);
+
     // Quartz veins: now uses the real BLOCK_NETHER_QUARTZ_ORE id (see
     // chunk.h/tile.cpp) instead of the first pass's BLOCK_QUARTZ_BLOCK
     // stand-in. Present in Wastes and Soul Sand Valley, matching vanilla's
@@ -413,7 +447,7 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
     if (biome == NB_WASTES || biome == NB_SOUL_SAND_VALLEY) {
         int veins = 1 + random.nextInt(3);
         for (int i = 0; i < veins; i++) {
-            int x = xo + random.nextInt(16), y = NETHER_FLOOR_Y + random.nextInt(NETHER_CEILING_Y - NETHER_FLOOR_Y), z = zo + random.nextInt(16);
+            int x = xo + random.nextInt(16), y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y), z = zo + random.nextInt(16);
             netherOreFeature(w, random, x, y, z, BLOCK_NETHER_QUARTZ_ORE, 12);
         }
     }
