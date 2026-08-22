@@ -8,6 +8,16 @@ void worldGenerateMCPE(World* w, long seed, int genMask);
 void worldGenInit(long seed, int genMask);
 void worldGenFree();
 
+// The world seed passed to the most recent worldGenInit -- exposed so
+// other generation code that isn't part of McpeGen itself (the Nether
+// generator, in particular) can derive its own independent randomness
+// from the same world seed without chunk_cache.cpp having to thread a
+// seed parameter through every reserved-region call site by hand. Same
+// value chunkGenerateTerrain already passes to caveFeature internally
+// (see g_genSeed in mcpegen.cpp); this just makes that value visible
+// outside the file too.
+long worldGenSeed();
+
 void chunkGenerateTerrain(World* w, int cx, int cz);
 
 bool chunkPostProcessPhase(World* w, int cx, int cz, int phase);

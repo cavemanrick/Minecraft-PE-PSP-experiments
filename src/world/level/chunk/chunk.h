@@ -70,6 +70,18 @@ enum { BLOCK_AIR = 0,
        BLOCK_WOOD_SLAB_DOUBLE = 157, BLOCK_WOOD_SLAB = 158,
        BLOCK_BAMBOO = 159, BLOCK_COCOA = 160, BLOCK_VINE = 161,
 
+       // Nether texture pack additions (see nether_gen.cpp for where these
+       // actually get placed during Nether generation). Ids picked from
+       // the first open run after BLOCK_VINE; nothing else in the codebase
+       // claimed 162+ yet.
+       BLOCK_SOUL_SAND = 162, BLOCK_SOUL_SOIL = 163,
+       BLOCK_NETHER_QUARTZ_ORE = 164, BLOCK_MAGMA = 165,
+       BLOCK_WARPED_NYLIUM = 166,
+       BLOCK_WARPED_WART_BLOCK = 167, BLOCK_WARPED_FUNGUS = 168,
+       BLOCK_WARPED_ROOTS = 169, BLOCK_NETHER_SPROUTS = 170,
+       BLOCK_WARPED_STEM = 171, BLOCK_WARPED_PLANKS = 172,
+       BLOCK_TWISTING_VINES = 173,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };
@@ -174,7 +186,17 @@ static inline bool isCrossShaped(unsigned char id) {
            id == BLOCK_REEDS || id == BLOCK_SAPLING ||
            id == BLOCK_WHEAT || id == BLOCK_MELON_STEM ||
            id == BLOCK_TALLGRASS || id == BLOCK_BAMBOO ||
-           id == BLOCK_COBWEB;
+           id == BLOCK_COBWEB ||
+           // Warped Forest ground decorations (see nether_gen.cpp) --
+           // all four are cutout sprite textures (verified binary 0/255
+           // alpha against the source texture packs, same convention as
+           // the flower/mushroom tiles above), not solid cube faces.
+           // Twisting vines is simplified to a static cross sprite here
+           // rather than a real climbable/growable vine column -- this
+           // codebase has no vine-growth-length system to hook it into
+           // yet, so it's decoration only for now, same as warped roots.
+           id == BLOCK_WARPED_FUNGUS || id == BLOCK_WARPED_ROOTS ||
+           id == BLOCK_NETHER_SPROUTS || id == BLOCK_TWISTING_VINES;
 }
 
 static inline bool isLeaf(unsigned char id) { return id == BLOCK_LEAVES; }

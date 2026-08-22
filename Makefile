@@ -179,7 +179,9 @@ OBJS = \
 	src/world/level/levelgen/feature_lake.o \
 	src/world/level/levelgen/feature_snow.o \
 	src/world/level/levelgen/debug_spawn_content.o \
-	src/world/level/levelgen/caves.o
+	src/world/level/levelgen/caves.o \
+	src/world/level/levelgen/nether_biome.o \
+	src/world/level/levelgen/nether_gen.o
 
 INCDIR = src
 # -MMD -MP: gcc writes a .d file next to every .o listing the headers that

@@ -115,6 +115,7 @@ Drop Tile::getResource(int data) {
         case BLOCK_ORE_EMERALD:         return { ITEM_DIAMOND, 1, 0 };
 
         case BLOCK_GLOWSTONE:           return { ITEM_GLOWSTONE_DUST, 1, 0 };
+        case BLOCK_NETHER_QUARTZ_ORE:   return { ITEM_NETHER_QUARTZ, 1, 0 };
         case BLOCK_CLAY:                return { ITEM_CLAY, 4, 0 };
         case BLOCK_BOOKSHELF:           return { ITEM_BOOK, 3, 0 };
 
@@ -386,6 +387,49 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
         case BLOCK_SNOW_BLOCK:   *col = 2; *row = 4;  break;
         case BLOCK_NETHERRACK:   *col = 7; *row = 6;  break;
         case BLOCK_GLOWSTONE:    *col = 9; *row = 6;  break;
+
+        // --- Nether texture pack additions (see nether_gen.cpp) ---
+        case BLOCK_SOUL_SAND:          *col = 8;  *row = 11; break;
+        case BLOCK_SOUL_SOIL:          *col = 9;  *row = 11; break;
+        case BLOCK_NETHER_QUARTZ_ORE:  *col = 10; *row = 11; break;
+        case BLOCK_MAGMA:              *col = 11; *row = 11; break;
+        case BLOCK_WARPED_NYLIUM:
+            // Same top/side/bottom split as BLOCK_GRASS -- warped nylium
+            // is the Nether's grass-equivalent -- except the underside is
+            // netherrack (what it actually converts from) rather than
+            // dirt, and there's no tint: the source texture is already
+            // fully colored, unlike grass's tinted-greyscale top.
+            if (f == F_TOP)       { *col = 12; *row = 11; }
+            else if (f == F_DOWN) { *col = 7;  *row = 6;  } // netherrack underside
+            else                  { *col = 13; *row = 11; }
+            break;
+        case BLOCK_WARPED_WART_BLOCK:  *col = 14; *row = 11; break;
+        case BLOCK_WARPED_FUNGUS:      *col = 15; *row = 11; break;
+        case BLOCK_WARPED_ROOTS:       *col = 7;  *row = 12; break;
+        case BLOCK_NETHER_SPROUTS:     *col = 8;  *row = 12; break;
+        case BLOCK_WARPED_STEM: {
+            // Same axis-based cap/side split as BLOCK_LOG (see that case
+            // below) but kept as its own block id rather than folded into
+            // LOG_TYPE_MASK -- that mask is only 2 bits and already fully
+            // used by oak/spruce/birch/jungle (see LOG_TYPE_MASK in
+            // chunk.h), and warped stem's cap texture isn't a ring-bark
+            // cross-section like vanilla logs anyway, so it needs its own
+            // texture slot regardless. Nether generation always places it
+            // upright (LOG_AXIS_Y, i.e. data==0), but the axis split is
+            // wired up for real in case a fallen-stem variant is added
+            // later, matching how fallen jungle logs reuse this same
+            // pattern on BLOCK_LOG.
+            int axis = (data >> LOG_AXIS_SHIFT) & LOG_AXIS_MASK;
+            bool capFace = (axis == LOG_AXIS_X) ? (f == F_LEFT || f == F_RIGHT)
+                         : (axis == LOG_AXIS_Z) ? (f == F_BACK || f == F_FORWARD)
+                         :                        (f == F_TOP  || f == F_DOWN);
+            if (capFace) { *col = 10; *row = 12; }
+            else         { *col = 9;  *row = 12; }
+            break;
+        }
+        case BLOCK_WARPED_PLANKS:      *col = 11; *row = 12; break;
+        case BLOCK_TWISTING_VINES:     *col = 7;  *row = 13; break;
+
         case BLOCK_STAIRS_NETHER_BRICK:
         case BLOCK_NETHER_BRICK: *col = 0; *row = 14; break;
         case BLOCK_WOOL: tileWool(data, f, col, row); break;
@@ -1044,6 +1088,7 @@ static int rawLightEmit(unsigned char id) {
     if (isLavaId(id) || id == BLOCK_GLOWSTONE || id == BLOCK_FIRE) return 15;
     if (id == BLOCK_TORCH) return 14;
     if (id == BLOCK_GLOWING_OBSIDIAN) return 13;
+    if (id == BLOCK_MAGMA) return 3; // matches vanilla's dim magma-block glow
 
     if (id == BLOCK_ORE_REDSTONE_LIT) return 9;
     if (id == BLOCK_FURNACE_LIT) return 13;
@@ -1087,11 +1132,19 @@ static int rawSoundType(unsigned char id) {
         case BLOCK_TORCH: case BLOCK_SIGN: case BLOCK_WALL_SIGN:
         case BLOCK_MELON: case BLOCK_MELON_STEM:
         case BLOCK_FIRE:
+        case BLOCK_WARPED_STEM: case BLOCK_WARPED_PLANKS:
 
         case BLOCK_STAIRS_PLANKS:
 
         case BLOCK_WOOD_SLAB: case BLOCK_WOOD_SLAB_DOUBLE:
             return SOUND_WOOD;
+
+        case BLOCK_WARPED_FUNGUS: case BLOCK_WARPED_ROOTS:
+        case BLOCK_NETHER_SPROUTS: case BLOCK_TWISTING_VINES:
+            return SOUND_GRASS;
+
+        case BLOCK_SOUL_SAND: case BLOCK_SOUL_SOIL:
+            return SOUND_GRAVEL;
 
         default:
             return SOUND_STONE;
@@ -1113,6 +1166,7 @@ static float rawDestroySpeed(int id) {
         case BLOCK_BRICKS: case BLOCK_MOSSY_COBBLE: case BLOCK_NETHER_BRICK:
         case BLOCK_STAIRS_PLANKS: case BLOCK_STAIRS_COBBLESTONE:
         case BLOCK_STAIRS_BRICK: case BLOCK_STAIRS_NETHER_BRICK:
+        case BLOCK_WARPED_STEM: case BLOCK_WARPED_PLANKS:
             return 2.0f;
         case BLOCK_LEAVES:
             return 0.2f;
@@ -1143,6 +1197,8 @@ static float rawDestroySpeed(int id) {
             return 0.5f;
         case BLOCK_CACTUS: case BLOCK_LADDER: case BLOCK_NETHERRACK:
             return 0.4f;
+        case BLOCK_SOUL_SAND: case BLOCK_SOUL_SOIL:
+            return 0.5f;
         case BLOCK_CHEST: case BLOCK_CRAFTING_TABLE: case BLOCK_STONECUTTER:
             return 2.5f;
         case BLOCK_FURNACE: case BLOCK_FURNACE_LIT:
@@ -1155,6 +1211,8 @@ static float rawDestroySpeed(int id) {
         case BLOCK_SAPLING: case BLOCK_TALLGRASS: case BLOCK_FLOWER: case BLOCK_ROSE:
         case BLOCK_MUSHROOM_BROWN: case BLOCK_MUSHROOM_RED: case BLOCK_TNT:
         case BLOCK_TORCH: case BLOCK_WHEAT: case BLOCK_REEDS: case BLOCK_MELON_STEM:
+        case BLOCK_WARPED_FUNGUS: case BLOCK_WARPED_ROOTS:
+        case BLOCK_NETHER_SPROUTS: case BLOCK_TWISTING_VINES:
             return 0.0f;
         default:
             return 1.0f;

@@ -418,6 +418,10 @@ void worldGenFree() {
     delete g_gen; g_gen = 0;
 }
 
+long worldGenSeed() {
+    return g_genSeed;
+}
+
 void chunkGenerateTerrain(World* w, int cx, int cz) {
     if (!g_gen) return;
 

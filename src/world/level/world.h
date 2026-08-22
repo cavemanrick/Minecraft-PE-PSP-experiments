@@ -216,6 +216,23 @@ static inline bool worldChunkIsReserved(const World* w, int cx, int cz) {
            cz >= 0 && cz < WORLD_PRESET_1024_CHUNKS;
 }
 
+// True for the subset of worldChunkIsReserved's footprint that's
+// specifically the Nether strip (as opposed to the End strip right after
+// it -- see WORLD_NETHER_ORIGIN_CX/WORLD_END_ORIGIN_CX above). Only
+// meaningful to call where worldChunkIsReserved is already known true;
+// doesn't re-check the world-size condition itself, matching how every
+// other caller in this reserved-region family already assumes its own
+// preconditions (e.g. worldChunkIsReserved itself is always checked
+// before chunkGenerateTerrain's guards read it). Lets chunk_cache.cpp
+// route only the Nether portion to the real Nether generator while the
+// End strip -- which has no generator yet -- keeps its existing
+// claimed-but-empty behavior.
+static inline bool worldChunkIsNether(const World* w, int cx, int cz) {
+    (void)w;
+    return cx >= WORLD_NETHER_ORIGIN_CX && cx < WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS &&
+           cz >= WORLD_NETHER_ORIGIN_CZ && cz < WORLD_NETHER_ORIGIN_CZ + WORLD_NETHER_CHUNKS;
+}
+
 bool worldInitTerrain(World* w, long seed, int worldType = WORLD_TYPE_OLD,
                       int sizeX = WORLD_DEFAULT_SIZE_CHUNKS, int sizeZ = WORLD_DEFAULT_SIZE_CHUNKS);
 

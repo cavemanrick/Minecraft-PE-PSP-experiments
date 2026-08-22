@@ -2,6 +2,7 @@
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 #include "world/level/levelgen/mcpegen.h"
+#include "world/level/levelgen/nether_gen.h"
 #include "world/level/storage/chunk_storage.h"
 
 #include <string.h>
@@ -171,15 +172,20 @@ void worldGetChunk(World* w, int cx, int cz) {
 
             worldSlot(w, cx, cz)->terrainPopulated = populated;
         } else if (worldChunkIsReserved(w, cx, cz)) {
-            // Reserved Nether/End space (1024 preset only) -- claim the
-            // chunk (marks it resident/ready so callers don't spin
-            // retrying) but skip real terrain generation entirely. Stays
-            // empty air until an actual Nether/End generator exists;
-            // that's a separate, not-yet-built piece. Without this guard,
-            // ANY caller reaching a reserved coordinate -- not just the
-            // pre-gen sweep, which already avoids this range structurally
-            // -- would fall through to chunkGenerateTerrain below and
-            // silently pollute reserved space with real overworld terrain.
+            // Reserved Nether/End space (1024 preset only). The Nether
+            // strip (WORLD_NETHER_ORIGIN_CX/CZ..+WORLD_NETHER_CHUNKS) now
+            // gets real terrain via chunkGenerateNether; the End strip
+            // past it still has no generator, so it's left as claimed-but-
+            // empty air exactly as before. Without the worldChunkIsReserved
+            // guard here, ANY caller reaching a reserved coordinate -- not
+            // just the pre-gen sweep, which already avoids this range
+            // structurally -- would fall through to chunkGenerateTerrain
+            // below and silently pollute reserved space with overworld
+            // terrain, so the guard stays even though the Nether half of
+            // it now does real work instead of a no-op.
+            profBegin(PROF_SGEN);
+            if (worldChunkIsNether(w, cx, cz)) chunkGenerateNether(w, worldGenSeed(), cx, cz);
+            profEnd(PROF_SGEN);
             worldSlot(w, cx, cz)->terrainPopulated = true;
         } else {
             profBegin(PROF_SGEN);
@@ -211,9 +217,15 @@ static int genWorker(SceSize, void*) {
         // Same reserved-region guard as worldGetChunk -- this background
         // worker is the async path worldStream uses for live gameplay
         // streaming, a genuinely different call site that would otherwise
-        // bypass the guard there entirely.
-        if (!worldChunkIsReserved(s_genWorld, g_jobX, g_jobZ))
+        // bypass the guard there entirely. Mirrors worldGetChunk's own
+        // Nether/End split: real generation for the Nether strip, still a
+        // no-op for the End strip past it.
+        if (worldChunkIsReserved(s_genWorld, g_jobX, g_jobZ)) {
+            if (worldChunkIsNether(s_genWorld, g_jobX, g_jobZ))
+                chunkGenerateNether(s_genWorld, worldGenSeed(), g_jobX, g_jobZ);
+        } else {
             chunkGenerateTerrain(s_genWorld, g_jobX, g_jobZ);
+        }
         g_jobPending = false;
         g_jobDone = true;
     }
@@ -317,10 +329,14 @@ int worldStream(World* w, float px, float pz, int budgetMs) {
         if (s_workerThid < 0) {
             GenScope gen(w);
             profBegin(PROF_SGEN);
-            if (worldChunkIsReserved(w, bestX, bestZ))
-                worldSlot(w, bestX, bestZ)->terrainPopulated = true; // see worldGetChunk's identical guard
-            else
+            if (worldChunkIsReserved(w, bestX, bestZ)) {
+                // see worldGetChunk's identical Nether/End split
+                if (worldChunkIsNether(w, bestX, bestZ))
+                    chunkGenerateNether(w, worldGenSeed(), bestX, bestZ);
+                worldSlot(w, bestX, bestZ)->terrainPopulated = true;
+            } else {
                 chunkGenerateTerrain(w, bestX, bestZ);
+            }
             profEnd(PROF_SGEN);
             finishBegin(w, bestX, bestZ);
             return brought;
