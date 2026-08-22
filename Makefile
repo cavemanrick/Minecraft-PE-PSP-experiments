@@ -43,6 +43,7 @@ OBJS = \
 	src/world/level/tile/entity/furnace_tile_entity.o \
 	src/world/level/tile/entity/reactor_tile_entity.o \
 	src/world/level/tile/nether_reactor_pattern.o \
+	src/world/level/tile/nether_portal.o \
 	src/client/gui/screens/screen_sign.o \
 	src/gpu/gu.o \
 	src/gpu/texture.o \

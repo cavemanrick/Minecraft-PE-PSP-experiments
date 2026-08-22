@@ -50,6 +50,27 @@ public:
     bool hasRespawnPosition() const { return respawnY >= 0; }
     void setRespawnPosition(int x, int y, int z) { respawnX = x; respawnY = y; respawnZ = z; }
 
+    // Where to send this player back to when they use the Nether-side
+    // portal to return -- the Overworld position/facing they had at the
+    // moment they last entered a portal going the other way. Saved/loaded
+    // through the same Player NBT compound as bed/respawn position (see
+    // buildPlayerTag/level_storage.cpp) rather than living only in memory
+    // (see nether_portal.cpp's earlier in-memory-only version), so it
+    // survives a save/quit/reload the same way bed and respawn position
+    // already do. netherReturnY < 0 means "none recorded yet", same
+    // sentinel convention as hasRespawnPosition() above -- a player who's
+    // never used a portal has no return position, and hasNetherReturnPosition()
+    // simply mirrors hasRespawnPosition()'s own -1-means-unset check
+    // exactly rather than introducing a second, different convention for
+    // what is otherwise the same shape of "optional saved position" data.
+    float netherReturnX, netherReturnY, netherReturnZ;
+    float netherReturnYRot, netherReturnXRot;
+    bool hasNetherReturnPosition() const { return netherReturnY >= 0.0f; }
+    void setNetherReturnPosition(float x, float y, float z, float yRot, float xRot) {
+        netherReturnX = x; netherReturnY = y; netherReturnZ = z;
+        netherReturnYRot = yRot; netherReturnXRot = xRot;
+    }
+
     bool isSleeping() const { return sleeping; }
     bool isSleepingLongEnough() const { return sleeping && sleepCounter >= SLEEP_DURATION; }
     int  startSleepInBed(int x, int y, int z);

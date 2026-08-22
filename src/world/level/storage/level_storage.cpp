@@ -123,6 +123,14 @@ static CompoundTag* buildPlayerTag(World* w) {
     p->putInt("SpawnY", g_level.player->respawnY);
     p->putInt("SpawnZ", g_level.player->respawnZ);
 
+    if (g_level.player->hasNetherReturnPosition()) {
+        p->put("NetherReturnPos", floatList(g_level.player->netherReturnX,
+                                            g_level.player->netherReturnY,
+                                            g_level.player->netherReturnZ));
+        p->put("NetherReturnRotation", floatList(g_level.player->netherReturnYRot,
+                                                  g_level.player->netherReturnXRot));
+    }
+
     ListTag* inv = new ListTag();
     if (g_level.player->inventory->isCreative()) {
         for (int i = 0; i < Inventory::HOTBAR; i++) {
@@ -301,6 +309,25 @@ static void loadLevelDat(World* w, const char* absDir, long* outSeed, int* outGa
                         g_level.player->setRespawnPosition(p->getInt("SpawnX"),
                                                            p->getInt("SpawnY"),
                                                            p->getInt("SpawnZ"));
+
+                    if (p->contains("NetherReturnPos")) {
+                        ListTag* nrp = p->getList("NetherReturnPos");
+                        ListTag* nrr = p->getList("NetherReturnRotation");
+                        if (nrp->size() >= 3) {
+                            float rx = nrp->getFloat(0), ry = nrp->getFloat(1), rz = nrp->getFloat(2);
+                            // getList never returns null (see CompoundTag::getList --
+                            // it lazily creates an empty list for a missing key), so
+                            // this just checks size rather than null-checking nrr.
+                            float ryr = (nrr->size() >= 2) ? nrr->getFloat(0) : 0.0f;
+                            float rxr = (nrr->size() >= 2) ? nrr->getFloat(1) : 0.0f;
+                            // Same NaN/negative-Y sanity guard buildPlayerTag/load
+                            // already applies to the player's own Pos above --
+                            // a corrupted or hand-edited save shouldn't be able to
+                            // set hasNetherReturnPosition() true with garbage data.
+                            if (rx == rx && ry == ry && rz == rz && ry >= 0.0f)
+                                g_level.player->setNetherReturnPosition(rx, ry, rz, ryr, rxr);
+                        }
+                    }
 
                     g_loadedSurvival = (outGameType && *outGameType != 1);
                     ListTag* inv = p->getList("Inventory");

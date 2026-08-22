@@ -4,6 +4,7 @@
 #include "world/level/tile/tile.h"
 #include "world/level/tile/tile_behavior.h"
 #include "world/level/tile/fire.h"
+#include "world/level/tile/nether_portal.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 #include "world/level/level.h"
@@ -175,6 +176,22 @@ bool FlintAndSteelItem::useOn(ItemInstance*, Player* player, World* w, int x, in
         worldPrimeTnt(w, x, y, z, 80);
         if (player) player->inventory->hurtSelected(1);
         return true;
+    }
+    // Portal ignition: only even attempted when the clicked block is
+    // obsidian (matches vanilla -- flint and steel on a random air block
+    // shouldn't scan the whole world for a frame). netherPortalTryIgnite
+    // itself does the real frame-shape validation and returns false if
+    // (x,y,z) isn't actually part of a complete, valid frame; falling
+    // through to normal fire placement below on failure, same as vanilla
+    // does (clicking obsidian that ISN'T part of a portal just does
+    // nothing, since obsidian isn't flammable and fireMayPlace will
+    // reject it).
+    if (worldBlock(w, x, y, z) == BLOCK_OBSIDIAN) {
+        if (netherPortalTryIgnite(w, x, y, z)) {
+            g_level.playSound(x + 0.5f, y + 0.5f, z + 0.5f, "fire.ignite", 1.0f, 1.0f);
+            if (player) player->inventory->hurtSelected(1);
+            return true;
+        }
     }
     int fx = x + kFaceNeighbor[face][0];
     int fy = y + kFaceNeighbor[face][1];

@@ -19,6 +19,7 @@
 #include "world/level/tile/entity/reactor_tile_entity.h"
 #include "world/level/tile/nether_reactor_pattern.h"
 #include "world/level/tile/redstone_ore.h"
+#include "world/level/tile/nether_portal.h"
 #include "world/level/tile/fire.h"
 #include "client/gamemode/gamemode.h"
 #include <stdlib.h>
@@ -321,7 +322,7 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             *tint = (age >= 2) ? 0xFFFFFFFFu : 0xFFB0B0B0u;
             break;
         }
-        case BLOCK_VINE:           *col = 12; *row = 10; *tint = 0xFF3E8A28u; break;
+        case BLOCK_VINE:           *col = 15; *row = 8; *tint = 0xFF3E8A28u; break;
         case BLOCK_FIRE:           *col = 15; *row = 1; break;
         case BLOCK_FLOWER:         *col = 13; *row = 0; break;
         case BLOCK_ROSE:           *col = 12; *row = 0; break;
@@ -429,6 +430,7 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
         }
         case BLOCK_WARPED_PLANKS:      *col = 11; *row = 12; break;
         case BLOCK_TWISTING_VINES:     *col = 7;  *row = 13; break;
+        case BLOCK_PORTAL:             *col = 8;  *row = 13; break;
 
         case BLOCK_STAIRS_NETHER_BRICK:
         case BLOCK_NETHER_BRICK: *col = 0; *row = 14; break;
@@ -837,6 +839,9 @@ struct FireTile : Tile { FireTile(unsigned char i) : Tile(i) {}
 struct WebTile : Tile { WebTile(unsigned char i) : Tile(i) {}
     void entityInside(World*, int, int, int, Entity* e) { if (e) e->makeStuckInWeb(); } };
 
+struct PortalTile : Tile { PortalTile(unsigned char i) : Tile(i) {}
+    void entityInside(World* w, int x, int y, int z, Entity* e) { netherPortalEntityInside(w, x, y, z, e); } };
+
 struct SupportTile : Tile { SupportTile(unsigned char i) : Tile(i) {}
     bool canSurvive(World* w, int x, int y, int z) { return supportCanSurvive(w, id, x, y, z, -1); }
     bool mayPlace(World* w, int x, int y, int z, int face) {
@@ -1040,6 +1045,7 @@ static bool rawSolidPhys(unsigned char id) {
     if (id == BLOCK_FIRE) return false;
     if (isSign(id)) return false;
     if (id == BLOCK_LADDER) return false;
+    if (id == BLOCK_PORTAL) return false; // walk straight through, same as a ladder/vine
     return true;
 }
 static bool rawCube(unsigned char id) {
@@ -1055,6 +1061,7 @@ static bool rawCube(unsigned char id) {
     if (id == BLOCK_CHEST) return false;
     if (id == BLOCK_CAKE) return false;
     if (id == BLOCK_COCOA) return false;
+    if (id == BLOCK_PORTAL) return false; // thin/see-through, not a full cube face
     return true;
 }
 static bool rawOpaque(unsigned char id) {
@@ -1063,7 +1070,8 @@ static bool rawOpaque(unsigned char id) {
            !isCrossShaped(id) && id != BLOCK_CACTUS && id != BLOCK_TOPSNOW && id != BLOCK_REEDS &&
            !isSlab(id) && !isStairs(id) && id != BLOCK_FENCE && id != BLOCK_LADDER && id != BLOCK_TORCH &&
            !isDoor(id) && !isTrapdoor(id) && !isFenceGate(id) && !isBed(id) && id != BLOCK_FARMLAND &&
-           id != BLOCK_CHEST && !isSign(id) && id != BLOCK_FIRE && id != BLOCK_CAKE && id != BLOCK_COCOA;
+           id != BLOCK_CHEST && !isSign(id) && id != BLOCK_FIRE && id != BLOCK_CAKE && id != BLOCK_COCOA &&
+           id != BLOCK_PORTAL;
 }
 static bool rawReplaceable(unsigned char id) {
 
@@ -1081,7 +1089,8 @@ static int rawLightOpacity(unsigned char id) {
         isFence(id) || isStairs(id) || isSlab(id) || isDoor(id) ||
         isTrapdoor(id) || isFenceGate(id) || id == BLOCK_LADDER || id == BLOCK_TORCH || isBed(id) ||
         id == BLOCK_FARMLAND || isSign(id) || id == BLOCK_FIRE ||
-        id == BLOCK_CHEST || id == BLOCK_CAKE || id == BLOCK_COCOA) return 0;
+        id == BLOCK_CHEST || id == BLOCK_CAKE || id == BLOCK_COCOA ||
+        id == BLOCK_PORTAL) return 0;
     return 15;
 }
 static int rawLightEmit(unsigned char id) {
@@ -1089,6 +1098,7 @@ static int rawLightEmit(unsigned char id) {
     if (id == BLOCK_TORCH) return 14;
     if (id == BLOCK_GLOWING_OBSIDIAN) return 13;
     if (id == BLOCK_MAGMA) return 3; // matches vanilla's dim magma-block glow
+    if (id == BLOCK_PORTAL) return 11; // matches vanilla's portal glow
 
     if (id == BLOCK_ORE_REDSTONE_LIT) return 9;
     if (id == BLOCK_FURNACE_LIT) return 13;
@@ -1207,6 +1217,8 @@ static float rawDestroySpeed(int id) {
             return 1.0f;
         case BLOCK_BEDROCK: case BLOCK_INVISIBLE_BEDROCK:
             return -1.0f;
+        case BLOCK_PORTAL:
+            return -1.0f; // unbreakable, same as bedrock -- matches vanilla
 
         case BLOCK_SAPLING: case BLOCK_TALLGRASS: case BLOCK_FLOWER: case BLOCK_ROSE:
         case BLOCK_MUSHROOM_BROWN: case BLOCK_MUSHROOM_RED: case BLOCK_TNT:
@@ -1261,6 +1273,7 @@ static Tile* makeTile(unsigned char id) {
         case BLOCK_BAMBOO:   return new BambooTile(id);
         case BLOCK_VINE:     return new VineTile(id);
         case BLOCK_COCOA:    return new CocoaTile(id);
+        case BLOCK_PORTAL:   return new PortalTile(id);
         case BLOCK_FLOWER: case BLOCK_ROSE: case BLOCK_SAPLING:
         case BLOCK_WHEAT: case BLOCK_MELON_STEM: case BLOCK_TALLGRASS:
         case BLOCK_MUSHROOM_BROWN: case BLOCK_MUSHROOM_RED:

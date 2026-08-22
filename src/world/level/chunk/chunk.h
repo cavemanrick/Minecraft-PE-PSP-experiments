@@ -82,6 +82,13 @@ enum { BLOCK_AIR = 0,
        BLOCK_WARPED_STEM = 171, BLOCK_WARPED_PLANKS = 172,
        BLOCK_TWISTING_VINES = 173,
 
+       // The portal block itself -- fills the frame's interior once lit,
+       // non-solid (walk straight through it, same as water/ladder), and
+       // BLOCK_PORTAL's own entityInside override (see tile.cpp) is what
+       // actually triggers a teleport. Not cube-shaped for the same reason
+       // BLOCK_VINE/BLOCK_LADDER aren't -- see rawCube in tile.cpp.
+       BLOCK_PORTAL = 174,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };

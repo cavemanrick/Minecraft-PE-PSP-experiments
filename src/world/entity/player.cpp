@@ -13,6 +13,8 @@ Player::Player(Level* level)
       bob(0), oBob(0), tilt(0), oTilt(0), bowPull(0), bowTimeHeld(0),
       eatAnim(0), sleeping(false), sleepCounter(0), bedX(0), bedY(0), bedZ(0),
       respawnX(0), respawnY(-1), respawnZ(0),
+      netherReturnX(0), netherReturnY(-1), netherReturnZ(0),
+      netherReturnYRot(0), netherReturnXRot(0),
       score(0) {}
 
 Player::~Player() { delete inventory; }
