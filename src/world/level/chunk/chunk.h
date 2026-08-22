@@ -37,6 +37,13 @@ enum { BLOCK_AIR = 0,
        BLOCK_BRICKS = 45, BLOCK_TNT = 46, BLOCK_BOOKSHELF = 47,
        BLOCK_MOSSY_COBBLE = 48, BLOCK_OBSIDIAN = 49, BLOCK_TORCH = 50,
        BLOCK_FIRE = 51,
+       // Solid huge-mushroom cap/stem blocks -- distinct from the small
+       // single-block decorative BLOCK_MUSHROOM_BROWN/RED above (39/40),
+       // which are non-solid (see isSolidGen) and can't form a walkable
+       // multi-block cap. Slots 52 and 55 were free/unused. See tile.cpp
+       // for the actual texture/tint wiring (getTexture) and
+       // HUGE_MUSHROOM_RED_BIT below for the cap's red/brown data bit.
+       BLOCK_HUGE_MUSHROOM_CAP = 52, BLOCK_HUGE_MUSHROOM_STEM = 55,
        BLOCK_STAIRS_PLANKS = 53, BLOCK_CHEST = 54,
        BLOCK_ORE_EMERALD = 56,
        BLOCK_DIAMOND_BLOCK = 57, BLOCK_CRAFTING_TABLE = 58,
@@ -212,7 +219,16 @@ static inline bool isWool(unsigned char id) { return id == BLOCK_WOOL; }
 static inline bool isGlass(unsigned char id) { return id == BLOCK_GLASS; }
 
 enum { LEAF_TYPE_MASK = 3, LEAF_OAK = 0, LEAF_SPRUCE = 1, LEAF_BIRCH = 2, LEAF_JUNGLE = 3,
-       LEAF_UPDATE_BIT = 4, LEAF_PERSISTENT_BIT = 8 };
+       LEAF_UPDATE_BIT = 4, LEAF_PERSISTENT_BIT = 8,
+       // Dark oak leaves are still LEAF_OAK for every non-render purpose
+       // (decay, drops, tool logic, etc.) -- this bit only tells the
+       // renderer to use a darker tint. Bits 4-7 were previously unused,
+       // so this doesn't collide with LEAF_UPDATE_BIT/LEAF_PERSISTENT_BIT.
+       LEAF_DARK_TINT_BIT = 16 };
+
+// BLOCK_HUGE_MUSHROOM_CAP data bit: which skin texture to use. Set means
+// the red spotted-cap variant; unset means the brown pored-cap variant.
+enum { HUGE_MUSHROOM_RED_BIT = 1 };
 
 static inline bool isOpaque(unsigned char id) { return Tile::tiles[id]->opaque; }
 

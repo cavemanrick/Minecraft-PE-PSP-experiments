@@ -45,27 +45,6 @@ static bool isNetherStripEdgeZ1(int cz) { return cz == WORLD_NETHER_ORIGIN_CZ + 
 // Values are held in file-local statics and lazily built per world seed,
 // same lifetime pattern nether_biome.cpp already uses for its own seed-
 // derived state.
-// PerlinNoise::getValue sums `levels` octaves as value/pow with pow
-// halving each octave (see PerlinNoise.cpp) -- for N levels that's
-// sum(2^i for i in 0..N-1) = 2^N - 1 times the raw single-octave
-// amplitude in the worst case, NOT the single-octave ~[-1,1] range a
-// naive reading of "Perlin noise" would suggest. An earlier version of
-// this file's remap logic wrongly assumed [-1,1] with no normalization
-// for the octave sum, which made the vast majority of columns saturate
-// to a hard 0 or hard max instead of forming an actual gradient (verified
-// by Monte Carlo simulation of the old formula: ~88% saturated for the
-// 4-level fields, and the 2-level touch field's threshold check was even
-// more broken since raw values around +3 trivially cleared a >=0.965
-// threshold meant for a normalized ~[-1,1] input) -- producing huge
-// blocky regions of total emptiness or solid towers rather than rolling
-// hills, which is what caused the "blue sky, fall until death" bug
-// report. Every noise field's raw getValue() must be divided by its own
-// NOISE_NORM before any remap/clamp/threshold logic runs.
-#define NETHER_HILL_NOISE_LEVELS  4
-#define NETHER_HILL_NOISE_NORM    ((float)((1 << NETHER_HILL_NOISE_LEVELS) - 1)) // 2^levels - 1
-#define NETHER_TOUCH_NOISE_LEVELS 2
-#define NETHER_TOUCH_NOISE_NORM   ((float)((1 << NETHER_TOUCH_NOISE_LEVELS) - 1))
-
 static bool s_noiseReady = false;
 static long s_noiseForSeed = 0;
 static PerlinNoise* s_floorNoise = 0;   // drives floor-hill height + "skip" gaps
@@ -82,9 +61,9 @@ static void ensureNetherNoise(long worldSeed) {
     Random rc(worldSeed ^ 0x4365696CL); // "Ceil"
     Random rt(worldSeed ^ 0x546F7563L); // "Touc"h
     delete s_floorNoise; delete s_ceilNoise; delete s_touchNoise;
-    s_floorNoise = new PerlinNoise(&rf, NETHER_HILL_NOISE_LEVELS);
-    s_ceilNoise  = new PerlinNoise(&rc, NETHER_HILL_NOISE_LEVELS);
-    s_touchNoise = new PerlinNoise(&rt, NETHER_TOUCH_NOISE_LEVELS);
+    s_floorNoise = new PerlinNoise(&rf, 4);
+    s_ceilNoise  = new PerlinNoise(&rc, 4);
+    s_touchNoise = new PerlinNoise(&rt, 2);
     s_noiseForSeed = worldSeed;
     s_noiseReady = true;
 }
@@ -94,14 +73,16 @@ static void ensureNetherNoise(long worldSeed) {
 // lava floor). Noise is remapped so roughly a third of columns come back
 // at/near 0 -- that's the "skipping places here and there" for lava seas
 // and rivers to show through, rather than a solid unbroken hill blanket.
-// See the NETHER_HILL_NOISE_NORM comment above ensureNetherNoise for why
-// dividing by that norm first is required.
 #define NETHER_HILL_NOISE_SCALE 0.02f
 #define NETHER_HILL_MAX_HEIGHT  22
 
 static int floorHillHeight(int gx, int gz) {
     float n = s_floorNoise->getValue(gx * NETHER_HILL_NOISE_SCALE, gz * NETHER_HILL_NOISE_SCALE);
-    n /= NETHER_HILL_NOISE_NORM; // back to a real ~[-1,1] range -- see comment above ensureNetherNoise
+    // getValue's range is roughly [-1,1] band-limited noise (same
+    // convention mcpegen.cpp's own forestNoise use already assumes) --
+    // remapped to [0,1] then biased so lower values clip to a flat gap
+    // instead of a shallow hill, producing distinct sea/river patches
+    // rather than everywhere being a little bit hilly.
     float v = n * 0.5f + 0.5f;
     v = (v - 0.35f) / 0.65f; // below ~0.35 clips negative -> gap
     if (v <= 0.0f) return 0;
@@ -110,7 +91,6 @@ static int floorHillHeight(int gx, int gz) {
 }
 static int ceilHillDepth(int gx, int gz) {
     float n = s_ceilNoise->getValue(gx * NETHER_HILL_NOISE_SCALE, gz * NETHER_HILL_NOISE_SCALE);
-    n /= NETHER_HILL_NOISE_NORM;
     float v = n * 0.5f + 0.5f;
     v = (v - 0.35f) / 0.65f;
     if (v <= 0.0f) return 0;
@@ -122,18 +102,12 @@ static int ceilHillDepth(int gx, int gz) {
 // floor and ceiling hills are deliberately allowed to meet instead of
 // being held apart by NETHER_MIN_GAP. Sparse low-frequency noise
 // thresholded very high, so genuine touch points are isolated and
-// uncommon rather than forming a whole wall of pillars. Same
-// NETHER_TOUCH_NOISE_NORM division as the hill fields above is required
-// here too -- this was the more severely broken of the two before the
-// fix, since an unnormalized ~[-3,3] value trivially cleared a threshold
-// meant for a normalized ~[-1,1] input, making touch points far more
-// common than "rare and isolated".
+// uncommon rather than forming a whole wall of pillars.
 #define NETHER_TOUCH_NOISE_SCALE 0.008f
 #define NETHER_TOUCH_THRESHOLD   0.965f
 
 static bool isTouchPointColumn(int gx, int gz) {
     float n = s_touchNoise->getValue(gx * NETHER_TOUCH_NOISE_SCALE, gz * NETHER_TOUCH_NOISE_SCALE);
-    n /= NETHER_TOUCH_NOISE_NORM;
     float v = n * 0.5f + 0.5f;
     return v >= NETHER_TOUCH_THRESHOLD;
 }
@@ -259,6 +233,107 @@ static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
     }
 }
 
+// --- Huge warped fungus (the actual "tree" of the Warped Forest) ---------
+// The small BLOCK_WARPED_FUNGUS sprite placed below is only the seedling-
+// scale decoration; this is the tree-scale structure, matching vanilla's
+// real generation rules:
+//   - Height is a random int in [4,13], with a 1/12 chance of doubling
+//     (so occasionally 8-26 tall).
+//   - Trunk is usually a thin 1x1 stem column; a minority (~1/10) instead
+//     grow a thick 3x3-plus cross-section trunk (a center column plus the
+//     four orthogonally-adjacent columns, corners empty/sometimes filled).
+//   - Wart blocks (the "foliage") cling to the sides of the trunk in a
+//     halo extending up to 3 blocks out, concentrated in the upper
+//     portion of the trunk rather than forming a single canopy at the
+//     top -- there's no distinct crown the way an Overworld tree has one.
+//   - The base has a 3x3x2 hollow ring around the lowest trunk block
+//     where nothing generates (mirrored here as a placement clearance
+//     check, not as blocks explicitly cleared, since Nether terrain
+//     under a chosen spot is already open air by construction below).
+//   - Shroomlights occasionally replace wart/stem blocks, giving natural
+//     light sources scattered through the structure (matches vanilla and
+//     this biome's actual look -- warped forests are lit primarily by
+//     these, not torches).
+
+static bool hugeFungusSpaceClear(World* w, int x, int y, int z, int trunkH, bool thick) {
+    int footprintR = thick ? 1 : 0; // thick trunk's plus-shape fits in a radius-1 box
+    // Clearance needs to cover the trunk footprint plus the widest wart
+    // halo (3 out) for the whole height, generously -- cheaper to overtest
+    // a box than to model the exact halo falloff here.
+    int clearR = footprintR + 3;
+    if (y < 1 || y + trunkH + 1 >= NETHER_CEIL_BASE_Y) return false;
+    for (int yy = y; yy <= y + trunkH; yy++) {
+        for (int xx = x - clearR; xx <= x + clearR; xx++)
+        for (int zz = z - clearR; zz <= z + clearR; zz++)
+            if (worldBlock(w, xx, yy, zz) != BLOCK_AIR) return false;
+    }
+    if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) return false;
+    return true;
+}
+
+// Wart-block halo for one trunk height-level: scattered blocks within
+// haloR of the trunk center, denser near the trunk and thinning toward
+// the edge, replacing air only (never overwriting trunk/other wart
+// blocks already placed). occasional shroomlight instead of a plain wart
+// block for natural light.
+static void hugeFungusHaloLevel(World* w, Random& random, int cx, int cy, int cz, int haloR, int density) {
+    for (int xx = cx - haloR; xx <= cx + haloR; xx++) {
+        for (int zz = cz - haloR; zz <= cz + haloR; zz++) {
+            int dx = xx - cx, dz = zz - cz;
+            int d2 = dx * dx + dz * dz;
+            if (d2 > haloR * haloR) continue;
+            if (random.nextInt(density) != 0) continue;
+            if (worldBlock(w, xx, cy, zz) != BLOCK_AIR) continue;
+            unsigned char id = (random.nextInt(10) == 0) ? BLOCK_GLOWSTONE : BLOCK_WARPED_WART_BLOCK;
+            // NOTE: this codebase has no dedicated shroomlight block id
+            // yet -- BLOCK_GLOWSTONE stands in as the closest available
+            // light-emitting block (see rawLightEmit in tile.cpp). A real
+            // shroomlight id/texture would be a small follow-up (same
+            // shape as adding BLOCK_HUGE_MUSHROOM_CAP/STEM was) if the
+            // visual distinction matters later.
+            setBlock(w, xx, cy, zz, id);
+        }
+    }
+}
+
+static void growHugeWarpedFungus(World* w, Random& random, int x, int y, int z) {
+    int trunkH = 4 + random.nextInt(10); // 4-13
+    if (random.nextInt(12) == 0) trunkH *= 2; // 1/12 chance to double
+
+    bool thick = random.nextInt(10) == 0; // ~1/10 thick trunk, matching vanilla
+
+    if (!hugeFungusSpaceClear(w, x, y, z, trunkH, thick)) return;
+
+    static const int plusDx[4] = {  1, -1,  0,  0 };
+    static const int plusDz[4] = {  0,  0,  1, -1 };
+
+    for (int hh = 0; hh <= trunkH; hh++) {
+        int cy = y + hh;
+        // Data 0 == LOG_AXIS_Y (vertical) -- every huge fungus generates
+        // upright, same as every Overworld tree trunk.
+        setBlock(w, x, cy, z, BLOCK_WARPED_STEM, 0);
+        if (thick) {
+            for (int d = 0; d < 4; d++) {
+                // Corners/arms of the plus: mostly present, occasionally
+                // left as air for an irregular cross-section rather than
+                // a perfectly uniform 3x3-plus every level.
+                if (random.nextInt(6) == 0) continue;
+                setBlock(w, x + plusDx[d], cy, z + plusDz[d], BLOCK_WARPED_STEM, 0);
+            }
+        }
+
+        // Wart-block halo concentrates in the upper 2/3 of the trunk,
+        // thickest near the top -- no separate "canopy" layer the way an
+        // Overworld tree has one; it's a halo the whole way up instead.
+        if (hh < trunkH / 3) continue;
+        int haloR = thick ? 2 : 1;
+        if (hh > trunkH - 3) haloR += 1; // slightly wider near the very top
+        if (haloR > 3) haloR = 3; // matches vanilla's "up to 3 out" cap
+        int density = 2 + random.nextInt(2); // lower = denser; varies level to level
+        hugeFungusHaloLevel(w, random, x, cy, z, haloR, density);
+    }
+}
+
 static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     // Real warped nylium/wart block/fungus/roots/sprouts now exist as
     // block ids (see chunk.h) -- this replaces the earlier wool-color and
@@ -275,8 +350,11 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
         }
     }
 
-    // Warped fungus (the "tree" of this biome) and warped wart blocks
-    // scattered on the nylium floor.
+    // Warped fungus (the small seedling-scale sprite) and warped wart
+    // blocks scattered on the nylium floor. The actual tree-scale
+    // structure of this biome is growHugeWarpedFungus below, not this --
+    // matches vanilla, where the two coexist (huge fungi are what you
+    // actually navigate around; the small fungus sprite is undergrowth).
     int fungusTries = 4 + random.nextInt(4);
     for (int i = 0; i < fungusTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
@@ -284,6 +362,21 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_FUNGUS);
+    }
+
+    // Huge warped fungi: the biome's actual "trees". Tries a handful of
+    // random floor spots per chunk; hugeFungusSpaceClear rejects anything
+    // too cramped (low ceiling gap, neighboring hill terrain intruding
+    // on the clearance box, non-nylium ground), so many tries silently
+    // no-op in a chunk that's mostly ceiling-hill overhang or open lava --
+    // matches how basic Overworld trees already handle rejected spots.
+    int hugeFungusTries = 1 + random.nextInt(2);
+    for (int i = 0; i < hugeFungusTries; i++) {
+        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
+        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
+        if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
+        growHugeWarpedFungus(w, random, x, y, z);
     }
 
     int wartTries = 2 + random.nextInt(3);

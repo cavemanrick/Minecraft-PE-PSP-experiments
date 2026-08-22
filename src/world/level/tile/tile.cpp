@@ -277,6 +277,22 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             break;
         }
         case BLOCK_CLAY:      *col = 8; *row = 4;  break;
+        case BLOCK_HUGE_MUSHROOM_CAP:
+            // data bit 0 selects red vs. brown skin texture -- confirmed
+            // against the actual atlas: red spotted skin sits at (13,7),
+            // brown pored skin at (14,7). Every face uses the same skin
+            // texture for now (no separate inward-pore/outward-skin split
+            // per face yet -- vanilla varies this per block position via
+            // its own metadata table, which isn't modeled here).
+            if (data & HUGE_MUSHROOM_RED_BIT) { *col = 13; *row = 7; }
+            else                              { *col = 14; *row = 7; }
+            break;
+        case BLOCK_HUGE_MUSHROOM_STEM:
+            // Best candidate found in the atlas for the pale stem/pore
+            // texture -- worth a visual sanity check in-game, since this
+            // wasn't as unambiguous a match as the two cap textures were.
+            *col = 13; *row = 8;
+            break;
         case BLOCK_LOG: {
             int axis = (data >> LOG_AXIS_SHIFT) & LOG_AXIS_MASK;
             // Ring-cap faces depend on which axis the log lies along;
@@ -300,7 +316,14 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
                 case LEAF_SPRUCE: *col = 4; *row = 8; *tint = 0xFF2BAE3Du; break;
                 case LEAF_BIRCH:  *col = 4; *row = 3; *tint = 0xFF55A780u; break;
                 case LEAF_JUNGLE: *col = 4; *row = 3; *tint = 0xFF2AB01Du; break;
-                default:          *col = 4; *row = 3; *tint = 0xFF18B548u; break;
+                default:
+                    // Plain oak leaves, except dark oak trees set
+                    // LEAF_DARK_TINT_BIT to get a noticeably darker,
+                    // more muted green than regular oak -- same texture
+                    // and leaf type in every other respect.
+                    *col = 4; *row = 3;
+                    *tint = (data & LEAF_DARK_TINT_BIT) ? 0xFF1F6B2Eu : 0xFF18B548u;
+                    break;
             }
             break;
         case BLOCK_COBWEB:         *col = 11; *row = 0; break;
@@ -1148,6 +1171,9 @@ static int rawSoundType(unsigned char id) {
 
         case BLOCK_WOOD_SLAB: case BLOCK_WOOD_SLAB_DOUBLE:
             return SOUND_WOOD;
+
+        case BLOCK_HUGE_MUSHROOM_CAP: case BLOCK_HUGE_MUSHROOM_STEM:
+            return SOUND_WOOD; // matches vanilla's mushroom-block footstep/break sound
 
         case BLOCK_WARPED_FUNGUS: case BLOCK_WARPED_ROOTS:
         case BLOCK_NETHER_SPROUTS: case BLOCK_TWISTING_VINES:

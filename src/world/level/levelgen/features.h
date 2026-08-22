@@ -47,8 +47,18 @@ void treeBirch(World* w, Random& random, int x, int y, int z);
 void treeSpruce(World* w, Random& random, int x, int y, int z);
 void treePine(World* w, Random& random, int x, int y, int z);
 void treeJungle(World* w, Random& random, int x, int y, int z);
+void treeDarkOak(World* w, Random& random, int x, int y, int z);
 void flowerFeature(World* w, Random& random, int x, int y, int z, unsigned char tile, unsigned char data = 0);
 void mushroomFeature(World* w, Random& random, int x, int y, int z, unsigned char tile);
+
+// Huge mushrooms (mushroom-forest / mushroom-fields / dark-forest style
+// biomes). Brown: flat 7x7 plate cap, corners clipped, stem fully hidden
+// beneath it. Red: hollow box of walls standing off around the stem,
+// partway down only, topped with a slightly rounded roof. Both use
+// BLOCK_HUGE_MUSHROOM_CAP/STEM (see chunk.h) -- placement/biome choice is
+// left entirely to the caller, same as every treeXxx function.
+void mushroomHugeBrown(World* w, Random& random, int x, int y, int z);
+void mushroomHugeRed(World* w, Random& random, int x, int y, int z);
 void cactusFeature(World* w, Random& random, int x, int y, int z);
 void reedsFeature(World* w, Random& random, int x, int y, int z);
 void oreFeature(World* w, Random& random, int x, int y, int z, unsigned char tile, int count);
