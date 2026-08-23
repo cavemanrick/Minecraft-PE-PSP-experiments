@@ -228,7 +228,7 @@ static bool isValidSpawn(World* w, int x, int z) {
 
     if (!worldChunkSettled(w, x >> 4, z >> 4)) return false;
     int ty; unsigned char top = columnTop(w, x, z, &ty);
-    return isSolidPhys(top) && top != BLOCK_LEAVES;
+    return isSolidPhys(top) && !isLeaf(top);
 }
 
 #define SPAWN_SEARCH_CHUNKS 2

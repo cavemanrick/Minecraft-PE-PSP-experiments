@@ -30,7 +30,9 @@ struct McpeGen {
     ~McpeGen();
 
     void computeBiome(int chunkX, int chunkZ);
-    float* getHeights(int x, int y, int z, int xSize, int ySize, int zSize);
+    // Takes World* purely so it can classify the mushroom island and lift
+    // its terrain above sea level -- see the island block in getHeights.
+    float* getHeights(const World* w, int x, int y, int z, int xSize, int ySize, int zSize);
     void prepareChunk(World* w, int chunkX, int chunkZ);
     void buildSurfacesChunk(World* w, int chunkX, int chunkZ);
 

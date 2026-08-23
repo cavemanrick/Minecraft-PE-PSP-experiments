@@ -31,11 +31,11 @@ const Material& materialOf(unsigned char id) {
     switch (id) {
         case BLOCK_AIR: return Material::air;
 
-        case BLOCK_GRASS:
+        case BLOCK_GRASS: case BLOCK_MYCELIUM:
         case BLOCK_DIRT: case BLOCK_FARMLAND: case BLOCK_UPDATE1: case BLOCK_UPDATE2:
             return Material::dirt;
 
-        case BLOCK_LEAVES:
+        case BLOCK_LEAVES: case BLOCK_LEAVES_DARK_OAK:
             return Material::leaves;
         case BLOCK_PLANKS: case BLOCK_LOG: case BLOCK_BOOKSHELF: case BLOCK_STAIRS_PLANKS:
         case BLOCK_CHEST: case BLOCK_CRAFTING_TABLE: case BLOCK_SIGN: case BLOCK_DOOR_WOOD:

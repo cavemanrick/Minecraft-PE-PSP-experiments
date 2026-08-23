@@ -13,6 +13,8 @@ bool HoeItem::useOn(ItemInstance* item, Player* player, World* world, int x, int
     unsigned char targetId = worldBlock(world, x, y, z);
     unsigned char aboveId  = worldBlock(world, x, y + 1, z);
 
+    // Grass and dirt only. BLOCK_MYCELIUM is deliberately NOT tillable --
+    // do not add it here.
     if (aboveId == BLOCK_AIR && (targetId == BLOCK_GRASS || targetId == BLOCK_DIRT)) {
 
         {

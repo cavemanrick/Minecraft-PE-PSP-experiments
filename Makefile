@@ -170,9 +170,11 @@ OBJS = \
 	src/world/level/levelgen/feature_tree_spruce.o \
 	src/world/level/levelgen/feature_tree_pine.o \
 	src/world/level/levelgen/feature_tree_jungle.o \
+	src/world/level/levelgen/feature_tree_dark_oak.o \
 	src/world/level/levelgen/feature_clay.o \
 	src/world/level/levelgen/feature_flower.o \
 	src/world/level/levelgen/feature_mushroom.o \
+	src/world/level/levelgen/feature_mushroom_huge.o \
 	src/world/level/levelgen/feature_cactus.o \
 	src/world/level/levelgen/feature_reeds.o \
 	src/world/level/levelgen/feature_ore.o \

@@ -95,8 +95,16 @@ Drop Tile::getResource(int data) {
     switch (id) {
         case BLOCK_STONE:               return { BLOCK_COBBLESTONE, 1, 0 };
         case BLOCK_GRASS:               return { BLOCK_DIRT, 1, 0 };
+        case BLOCK_MYCELIUM:            return { BLOCK_DIRT, 1, 0 }; // as in vanilla, mining it gives plain dirt
         case BLOCK_FARMLAND:            return { BLOCK_DIRT, 1, 0 };
-        case BLOCK_LEAVES:              return { BLOCK_SAPLING, 1, (short)(data & 3) };
+        case BLOCK_LEAVES:              return { BLOCK_SAPLING, 1, (short)(data & LEAF_TYPE_MASK) };
+        // Dark oak has no sapling type of its own: BLOCK_SAPLING's data is
+        // the same 2-bit field as LEAF_TYPE_MASK and all four slots are
+        // taken (oak/spruce/birch/jungle). Dropping a plain oak sapling is
+        // the honest fallback -- a real dark oak sapling needs either a
+        // fifth sapling variant or its own item id, neither of which is in
+        // scope here. Flagged rather than silently dropping nothing.
+        case BLOCK_LEAVES_DARK_OAK:     return { BLOCK_SAPLING, 1, (short)LEAF_OAK };
         case BLOCK_SAPLING:             return { BLOCK_SAPLING, 1, (short)(data & 3) };
 
         case BLOCK_DOUBLE_SLAB:         return { BLOCK_SLAB, 2, (short)(data & DSLAB_MAT_MASK) };
@@ -153,7 +161,7 @@ Drop Tile::getResource(int data) {
 }
 
 int Tile::getResourceCount(int data, Random& rng) {
-    if (id == BLOCK_LEAVES) return (rng.nextInt(20) == 0) ? 1 : 0;
+    if (isLeaf(id)) return (rng.nextInt(20) == 0) ? 1 : 0;
     if (id == BLOCK_TALLGRASS) return (rng.nextInt(8) == 0) ? 1 : 0;
     if (id == BLOCK_CLAY) return 4;
     if (id == BLOCK_BOOKSHELF) return 3;
@@ -185,7 +193,12 @@ void Tile::spawnResources(World* , int x, int y, int z, int data, Random& rng) {
         for (int i = 0; i < count; i++)
             dropItem(x, y, z, d.id, d.aux, rng);
 
-    if (id == BLOCK_LEAVES && (data & 3) == 0 && rng.nextInt(200) == 0)
+    // Oak and dark oak both drop apples in vanilla. Oak is identified by
+    // its leaf type field; dark oak by its own block id, which carries no
+    // type field at all (see BLOCK_LEAVES_DARK_OAK in chunk.h).
+    bool appleLeaf = (id == BLOCK_LEAVES && (data & LEAF_TYPE_MASK) == LEAF_OAK) ||
+                     (id == BLOCK_LEAVES_DARK_OAK);
+    if (appleLeaf && rng.nextInt(200) == 0)
         dropItem(x, y, z, ITEM_APPLE, 0, rng);
 }
 
@@ -316,15 +329,26 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
                 case LEAF_SPRUCE: *col = 4; *row = 8; *tint = 0xFF2BAE3Du; break;
                 case LEAF_BIRCH:  *col = 4; *row = 3; *tint = 0xFF55A780u; break;
                 case LEAF_JUNGLE: *col = 4; *row = 3; *tint = 0xFF2AB01Du; break;
-                default:
-                    // Plain oak leaves, except dark oak trees set
-                    // LEAF_DARK_TINT_BIT to get a noticeably darker,
-                    // more muted green than regular oak -- same texture
-                    // and leaf type in every other respect.
-                    *col = 4; *row = 3;
-                    *tint = (data & LEAF_DARK_TINT_BIT) ? 0xFF1F6B2Eu : 0xFF18B548u;
-                    break;
+                default:          *col = 4; *row = 3; *tint = 0xFF18B548u; break;
             }
+            break;
+        case BLOCK_LEAVES_DARK_OAK:
+            // Real atlas tile now, at what used to be an unused violet
+            // placeholder slot. The colour is BAKED INTO THE TEXTURE
+            // (the oak leaf greyscale mask multiplied by 0xFF1F6B2E), so
+            // *tint stays white here -- setting a tint as well would
+            // modulate twice (mesh_block.cpp does mulColor(bright, tint)
+            // and the GU is in GU_TFX_MODULATE) and come out near-black.
+            *col = 14; *row = 1;
+            break;
+        case BLOCK_MYCELIUM:
+            // Same three-way face split as BLOCK_GRASS above, but with no
+            // tint: the mycelium top texture at (14,4) is already coloured
+            // in the atlas, unlike the greyscale grass top at (0,0) which
+            // has to be tinted at runtime for biome grass colour.
+            if (f == F_TOP)       { *col = 14; *row = 4; }
+            else if (f == F_DOWN) { *col = 2;  *row = 0; } // plain dirt underneath
+            else                  { *col = 13; *row = 4; } // purple fringe over dirt
             break;
         case BLOCK_COBWEB:         *col = 11; *row = 0; break;
 
@@ -1089,7 +1113,7 @@ static bool rawCube(unsigned char id) {
 }
 static bool rawOpaque(unsigned char id) {
     return id != BLOCK_AIR && !isLiquidId(id) && id != BLOCK_ICE &&
-           id != BLOCK_LEAVES && id != BLOCK_GLASS && id != BLOCK_SAPLING && id != BLOCK_GLASS_PANE &&
+           !isLeaf(id) && id != BLOCK_GLASS && id != BLOCK_SAPLING && id != BLOCK_GLASS_PANE &&
            !isCrossShaped(id) && id != BLOCK_CACTUS && id != BLOCK_TOPSNOW && id != BLOCK_REEDS &&
            !isSlab(id) && !isStairs(id) && id != BLOCK_FENCE && id != BLOCK_LADDER && id != BLOCK_TORCH &&
            !isDoor(id) && !isTrapdoor(id) && !isFenceGate(id) && !isBed(id) && id != BLOCK_FARMLAND &&
@@ -1105,7 +1129,7 @@ static int rawLightOpacity(unsigned char id) {
     if (id == BLOCK_AIR || id == BLOCK_INVISIBLE_BEDROCK) return 0;
     if (isWaterId(id) || id == BLOCK_ICE) return 3;
     if (isLavaId(id)) return 15;
-    if (id == BLOCK_LEAVES) return 1;
+    if (isLeaf(id)) return 1;
     if (isCrossShaped(id) ||
         id == BLOCK_CACTUS || id == BLOCK_TOPSNOW ||
         id == BLOCK_GLASS || id == BLOCK_GLASS_PANE ||
@@ -1135,7 +1159,9 @@ static int rawSoundType(unsigned char id) {
         return SOUND_SILENT;
 
     switch (id) {
-        case BLOCK_GRASS: case BLOCK_LEAVES: case BLOCK_FLOWER: case BLOCK_ROSE:
+        case BLOCK_GRASS: case BLOCK_MYCELIUM:
+        case BLOCK_LEAVES: case BLOCK_LEAVES_DARK_OAK:
+        case BLOCK_FLOWER: case BLOCK_ROSE:
         case BLOCK_MUSHROOM_BROWN: case BLOCK_MUSHROOM_RED: case BLOCK_SAPLING:
         case BLOCK_REEDS: case BLOCK_WHEAT: case BLOCK_TNT: case BLOCK_TALLGRASS:
         case BLOCK_BAMBOO: case BLOCK_COCOA: case BLOCK_VINE:
@@ -1194,7 +1220,8 @@ static float rawDestroySpeed(int id) {
             return 1.5f;
         case BLOCK_DIRT: case BLOCK_SAND:
             return 0.5f;
-        case BLOCK_GRASS: case BLOCK_GRAVEL: case BLOCK_CLAY: case BLOCK_FARMLAND:
+        case BLOCK_GRASS: case BLOCK_MYCELIUM:
+        case BLOCK_GRAVEL: case BLOCK_CLAY: case BLOCK_FARMLAND:
             return 0.6f;
         case BLOCK_PLANKS: case BLOCK_LOG: case BLOCK_FENCE: case BLOCK_FENCE_GATE:
         case BLOCK_DOUBLE_SLAB: case BLOCK_SLAB: case BLOCK_COBBLESTONE:
@@ -1204,7 +1231,7 @@ static float rawDestroySpeed(int id) {
         case BLOCK_STAIRS_BRICK: case BLOCK_STAIRS_NETHER_BRICK:
         case BLOCK_WARPED_STEM: case BLOCK_WARPED_PLANKS:
             return 2.0f;
-        case BLOCK_LEAVES:
+        case BLOCK_LEAVES: case BLOCK_LEAVES_DARK_OAK:
             return 0.2f;
         case BLOCK_GLASS: case BLOCK_GLASS_PANE: case BLOCK_GLOWSTONE:
             return 0.3f;
@@ -1293,7 +1320,8 @@ static Tile* makeTile(unsigned char id) {
             return new RedStoneOreTile(id);
         case BLOCK_FIRE:     return new FireTile(id);
         case BLOCK_GRASS:    return new GrassTile(id);
-        case BLOCK_LEAVES:   return new LeafTile(id);
+        case BLOCK_LEAVES: case BLOCK_LEAVES_DARK_OAK:
+                             return new LeafTile(id);
         case BLOCK_CACTUS:   return new CactusTile(id);
         case BLOCK_REEDS:    return new ReedTile(id);
         case BLOCK_BAMBOO:   return new BambooTile(id);

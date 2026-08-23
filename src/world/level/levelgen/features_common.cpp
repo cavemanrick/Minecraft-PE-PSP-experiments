@@ -19,7 +19,7 @@ bool isSolidGen(unsigned char id) {
 int heightmapAt(World* w, int x, int z) {
     for (int y = WORLD_H - 1; y >= 0; y--) {
         unsigned char b = worldBlock(w, x, y, z);
-        if (b == BLOCK_GRASS || b == BLOCK_DIRT || b == BLOCK_SAND ||
+        if (b == BLOCK_GRASS || b == BLOCK_MYCELIUM || b == BLOCK_DIRT || b == BLOCK_SAND ||
             b == BLOCK_STONE || b == BLOCK_GRAVEL || b == BLOCK_SANDSTONE ||
             b == BLOCK_CLAY || b == BLOCK_BEDROCK)
             return y + 1;

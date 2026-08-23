@@ -25,6 +25,7 @@ void fireInitFlammables() {
     setFlammable(BLOCK_WOOD_SLAB_DOUBLE, 5, 20);
     setFlammable(BLOCK_LOG,      5,   5);
     setFlammable(BLOCK_LEAVES,  30,  60);
+    setFlammable(BLOCK_LEAVES_DARK_OAK, 30, 60); // same as any other leaf block
     setFlammable(BLOCK_BOOKSHELF,30,  20);
     setFlammable(BLOCK_TNT,     15, 100);
     setFlammable(BLOCK_WOOL,    30,  60);

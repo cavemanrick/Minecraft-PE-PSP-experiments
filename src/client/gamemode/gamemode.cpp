@@ -221,11 +221,17 @@ static void breakTargetedBlock(const BlockHit& hit) {
     {
 
         ItemInstance* sel = g_level.player->inventory->getSelected();
-        bool shearedLeaf = (brokenId == BLOCK_LEAVES && sel && sel->id == ITEM_SHEARS &&
+        bool shearedLeaf = (isLeaf(brokenId) && sel && sel->id == ITEM_SHEARS &&
                             !g_gameMode->isCreative());
-        if (shearedLeaf)
-            Tile::popResource(hit.x, hit.y, hit.z,
-                              ItemInstance(BLOCK_LEAVES, 1, (short)(brokenData & 3)));
+        if (shearedLeaf) {
+            // Shears give back the exact leaf block that was broken.
+            // BLOCK_LEAVES carries its variant in the data nibble;
+            // BLOCK_LEAVES_DARK_OAK has no type field (the id is the
+            // type), so its aux is always 0 -- passing brokenData through
+            // would hand back a leaf item carrying stray decay flags.
+            short aux = (brokenId == BLOCK_LEAVES) ? (short)(brokenData & LEAF_TYPE_MASK) : (short)0;
+            Tile::popResource(hit.x, hit.y, hit.z, ItemInstance(brokenId, 1, aux));
+        }
 
         // Vine only yields an item when cut with shears, same rule as leaves.
         bool isVine = (brokenId == BLOCK_VINE);
@@ -656,7 +662,7 @@ CrosshairTarget gameModeCrosshairTarget() {
 
     if (id == BLOCK_INVISIBLE_BEDROCK) return t;
 
-    t.breakLabel = (id == BLOCK_LEAVES && sel && sel->id == ITEM_SHEARS) ? "Shear" : "Mine";
+    t.breakLabel = (isLeaf(id) && sel && sel->id == ITEM_SHEARS) ? "Shear" : "Mine";
 
     if (!t.useLabel) {
 

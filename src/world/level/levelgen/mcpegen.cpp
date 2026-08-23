@@ -14,6 +14,12 @@
 #include "world/level/levelgen/biome.h"
 
 #define MCPE_DEPTH    128
+
+// Floor of the mushroom island's moat. Sea level is 64 (blocks at y < 64
+// are water), so a bed at 60 gives four blocks of water -- deep enough to
+// read as a real channel and to stop a player simply walking across, and
+// shallow enough to swim.
+#define MUSHROOM_MOAT_BED_Y 60
 #define NCELL_W       4
 #define NCELL_H       8
 
@@ -37,7 +43,14 @@ McpeGen::~McpeGen() {
     delete[] rawTemp; delete[] rawDownfall; delete[] rawNoise;
 }
 
-float* McpeGen::getHeights(int x, int y, int z, int xSize, int ySize, int zSize) {
+// How much to raise the mushroom island, in getHeights' own yCenter units.
+// One unit here is NCELL_H (8) blocks, so 0.75 is about 6 blocks -- enough
+// to clear sea level (y=64, which is yCenter 8) reliably without turning the
+// island into a plateau. Applied AFTER the normal depth term rather than
+// replacing it, so the island keeps whatever rolling shape the noise gave it.
+#define MUSHROOM_ISLAND_LIFT 0.75f
+
+float* McpeGen::getHeights(const World* w, int x, int y, int z, int xSize, int ySize, int zSize) {
     float s = 1 * 684.412f;
     float hs = 1 * 684.412f;
 
@@ -88,6 +101,29 @@ float* McpeGen::getHeights(int x, int y, int z, int xSize, int ySize, int zSize)
 
             float yCenter = ySize / 2.0f + depth * 4;
 
+            // Mushroom island: raise the land so it is reliably ABOVE sea
+            // level. Without this the island would inherit whatever the
+            // density field happened to produce, and any island that landed
+            // on ocean terrain would be a moat around nothing.
+            //
+            // (x + xx) and (z + zz) are in NCELL_W units, not blocks -- see
+            // prepareChunk's call, which passes chunkX * (16 / NCELL_W).
+            // Multiplying back up by NCELL_W is what makes this sample the
+            // same world position the column loop will later write to.
+            //
+            // This is 25 classifications per chunk (a 5x5 grid), not 256:
+            // cheap enough to sit in the density path, which is why the lift
+            // lives here rather than being faked afterwards by stacking
+            // blocks on top of a finished column.
+            {
+                float margin = 0.0f;
+                BiomeId gb = classifyBiomeSpatialEx(worldSeed, w,
+                                                    (x + xx) * NCELL_W, (z + zz) * NCELL_W,
+                                                    &margin);
+                if (gb == B_MUSHROOM)
+                    yCenter += MUSHROOM_ISLAND_LIFT * mushroomLandLift(margin);
+            }
+
             pp++;
 
             for (int yy = 0; yy < ySize; yy++) {
@@ -124,7 +160,7 @@ void McpeGen::prepareChunk(World* w, int chunkX, int chunkZ) {
     int ySize = 128 / NCELL_H + 1;
     int zSize = xChunks + 1;
 
-    getHeights(chunkX * xChunks, 0, chunkZ * xChunks, xSize, ySize, zSize);
+    getHeights(w, chunkX * xChunks, 0, chunkZ * xChunks, xSize, ySize, zSize);
 
     for (int xc = 0; xc < xChunks; xc++) {
         for (int zc = 0; zc < xChunks; zc++) {
@@ -193,9 +229,20 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
         for (int z = 0; z < 16; z++) {
             float temp = 1;
 
-            BiomeId biome = classifyBiomeSpatial(worldSeed, w, xOffs * 16 + x, zOffs * 16 + z);
+            float mushMargin = 0.0f;
+            BiomeId biome = classifyBiomeSpatialEx(worldSeed, w, xOffs * 16 + x, zOffs * 16 + z,
+                                                   &mushMargin);
             unsigned char bTop, bMat;
             biomeSurface(biome, &bTop, &bMat);
+
+            // The moat ring: the outer MUSHROOM_MOAT_WIDTH blocks of the
+            // island are always water, so the island is guaranteed to be
+            // surrounded whether it happened to generate in an ocean or in
+            // the middle of a continent. Carving it here rather than in
+            // prepareChunk costs nothing extra, because this is the one
+            // place that already classifies every single column.
+            bool moat = (biome == B_MUSHROOM && mushMargin > 0.0f &&
+                         mushMargin <= MUSHROOM_MOAT_WIDTH);
 
             bool sand   = (sandBuffer[z + x * 16]   + random.nextFloat() * 0.2f) > 0;
             bool gravel = (gravelBuffer[z + x * 16] + random.nextFloat() * 0.2f) > 3;
@@ -209,6 +256,27 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
 
             unsigned char col[WORLD_H];
             blockColumnGet(w, gx, gz, col);
+
+            if (moat) {
+                // Cut everything from MUSHROOM_MOAT_BED_Y upward: solid
+                // below sea level becomes water, anything at or above sea
+                // level becomes air. Only ever REMOVES material -- a moat
+                // column that was already open ocean is left exactly as it
+                // was, so this cannot build a wall of water out over the
+                // sea. The surface pass below then finds the topmost
+                // remaining stone (always at MUSHROOM_MOAT_BED_Y - 1 or
+                // lower) and, because that is under sea level, dresses it
+                // with *material (dirt) rather than *top -- which is why no
+                // mycelium ever ends up submerged.
+                for (int y = WORLD_H - 1; y >= MUSHROOM_MOAT_BED_Y; y--) {
+                    if (y >= waterHeight) {
+                        if (col[y] != BLOCK_AIR) col[y] = BLOCK_AIR;
+                    } else if (col[y] == BLOCK_STONE) {
+                        col[y] = BLOCK_CALM_WATER;
+                    }
+                }
+            }
+
             for (int y = 127; y >= 0; y--) {
                 unsigned char* cell = &col[y];
 
@@ -225,8 +293,15 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
                                 material = BLOCK_STONE;
                             } else if (y >= waterHeight - 4 && y <= waterHeight + 1) {
                                 top = bTop; material = bMat;
-                                if (gravel) { top = BLOCK_AIR;  material = BLOCK_GRAVEL; }
-                                if (sand)   { top = BLOCK_SAND; material = BLOCK_SAND; }
+                                // No sand or gravel beaches on the mushroom
+                                // island: vanilla mushroom fields run
+                                // mycelium right down to the waterline, and
+                                // a sand rim would read as an ordinary
+                                // island rather than a mushroom one.
+                                if (biome != B_MUSHROOM) {
+                                    if (gravel) { top = BLOCK_AIR;  material = BLOCK_GRAVEL; }
+                                    if (sand)   { top = BLOCK_SAND; material = BLOCK_SAND; }
+                                }
                             }
                             if (y < waterHeight && top == BLOCK_AIR) {
                                 top = (temp < 0.15f) ? BLOCK_ICE : BLOCK_CALM_WATER;
@@ -306,6 +381,10 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     if (biome == B_DESERT)   forests -= 20;
     if (biome == B_TUNDRA)   forests -= 20;
     if (biome == B_PLAINS)   forests -= 20;
+    // Mushroom fields have no ordinary trees at all -- huge mushrooms take
+    // their place, placed in their own loop below. Same -20 idiom the
+    // treeless biomes above already use.
+    if (biome == B_MUSHROOM) forests -= 20;
     for (int i = 0; i < forests; i++) {
         int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
         int ty = heightmapAt(w, tx, tz);
@@ -328,10 +407,41 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
         }
     }
 
+    if (biome == B_MUSHROOM) {
+        // Huge mushrooms are this biome's canopy. Placed after the tree
+        // loop rather than inside it because they are not trees: they take
+        // no part in the forestNoise density that drives tree count, and
+        // their own generators do their own clearance and ground checks
+        // (grass/dirt/mycelium -- see feature_mushroom_huge.cpp).
+        //
+        // Note this loop only draws from `random` when the biome actually
+        // is mushroom, so adding it does not shift the random stream for
+        // any other biome's chunks.
+        int huge = 3 + random.nextInt(4);
+        for (int i = 0; i < huge; i++) {
+            int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
+            int ty = heightmapAt(w, tx, tz);
+            if (random.nextInt(2) == 0) mushroomHugeRed(w, random, tx, ty, tz);
+            else                        mushroomHugeBrown(w, random, tx, ty, tz);
+        }
+    }
+
     return false; }
 
     case 3: {
     BiomeId biome = (BiomeId)mPhaseBiome;
+
+    // Mushroom fields grow no flowers and no grass in vanilla -- the
+    // ground cover is small mushrooms, and lots of them. Branching here
+    // rather than scaling the counts keeps every other biome's draw
+    // sequence from `random` byte-identical to what it was.
+    if (biome == B_MUSHROOM) {
+        for (int i = 0; i < 12; i++) {
+            int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8;
+            mushroomFeature(w, random, x, y, z,
+                            (random.nextInt(2) == 0) ? BLOCK_MUSHROOM_BROWN : BLOCK_MUSHROOM_RED);
+        }
+    } else {
 
     for (int i = 0; i < 2; i++) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; flowerFeature(w, random, x, y, z, BLOCK_FLOWER); }
     if (random.nextInt(2) == 0) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; flowerFeature(w, random, x, y, z, BLOCK_ROSE); }
@@ -343,6 +453,8 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     }
     if (random.nextInt(4) == 0) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; mushroomFeature(w, random, x, y, z, BLOCK_MUSHROOM_BROWN); }
     if (random.nextInt(8) == 0) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; mushroomFeature(w, random, x, y, z, BLOCK_MUSHROOM_RED); }
+
+    }
 
     for (int i = 0; i < 10; i++) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; reedsFeature(w, random, x, y, z); }
 

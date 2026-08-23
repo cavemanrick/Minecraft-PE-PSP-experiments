@@ -13,6 +13,11 @@ void snowCap(World* w, int chunkX, int chunkZ, float* mTemp) {
         if (worldBlock(w, gx, y, gz) != BLOCK_AIR) continue;
         unsigned char below = worldBlock(w, gx, y - 1, gz);
         if (below == BLOCK_AIR || isWaterId(below) || below == BLOCK_ICE) continue;
+        // Mycelium never gets a snow cap. Mushroom biomes are warm enough
+        // that this should rarely trigger anyway, but the temperature test
+        // above is height-adjusted, so a high-altitude mushroom biome could
+        // otherwise cross SNOW_CUTOFF and frost over its own ground.
+        if (below == BLOCK_MYCELIUM) continue;
         setBlock(w, gx, y, gz, BLOCK_TOPSNOW);
     }
 }

@@ -96,6 +96,42 @@ enum { BLOCK_AIR = 0,
        // BLOCK_VINE/BLOCK_LADDER aren't -- see rawCube in tile.cpp.
        BLOCK_PORTAL = 174,
 
+       // Dark oak leaves. A separate block id rather than a BLOCK_LEAVES
+       // data variant, because BLOCK_LEAVES has no data room left: block
+       // data is stored as a 4-bit nibble (worldData/worldDataPut in
+       // world.h both mask with 0x0F), and all four of those bits are
+       // already spoken for -- bits 0-1 by LEAF_TYPE_MASK, bit 2 by
+       // LEAF_UPDATE_BIT and bit 3 by LEAF_PERSISTENT_BIT (both really
+       // used, see leafdecay.cpp). Any "spare" flag at bit 4 or above is
+       // silently discarded on write, which is exactly what happened to
+       // the earlier LEAF_DARK_TINT_BIT = 16 attempt.
+       //
+       // isLeaf() below returns true for this id, so every leaf behaviour
+       // that routes through isLeaf -- decay (leafdecay.cpp), tree-space
+       // clearance (isTreeClear/isSolidGen in features_common.cpp) --
+       // picks it up with no further per-id wiring. The id-specific
+       // wiring is the switch-based stuff: texture/tint, material,
+       // flammability, sound, hardness, drops and the tile factory.
+       //
+       // Its own data nibble is currently only LEAF_UPDATE_BIT /
+       // LEAF_PERSISTENT_BIT -- there is no type field, since the id IS
+       // the type. That leaves bits 0-1 free here if dark oak ever needs
+       // sub-variants.
+       BLOCK_LEAVES_DARK_OAK = 175,
+
+       // Mycelium: the mushroom-biome ground block. Top/side/bottom split
+       // like BLOCK_GRASS (purple-speckled top at atlas (14,4), fringe-over-
+       // dirt side at (13,4), plain dirt underneath), drops dirt, and is
+       // deliberately INERT -- no random tick, so it neither spreads to
+       // nearby dirt nor reverts to dirt in the dark the way BLOCK_GRASS
+       // does via GrassTile. Vanilla mycelium does both; that is a
+       // behaviour decision left open rather than silently implemented.
+       //
+       // Also deliberately absent: snow (feature_snow.cpp skips it) and
+       // tilling (HoeItem::useOn only accepts grass/dirt, so mycelium is
+       // excluded by omission -- see the note there).
+       BLOCK_MYCELIUM = 176,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };
@@ -213,18 +249,21 @@ static inline bool isCrossShaped(unsigned char id) {
            id == BLOCK_NETHER_SPROUTS || id == BLOCK_TWISTING_VINES;
 }
 
-static inline bool isLeaf(unsigned char id) { return id == BLOCK_LEAVES; }
+static inline bool isLeaf(unsigned char id) {
+    return id == BLOCK_LEAVES || id == BLOCK_LEAVES_DARK_OAK;
+}
 static inline bool isLog(unsigned char id) { return id == BLOCK_LOG; }
 static inline bool isWool(unsigned char id) { return id == BLOCK_WOOL; }
 static inline bool isGlass(unsigned char id) { return id == BLOCK_GLASS; }
 
 enum { LEAF_TYPE_MASK = 3, LEAF_OAK = 0, LEAF_SPRUCE = 1, LEAF_BIRCH = 2, LEAF_JUNGLE = 3,
-       LEAF_UPDATE_BIT = 4, LEAF_PERSISTENT_BIT = 8,
-       // Dark oak leaves are still LEAF_OAK for every non-render purpose
-       // (decay, drops, tool logic, etc.) -- this bit only tells the
-       // renderer to use a darker tint. Bits 4-7 were previously unused,
-       // so this doesn't collide with LEAF_UPDATE_BIT/LEAF_PERSISTENT_BIT.
-       LEAF_DARK_TINT_BIT = 16 };
+       LEAF_UPDATE_BIT = 4, LEAF_PERSISTENT_BIT = 8 };
+// NOTE: this nibble is FULL. Bits 0-1 are the type, bit 2 is
+// LEAF_UPDATE_BIT, bit 3 is LEAF_PERSISTENT_BIT, and bits 4+ do not exist
+// -- worldDataPut masks every write with 0x0F. A previous
+// LEAF_DARK_TINT_BIT = 16 lived here and could never be read back; dark
+// oak now uses its own BLOCK_LEAVES_DARK_OAK id instead. Any future leaf
+// variant needs the same treatment, not another flag bit.
 
 // BLOCK_HUGE_MUSHROOM_CAP data bit: which skin texture to use. Set means
 // the red spotted-cap variant; unset means the brown pored-cap variant.

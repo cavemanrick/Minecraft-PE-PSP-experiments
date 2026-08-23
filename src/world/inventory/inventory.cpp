@@ -4,7 +4,7 @@
 static const short kPalette[] = {
 
     BLOCK_COBBLESTONE, BLOCK_STONE_BRICKS, BLOCK_STONE_BRICKS, BLOCK_STONE_BRICKS, BLOCK_MOSSY_COBBLE, BLOCK_PLANKS, BLOCK_BRICKS,
-    BLOCK_STONE, BLOCK_DIRT, BLOCK_GRASS, BLOCK_CLAY,
+    BLOCK_STONE, BLOCK_DIRT, BLOCK_GRASS, BLOCK_MYCELIUM, BLOCK_CLAY,
     BLOCK_SANDSTONE, BLOCK_SANDSTONE, BLOCK_SANDSTONE,
     BLOCK_SAND, BLOCK_GRAVEL,
     BLOCK_LOG, BLOCK_LOG, BLOCK_LOG,
@@ -40,9 +40,10 @@ static const short kPalette[] = {
     BLOCK_CRAFTING_TABLE, BLOCK_STONECUTTER, BLOCK_CHEST, BLOCK_FURNACE, BLOCK_TNT,
 
     BLOCK_FLOWER, BLOCK_ROSE, BLOCK_MUSHROOM_BROWN, BLOCK_MUSHROOM_RED,
+    BLOCK_HUGE_MUSHROOM_CAP, BLOCK_HUGE_MUSHROOM_CAP, BLOCK_HUGE_MUSHROOM_STEM,
     BLOCK_CACTUS, BLOCK_MELON, ITEM_REEDS, BLOCK_COBWEB,
     BLOCK_SAPLING, BLOCK_SAPLING, BLOCK_SAPLING,
-    BLOCK_LEAVES, BLOCK_LEAVES, BLOCK_LEAVES,
+    BLOCK_LEAVES, BLOCK_LEAVES, BLOCK_LEAVES, BLOCK_LEAVES_DARK_OAK,
 
     ITEM_SEEDS_WHEAT, ITEM_SEEDS_MELON, ITEM_BONEMEAL,
     ITEM_HOE_IRON,
@@ -57,7 +58,7 @@ static const short kPalette[] = {
 static const unsigned char kPaletteData[] = {
 
     0, SB_NORMAL, SB_MOSSY, SB_CRACKED, 0, 0, 0,
-    0, 0, 0, 0,
+    0, 0, 0, 0, 0,
     SS_DEFAULT, SS_CHISELED, SS_SMOOTH,
     0, 0,
     LOG_OAK, LOG_SPRUCE, LOG_BIRCH,
@@ -74,9 +75,11 @@ static const unsigned char kPaletteData[] = {
     0, BLOCK_WATER, BLOCK_LAVA,
     0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0,                                 // flower, rose, small brown/red mushroom
+    0, HUGE_MUSHROOM_RED_BIT, 0,                // huge mushroom: brown cap, red cap, stem
+    0, 0, 0, 0,                                 // cactus, melon, reeds, cobweb
     0, 1, 2,
-    0, 1, 2,
+    0, 1, 2, 0,                                 // oak/spruce/birch leaves, then dark oak
     0, 0, 15,
     0, 0, 0,
     0, 0, 0,
