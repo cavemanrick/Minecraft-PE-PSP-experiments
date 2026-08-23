@@ -15,6 +15,7 @@ Player::Player(Level* level)
       respawnX(0), respawnY(-1), respawnZ(0),
       netherReturnX(0), netherReturnY(-1), netherReturnZ(0),
       netherReturnYRot(0), netherReturnXRot(0),
+      inPortalThisTick(false), portalLatched(false),
       score(0) {}
 
 Player::~Player() { delete inventory; }

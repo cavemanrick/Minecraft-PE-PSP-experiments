@@ -71,6 +71,33 @@ public:
         netherReturnYRot = yRot; netherReturnXRot = xRot;
     }
 
+    // Portal re-entry latch. Replaces the old tick-counter cooldown in
+    // nether_portal.cpp, which did not work: Tile::entityInside is called
+    // once per *overlapping block* per tick (see the triple loop at the end
+    // of Entity::move in entity.cpp), not once per tick, so a counter
+    // incremented there measured "portal blocks touched" rather than time.
+    // Its value therefore depended on how wide the portal was and where in
+    // it the player stood, and it froze entirely the moment the player
+    // stepped out of a portal.
+    //
+    // The latch is the vanilla rule instead: once a teleport fires, no
+    // further teleport may fire until the player has spent a whole tick not
+    // touching any portal block. This is what stops the ping-pong when the
+    // return trip drops the player straight back inside the Overworld
+    // portal they left from (their recorded return position is, by
+    // definition, a spot inside a portal).
+    //
+    // inPortalThisTick is set by netherPortalEntityInside during move();
+    // portalTickEnd() is called once per tick afterwards (end of
+    // LocalPlayer::aiStep) to consume it. Not saved to NBT -- a fresh load
+    // starting unlatched is correct, since the player is not mid-crossing.
+    bool inPortalThisTick;
+    bool portalLatched;
+    void portalTickEnd() {
+        if (!inPortalThisTick) portalLatched = false;
+        inPortalThisTick = false;
+    }
+
     bool isSleeping() const { return sleeping; }
     bool isSleepingLongEnough() const { return sleeping && sleepCounter >= SLEEP_DURATION; }
     int  startSleepInBed(int x, int y, int z);

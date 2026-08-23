@@ -123,6 +123,14 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
     travel(xs, yf);
     walkingSpeed = baseWalkSpeed;
 
+    // Consume the Nether-portal re-entry latch. This must sit immediately
+    // after travel(), because travel() -> move() is what runs the
+    // block-overlap loop that calls Tile::entityInside (entity.cpp), and
+    // therefore what sets inPortalThisTick. Anything earlier reads a stale
+    // flag; anything after an early return never runs at all. See
+    // Player::portalTickEnd in player.h.
+    portalTickEnd();
+
     extern int g_autoJump;
     if (g_autoJump && onGround && horizontalCollision && !flying && !isInWater() && !isInLava()) {
         float sy = sinf(yRot * 3.14159265f / 180.0f), cy = cosf(yRot * 3.14159265f / 180.0f);
