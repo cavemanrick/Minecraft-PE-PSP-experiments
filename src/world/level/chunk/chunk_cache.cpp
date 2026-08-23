@@ -304,29 +304,36 @@ int worldStream(World* w, float px, float pz, int budgetMs) {
     {
         if ((unsigned int)(sceKernelGetSystemTimeLow() - tStart) > (unsigned int)budgetMs * 1000u)
             return brought;
+        // Whether the player themselves is currently inside the reserved
+        // strip -- computed once per call, outside the dx/dz loop, and
+        // used below to decide whether reserved *candidate* chunks are
+        // fair game for this pass. This used to be an unconditional skip
+        // (see the "visible through the wall" fix a few sessions back),
+        // which fixed the original bug -- standing near the boundary in
+        // the Overworld pulled in and rendered Nether terrain nobody had
+        // actually walked into yet -- but was too broad: it also blocked
+        // the player's own surrounding chunks from loading once they
+        // WERE standing in the Nether (via portal or debug teleport),
+        // since pcx/pcz then sits inside the reserved strip too. That
+        // left only the single chunk worldGetChunk explicitly touched
+        // ever generated -- a small island of real terrain surrounded by
+        // permanently-unloaded chunks, which reads as "sky in every
+        // direction, fall to death one step off the platform".
+        bool playerInReservedRegion = worldChunkIsReserved(w, pcx, pcz);
+
         int bestX = 0, bestZ = 0, bestD = 0x7FFFFFFF;
         for (int dz = -R; dz <= R; dz++)
             for (int dx = -R; dx <= R; dx++) {
                 int cx = pcx + dx, cz = pcz + dz;
                 if (!worldChunkInBounds(w, cx, cz)) continue;
-                // Reserved Nether/End chunks (see worldChunkIsReserved,
-                // world.h) are structurally "in bounds" for the 1024
-                // preset -- sizeX deliberately spans the whole strip so
-                // worldGetChunk can reach it on demand for portal/debug
-                // teleport -- but this loop is the *ambient* proximity
-                // streamer, driven purely by player XZ distance every
-                // frame with no idea whether the player has ever actually
-                // crossed into the Nether. Without this guard, simply
-                // standing near the overworld/reserved seam pulls
-                // reserved chunks into render distance and generates (and
-                // draws) real Nether terrain that's visible right through
-                // Level::getCubes' invisible collision wall, even though
-                // the player can't walk into it. Portal/debug-teleport
-                // code still reaches the reserved strip fine -- they call
-                // worldGetChunk directly (see nether_portal.cpp,
-                // debug_teleport.cpp), which doesn't go through this loop
-                // at all.
-                if (worldChunkIsReserved(w, cx, cz)) continue;
+                // Only exclude reserved candidates when the player is NOT
+                // themselves already inside the reserved strip -- see the
+                // comment above playerInReservedRegion. A player standing
+                // in the Nether needs their own surrounding reserved
+                // chunks to stream in normally, same as any other chunk;
+                // it's only ambient bleed-in from the Overworld side that
+                // this guard exists to prevent.
+                if (!playerInReservedRegion && worldChunkIsReserved(w, cx, cz)) continue;
                 if (worldChunkReady(w, cx, cz)) continue;
                 int d = dx * dx + dz * dz;
                 if (d < bestD) { bestD = d; bestX = cx; bestZ = cz; }
