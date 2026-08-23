@@ -17,7 +17,6 @@
 #include "util/prof.h"
 #include "platform/audio/sound.h"
 #include "platform/audio/music.h"
-#include "world/level/levelgen/biome.h"
 #include "world/level/storage/worldlist.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
@@ -126,22 +125,6 @@ int g_difficulty = Difficulty::NORMAL;
 
 #define MEM_OVERLAY 0
 
-static void registerMusicTracks(void) {
-    static const char* kBiomeDirs[] = {
-        "tundra", "savanna", "desert", "swamp", "taiga", "shrub",
-        "forest", "plains", "seasonal", "rain", "jungle"
-    };
-    static char paths[11][3][48];
-
-    for (int b = 0; b < 11; b++) {
-        for (int t = 0; t < 3; t++) {
-            snprintf(paths[b][t], sizeof(paths[b][t]),
-                     "data/music/%s/track%d.raw", kBiomeDirs[b], t + 1);
-            musicRegisterTrack((BiomeId)b, paths[b][t], 1);
-        }
-    }
-}
-
 int main(int argc, char* argv[]) {
     Item::initItems();
     Tile::initTiles();
@@ -152,7 +135,6 @@ int main(int argc, char* argv[]) {
     detectLowMemPsp();
     soundInit();
     musicInit();
-    registerMusicTracks();
     optionsLoad();
 
     sceCtrlSetSamplingCycle(0);
@@ -308,14 +290,10 @@ int main(int argc, char* argv[]) {
 
             gameUpdate(s, inGameMenu ? pMenu
                        : (pressed | (repeat & (PSP_CTRL_LEFT | PSP_CTRL_RIGHT))), pad);
-
-            if (s.screen == SCREEN_GAME && g_worldBuilt && g_level.player) {
-                BiomeId curBiome = classifyBiomeSpatial(worldGetSeed(), &g_world,
-                                                         (int)floorf(g_level.player->x),
-                                                         (int)floorf(g_level.player->z));
-                musicUpdate(curBiome);
-            }
         }
+
+        musicUpdate(s.screen == SCREEN_TITLE,
+                    s.screen == SCREEN_GAME && g_worldBuilt);
 
         if (pressed && (screenBefore != SCREEN_GAME || g_optionsOpen) &&
             (!navOnly || menuSelectionSig(s) != sigBefore))
