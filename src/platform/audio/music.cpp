@@ -56,10 +56,29 @@ struct RingSlot {
     short samples[MUSIC_SAMPLE_COUNT * 2];
 };
 
-static RingSlot      g_ring[RING_BLOCKS];
-static volatile int  g_ringReadIdx  = 0; // next slot the output thread will play
-static volatile int  g_ringWriteIdx = 0; // next slot the reader thread will fill
-static volatile int  g_ringFilled   = 0; // number of slots currently holding unplayed audio
+static RingSlot g_ring[RING_BLOCKS];
+
+// Two monotonically increasing counters, each written by EXACTLY ONE
+// thread: the reader owns g_ringWritten, the output thread owns
+// g_ringRead. Occupancy is the difference. Slot index is counter %
+// RING_BLOCKS.
+//
+// The previous design used a single shared g_ringFilled that the reader
+// incremented and the output thread decremented. Neither ++ nor -- is
+// atomic on this hardware, so the two read-modify-writes interleave and
+// lose updates. The count then drifts away from the ring's true
+// occupancy, and once it drifts high enough the reader parks in its
+// "ring is full" sleep while the output thread plays whatever stale
+// slots the count claims are there -- audible as skipping, repeats and
+// eventually silence, with no way back.
+//
+// Unsigned so the subtraction stays correct across wraparound: at 20
+// blocks/second these take about seven years to wrap, but the arithmetic
+// being right by construction costs nothing.
+static volatile unsigned int g_ringWritten = 0; // reader thread only
+static volatile unsigned int g_ringRead    = 0; // output thread only
+
+static unsigned int ringFilled(void) { return g_ringWritten - g_ringRead; }
 
 static void closeTrack(void) {
     if (g_file) { fclose(g_file); g_file = NULL; }
@@ -79,11 +98,17 @@ static void musicFillBlock(short* out) {
         g_pendingFile = NULL;
         g_pendingSwap = 0;
 
-        // Discard any blocks from the previous track still sitting in the
-        // ring, so the new track (or silence, for musicStop()) starts
-        // right away instead of after however many stale blocks remain.
-        g_ringWriteIdx = g_ringReadIdx;
-        g_ringFilled   = 0;
+        // NOTE: the ring is deliberately NOT flushed here any more. The
+        // old code reset both indices from this thread, but g_ringReadIdx
+        // belongs to the output thread, and rewinding the write pointer
+        // on top of a slot the output thread was mid-way through handing
+        // to the hardware is a data race on the sample buffer itself.
+        //
+        // The cost of not flushing is that up to RING_BLOCKS of the
+        // previous track still play -- about 140ms at 44100Hz. That is a
+        // short tail on a track change and on musicStop(), which is a far
+        // better trade than a cross-thread race for the sake of a crisper
+        // cut.
     }
 
     if (!g_playing || !g_file) {
@@ -135,12 +160,11 @@ static void musicFillBlock(short* out) {
 // it doesn't spin the CPU. This is the only thread that touches disk.
 static int musicReaderThread(SceSize, void*) {
     for (;;) {
-        while (g_ringFilled >= RING_BLOCKS) {
+        while (ringFilled() >= RING_BLOCKS) {
             sceKernelDelayThread(3000); // 3ms; ring is full, nothing to do yet
         }
-        musicFillBlock(g_ring[g_ringWriteIdx].samples);
-        g_ringWriteIdx = (g_ringWriteIdx + 1) % RING_BLOCKS;
-        g_ringFilled++;
+        musicFillBlock(g_ring[g_ringWritten % RING_BLOCKS].samples);
+        g_ringWritten++;   // published only after the slot is fully written
     }
     return 0;
 }
@@ -155,11 +179,10 @@ static int musicOutputThread(SceSize, void*) {
 
     for (;;) {
         int vol = PSP_AUDIO_VOLUME_MAX; // per-sample volume already applied in musicFillBlock
-        if (g_ringFilled > 0) {
+        if (ringFilled() > 0) {
             sceAudioOutputPannedBlocking(g_channel, vol, vol,
-                                          g_ring[g_ringReadIdx].samples);
-            g_ringReadIdx = (g_ringReadIdx + 1) % RING_BLOCKS;
-            g_ringFilled--;
+                                          g_ring[g_ringRead % RING_BLOCKS].samples);
+            g_ringRead++;  // released only after the slot has been consumed
         } else {
             // Underrun: reader hasn't kept up. Play silence for one block
             // instead of stalling the output thread on a blocking read.
@@ -205,10 +228,24 @@ static void scanMusicFolder(void) {
         g_rotationCount++;
     }
     closedir(d);
+
+    // Logged because an empty pool is invisible otherwise, and it is the
+    // difference between "rotation is working" and "rotation is falling
+    // back to danny.raw every time".
+    printf("[music] %d rotation track(s) found in %s\n", g_rotationCount, MUSIC_DIR);
 }
 
 static const char* pickRotationTrack(void) {
-    if (g_rotationCount == 0) return NULL;
+    // If data/music/ holds nothing but menu.raw and danny.raw -- which is
+    // the out-of-the-box state -- the rotation pool is empty, and the old
+    // code's answer to that was to return NULL and reschedule five seconds
+    // later, forever. Gameplay music therefore ended permanently the
+    // moment danny.raw finished, with nothing in the log to say why.
+    //
+    // Falling back to danny.raw means "one music file installed" behaves
+    // like a one-track rotation rather than like a bug. Drop the fallback
+    // only if silence-after-one-track is ever actually wanted.
+    if (g_rotationCount == 0) return FIRST_TRACK;
     int idx = rand() % g_rotationCount;
     return g_rotationTracks[idx];
 }
@@ -313,6 +350,10 @@ void musicUpdate(bool inMainMenu, bool inGameplay) {
 
     switch (g_phase) {
         case PHASE_IDLE:
+            // Re-scan on entering gameplay rather than only at boot, so a
+            // track added to data/music/ mid-session is picked up without
+            // a restart. Cheap: one readdir per world entry.
+            scanMusicFolder();
             g_phaseUntil = now + GAMEPLAY_FIRST_WAIT_SEC;
             g_phase      = PHASE_WAIT_FIRST;
             break;

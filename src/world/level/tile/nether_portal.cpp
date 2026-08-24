@@ -33,7 +33,11 @@
 // debug_teleport.cpp already gates itself the same way (see its sizeX
 // check); this brings the real portal path in line with it.
 static bool netherPortalsSupported(const World* w) {
-    return w && w->sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS;
+    // Both pre-generated presets now carry a Nether strip, so this is no
+    // longer a 1024-only feature -- worldHasReservedRegions covers 512 as
+    // well. Legacy infinite saves (sizeX == 0) still have nowhere to go
+    // and are correctly excluded.
+    return w && worldHasReservedRegions(w);
 }
 
 // --- Frame detection --------------------------------------------------
@@ -195,9 +199,22 @@ bool netherPortalTryIgnite(World* w, int x, int y, int z) {
 // reused as the SAME coordinate: one canonical Nether portal for the
 // whole world, matching this project's "fixed single entry point, no
 // coordinate mapping" scope decision.
-static const int kNetherPortalCX = WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS / 2;
-static const int kNetherPortalCZ = WORLD_NETHER_CHUNKS / 2 + 4; // offset from the debug teleport's own entry point so the two don't overlap
-static const int kNetherPortalY  = 60; // safely inside the guaranteed navigable gap, see debug_teleport.cpp's identical reasoning
+// No longer compile-time constants: the strip's X origin depends on the
+// preset's overworld width (worldNetherOriginCX in world.h).
+static int netherPortalCX(const World* w) { return worldNetherOriginCX(w) + WORLD_NETHER_CHUNKS / 2; }
+// Offset from the debug teleport's own entry point so the two don't
+// overlap. WORLD_NETHER_CHUNKS is 16 now, so +2 rather than the old +4 --
+// +4 would land 4 chunks from an 8-chunk half-width, uncomfortably close
+// to the strip's bedrock side wall.
+static int netherPortalCZ(void) { return WORLD_NETHER_CHUNKS / 2 + 2; }
+
+// Inside the guaranteed navigable gap of the 40-tall shell. The worst-case
+// gap runs y=15..27 (floor hills top out at 14, ceiling hills bottom out
+// at 28 -- see the budget check on NETHER_H in nether_gen.cpp), and the
+// portal frame occupies y-1 through y+3, so 18 puts the frame at 17..21,
+// clear at both ends even on the tightest column. The old value of 60 is
+// now above the bedrock ceiling entirely.
+#define kNetherPortalY 18
 
 // The Nether-side frame's anchor block, derived in exactly one place so
 // the builder and the teleporter cannot disagree about where it is.
@@ -217,10 +234,10 @@ static const int kNetherPortalY  = 60; // safely inside the guaranteed navigable
 // nether_gen.cpp). Centring keeps the frame, the 5x5 carved pocket and the
 // landing spot inside one chunk -- which is exactly why the debug
 // teleport, which has always used cz * 16 + 8, never showed this.
-static void netherSidePortalAnchor(int* bx, int* by, int* bz) {
-    *bx = kNetherPortalCX * 16 + 8;
+static void netherSidePortalAnchor(const World* w, int* bx, int* by, int* bz) {
+    *bx = netherPortalCX(w) * 16 + 8;
     *by = kNetherPortalY;
-    *bz = kNetherPortalCZ * 16 + 8;
+    *bz = netherPortalCZ() * 16 + 8;
 }
 
 // How many chunks either side of a teleport destination to force-generate
@@ -286,12 +303,12 @@ static void carveSafePortalLanding(World* w, int bx, int by, int bz) {
 // checks whether a portal block already sits there.
 static void ensureNetherSidePortal(World* w) {
     int bx, by, bz;
-    netherSidePortalAnchor(&bx, &by, &bz);
+    netherSidePortalAnchor(w, &bx, &by, &bz);
 
     // Claim the arrival chunk and its skirt up front, so every write below
     // lands in a ready chunk instead of being dropped by setBlock's
     // worldReady guard.
-    worldEnsureArea(w, kNetherPortalCX, kNetherPortalCZ, PORTAL_ARRIVAL_CHUNK_RADIUS);
+    worldEnsureArea(w, netherPortalCX(w), netherPortalCZ(), PORTAL_ARRIVAL_CHUNK_RADIUS);
 
     if (worldBlock(w, bx, by, bz) == BLOCK_PORTAL) return; // already built
 
@@ -338,7 +355,7 @@ static void teleportToNether(World* w, Entity* e) {
     ensureNetherSidePortal(w);
 
     int bx, by, bz;
-    netherSidePortalAnchor(&bx, &by, &bz);
+    netherSidePortalAnchor(w, &bx, &by, &bz);
     // Land just in front of the portal plane (bz - 1), not inside the
     // portal blocks themselves. The re-entry latch would hold either way,
     // but landing outside the portal face means the latch releases on the

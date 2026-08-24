@@ -169,9 +169,11 @@ bool worldInitTerrain(World* w, long seed, int worldType, int sizeX, int sizeZ) 
     // to (air) rather than either real overworld content or a
     // half-built stand-in.
     if (worldType == WORLD_TYPE_OLD && sizeX != 0 && !worldFitsInWindow(w)) {
-        int overworldX = (sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS) ? WORLD_PRESET_1024_CHUNKS : sizeX;
-        int overworldZ = (sizeZ == WORLD_PRESET_1024_TOTAL_Z_CHUNKS && sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS)
-                        ? WORLD_PRESET_1024_CHUNKS : sizeZ;
+        // Pre-generate the overworld only. worldOverworldChunksX strips
+        // the reserved Nether/End columns for whichever preset this is;
+        // Z is never extended by the strips, so it passes through.
+        int overworldX = worldOverworldChunksX(w);
+        int overworldZ = sizeZ;
         worldPreGenerateSweep(w, 0, 0, overworldX, overworldZ);
     }
 

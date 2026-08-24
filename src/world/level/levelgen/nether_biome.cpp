@@ -22,8 +22,15 @@ static float s_seedX[N_NETHER_BIOMES];
 static float s_seedZ[N_NETHER_BIOMES];
 static PerlinNoise* s_borderNoise = 0;
 
-static void ensureNetherBiomeSeeds(long worldSeed) {
-    if (s_seedsReady && s_seedsForWorldSeed == worldSeed) return;
+static int  s_seedsForOriginCX = -1;
+
+static void ensureNetherBiomeSeeds(long worldSeed, const World* w) {
+    // Also keyed on the strip origin, not just the seed: two worlds can
+    // share a seed and place their Nether at different X (512 vs 1024
+    // preset), and reusing the cached layout across them would put the
+    // biome seeds outside the strip entirely.
+    if (s_seedsReady && s_seedsForWorldSeed == worldSeed &&
+        s_seedsForOriginCX == worldNetherOriginCX(w)) return;
 
     // Different XOR constant than the overworld's ensureBiomeSeeds (which
     // uses ^0x610E5EEDL) so the two seed sets are independent even on the
@@ -38,7 +45,7 @@ static void ensureNetherBiomeSeeds(long worldSeed) {
     // classifyNetherBiome is queried in (already-offset worldX/worldZ),
     // not a Nether-local 0-based space, so every distance comparison
     // downstream stays in one consistent coordinate system.
-    float originX = (float)(WORLD_NETHER_ORIGIN_CX * CHUNK_SX);
+    float originX = (float)(worldNetherOriginCX(w) * CHUNK_SX);
     float originZ = (float)(WORLD_NETHER_ORIGIN_CZ * CHUNK_SZ);
 
     // 3 seeds on a simple 3x1 strip of cells across X, full height in Z --
@@ -58,11 +65,12 @@ static void ensureNetherBiomeSeeds(long worldSeed) {
     s_borderNoise = new PerlinNoise(&seedRandom, 2);
 
     s_seedsForWorldSeed = worldSeed;
+    s_seedsForOriginCX  = worldNetherOriginCX(w);
     s_seedsReady = true;
 }
 
-NetherBiomeId classifyNetherBiome(long worldSeed, int worldX, int worldZ) {
-    ensureNetherBiomeSeeds(worldSeed);
+NetherBiomeId classifyNetherBiome(long worldSeed, const World* w, int worldX, int worldZ) {
+    ensureNetherBiomeSeeds(worldSeed, w);
 
     float bx = (float)worldX, bz = (float)worldZ;
     int best = 0;

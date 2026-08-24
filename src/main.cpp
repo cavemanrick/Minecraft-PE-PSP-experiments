@@ -292,7 +292,14 @@ int main(int argc, char* argv[]) {
                        : (pressed | (repeat & (PSP_CTRL_LEFT | PSP_CTRL_RIGHT))), pad);
         }
 
-        musicUpdate(s.screen == SCREEN_TITLE,
+        // Menu music covers EVERY menu screen, not just the title. The
+        // first argument used to be `s.screen == SCREEN_TITLE`, which made
+        // musicUpdate's "just left the title screen" branch fire the
+        // instant the player opened the worlds list, options, or the
+        // create-world screen -- so the menu track stopped as soon as you
+        // navigated anywhere, and only came back on returning to the
+        // title. Every non-gameplay screen is menu music now.
+        musicUpdate(s.screen != SCREEN_GAME,
                     s.screen == SCREEN_GAME && g_worldBuilt);
 
         if (pressed && (screenBefore != SCREEN_GAME || g_optionsOpen) &&

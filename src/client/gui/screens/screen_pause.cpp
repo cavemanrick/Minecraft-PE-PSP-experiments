@@ -36,7 +36,7 @@ extern World g_world;
 // pause menu is already a dedicated, deliberately-entered context with
 // no such collision risk.
 static bool debugNetherEntryAvailable() {
-    return g_world.sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS;
+    return worldHasReservedRegions(&g_world);
 }
 
 static const char* const kPauseButtons[] = {

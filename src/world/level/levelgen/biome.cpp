@@ -48,17 +48,15 @@ static PerlinNoise* s_borderNoise = 0;
 //
 // Z is unaffected (the reserved strip does not extend the Z bound), but is
 // routed through the same helper for symmetry.
+// Both of these now defer to world.h rather than special-casing the 1024
+// preset, because the 512 preset has reserved strips too. Keeping a local
+// copy of that arithmetic here is exactly how the original bug happened.
 static int overworldChunksX(const World* w) {
-    if (w->sizeX == 0) return 0;                                  // infinite
-    if (w->sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS)
-        return WORLD_PRESET_1024_CHUNKS;                          // strip off Nether+End
-    return w->sizeX;
+    if (w->sizeX == 0) return 0;                     // legacy infinite save
+    return worldOverworldChunksX(w);
 }
 static int overworldChunksZ(const World* w) {
-    if (w->sizeZ == 0) return 0;
-    if (w->sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS)
-        return WORLD_PRESET_1024_TOTAL_Z_CHUNKS;
-    return w->sizeZ;
+    return w->sizeZ;                                  // strips never extend Z
 }
 
 static void ensureBiomeSeeds(long worldSeed, const World* w) {

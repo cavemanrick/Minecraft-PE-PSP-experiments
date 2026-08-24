@@ -177,8 +177,8 @@ std::vector<AABB>& Level::getCubes(Entity* , const AABB& box) {
     // for worlds actually created at the 1024 preset (w->sizeX matches
     // its exact total); every other world size has no reserved regions
     // and this never fires.
-    if (w->sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS) {
-        const float boundaryX = (float)(WORLD_PRESET_1024_CHUNKS * CHUNK_SX);
+    if (worldHasReservedRegions(w)) {
+        const float boundaryX = (float)(worldOverworldChunksX(w) * CHUNK_SX);
         if (box.x1 > boundaryX && box.x0 < boundaryX + 1.0f) {
             AABB wall(boundaryX, -64.0f, 0.0f, boundaryX + 1.0f, (float)WORLD_H + 64.0f,
                       (float)(WORLD_PRESET_1024_CHUNKS * CHUNK_SZ));

@@ -33,15 +33,21 @@ static float s_returnYRot = 0, s_returnXRot = 0;
 
 // A fixed, centered point well inside the Nether strip's footprint,
 // clear of the boundary wall (Level::getCubes) and the strip's own edges.
-static const int kNetherEntryCX = WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS / 2;
-static const int kNetherEntryCZ = WORLD_NETHER_CHUNKS / 2;
+// Not compile-time constants any more: the strip's X origin depends on
+// which preset this world is (worldNetherOriginCX in world.h).
+static int netherEntryCX(const World* w) { return worldNetherOriginCX(w) + WORLD_NETHER_CHUNKS / 2; }
+static int netherEntryCZ(void) { return WORLD_NETHER_CHUNKS / 2; }
 
 // Comfortably above the lava floor and safely inside the guaranteed
 // navigable gap (see NETHER_MIN_GAP in nether_gen.cpp) for any non-touch-
 // point column, so the cleared pocket only ever needs to punch through
 // the rare touch-point pillar case, never open straight into the lava
 // floor from below.
-static const int kNetherEntryY = 60;
+// Rescaled with the shell: the Nether is 40 tall now, so 60 would be
+// above the bedrock ceiling. The tightest guaranteed gap is y=15..27
+// (see the NETHER_H budget check in nether_gen.cpp), so 18 sits inside
+// it with room for the carved pocket above and below.
+static const int kNetherEntryY = 18;
 
 static void carveSafePlatform(World* w, int bx, int by, int bz) {
     // Real Nether terrain already exists here by the time this runs (see
@@ -62,7 +68,10 @@ static void carveSafePlatform(World* w, int bx, int by, int bz) {
 // bindings.
 void debugToggleNetherTeleport(World* w, LocalPlayer* player) {
     if (!player || !w) return;
-    if (w->sizeX != WORLD_PRESET_1024_TOTAL_X_CHUNKS) return; // not a 1024-preset world -- no reserved region exists
+    // Both pre-generated presets have a Nether strip now, so this is no
+    // longer 1024-only. Legacy infinite saves have no reserved region and
+    // are still excluded.
+    if (!worldHasReservedRegions(w)) return;
 
     if (s_haveReturnPos) {
         player->moveTo(s_returnX, s_returnY, s_returnZ, s_returnYRot, s_returnXRot);
@@ -74,10 +83,10 @@ void debugToggleNetherTeleport(World* w, LocalPlayer* player) {
     s_returnYRot = player->yRot; s_returnXRot = player->xRot;
     s_haveReturnPos = true;
 
-    int bx = kNetherEntryCX * 16 + 8, bz = kNetherEntryCZ * 16 + 8;
+    int bx = netherEntryCX(w) * 16 + 8, bz = netherEntryCZ() * 16 + 8;
     int by = kNetherEntryY;
 
-    worldGetChunk(w, kNetherEntryCX, kNetherEntryCZ); // claim + generate real Nether terrain here (see chunkGenerateNether) before writing to it
+    worldGetChunk(w, netherEntryCX(w), netherEntryCZ()); // claim + generate real Nether terrain here (see chunkGenerateNether) before writing to it
     carveSafePlatform(w, bx, by, bz);
 
     player->moveTo((float)bx + 0.5f, (float)by, (float)bz + 0.5f, player->yRot, player->xRot);

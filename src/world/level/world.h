@@ -169,24 +169,71 @@ extern volatile bool g_terrainThreadDone;
 #define WORLD_PRESET_512_CHUNKS  32   // 512 / 16
 #define WORLD_PRESET_1024_CHUNKS 64   // 1024 / 16
 
-#define WORLD_NETHER_CHUNKS 32        // 512 / 16
-#define WORLD_END_CHUNKS    32        // 512 / 16
+// Nether/End strip size. 16 chunks = 256 blocks square.
+//
+// The request was 250x250. Reserved regions are claimed in whole chunks --
+// worldChunkIsReserved, the streaming cache and the Nether generator all
+// work in chunk units -- and 250 is not a multiple of 16 (15.625 chunks).
+// 16 chunks is the nearest whole-chunk size, and rounding up rather than
+// down to 15 (240 blocks) keeps a power-of-two strip, which keeps the
+// bedrock side-wall edge tests and the biome Voronoi span tidy. Change
+// both defines together if a different size is wanted; nothing else
+// hardcodes the old 32.
+#define WORLD_NETHER_CHUNKS 16        // 256 / 16
+#define WORLD_END_CHUNKS    16        // 256 / 16
+#define WORLD_RESERVED_CHUNKS (WORLD_NETHER_CHUNKS + WORLD_END_CHUNKS)
 
-// Reserved regions sit beyond the overworld's own extent along +X, sharing
-// its Z range. Nether occupies chunk X [1024/16, 1024/16 + 32), End occupies
-// chunk X right after that; both span chunk Z [0, 1024/16) -- only using
-// the first 32 of their available 64-chunk-tall Z range, since they only
-// need to be 512 deep, not 1024; the unused Z beyond that is simply never
-// generated (harmless, same "nothing happens past the logical bound within
-// this coordinate range" behavior worldChunkInBounds already gives for any
-// out-of-bounds chunk).
-#define WORLD_NETHER_ORIGIN_CX WORLD_PRESET_1024_CHUNKS
-#define WORLD_NETHER_ORIGIN_CZ 0
-#define WORLD_END_ORIGIN_CX (WORLD_PRESET_1024_CHUNKS + WORLD_NETHER_CHUNKS)
-#define WORLD_END_ORIGIN_CZ 0
-
-#define WORLD_PRESET_1024_TOTAL_X_CHUNKS (WORLD_PRESET_1024_CHUNKS + WORLD_NETHER_CHUNKS + WORLD_END_CHUNKS)
+// BOTH pre-generated presets now carry reserved regions, not just 1024.
+// Reserved strips sit beyond the overworld's own extent along +X, sharing
+// its Z range: Nether first, then End immediately after. The overworld
+// itself keeps its full advertised size in either case -- the strips are
+// appended, never carved out.
+//
+//   512 preset : overworld 32 chunks + 16 Nether + 16 End = 64 total X, 32 Z
+//   1024 preset: overworld 64 chunks + 16 Nether + 16 End = 96 total X, 64 Z
+//
+// The strips only use the first WORLD_NETHER_CHUNKS rows of Z; the rest of
+// the reserved X-column is claimed but never generated, which is the same
+// harmless behaviour worldChunkInBounds already gives out-of-bounds chunks.
+#define WORLD_PRESET_512_TOTAL_X_CHUNKS  (WORLD_PRESET_512_CHUNKS  + WORLD_RESERVED_CHUNKS)
+#define WORLD_PRESET_512_TOTAL_Z_CHUNKS  WORLD_PRESET_512_CHUNKS
+#define WORLD_PRESET_1024_TOTAL_X_CHUNKS (WORLD_PRESET_1024_CHUNKS + WORLD_RESERVED_CHUNKS)
 #define WORLD_PRESET_1024_TOTAL_Z_CHUNKS WORLD_PRESET_1024_CHUNKS
+
+// Recognised by exact total width, not by "is sizeX bigger than the
+// reserved strip". A saved world stores its sizeX verbatim, so a world
+// made before reserved regions existed (512 saved sizeX as 32) must not
+// be reinterpreted as having a strip -- subtracting blindly would hand it
+// an overworld of zero width.
+//
+// Note WORLD_PRESET_512_TOTAL_X_CHUNKS (64) numerically equals
+// WORLD_PRESET_1024_CHUNKS (64). That is safe only because 64 was never
+// itself a stored sizeX: the old presets stored 0 (infinite), 32 (512) or
+// 128 (old 1024). Old 1024 saves therefore fall through as
+// "no reserved regions" and their Nether is unreachable -- they need
+// regenerating, which the biome changes already required anyway.
+static inline bool worldHasReservedRegions(const World* w) {
+    return w->sizeX == WORLD_PRESET_512_TOTAL_X_CHUNKS ||
+           w->sizeX == WORLD_PRESET_1024_TOTAL_X_CHUNKS;
+}
+
+// Chunk extent of the walkable overworld, which is NOT w->sizeX whenever
+// reserved strips are present. Anything that means "the world the player
+// can walk around in" -- biome seeding, pre-generation bounds, the
+// boundary wall -- must use this rather than sizeX directly.
+static inline int worldOverworldChunksX(const World* w) {
+    return worldHasReservedRegions(w) ? (w->sizeX - WORLD_RESERVED_CHUNKS) : w->sizeX;
+}
+
+// Where the strips begin, which now depends on the world rather than
+// being a fixed constant, since the two presets have different overworld
+// widths.
+static inline int worldNetherOriginCX(const World* w) { return worldOverworldChunksX(w); }
+static inline int worldEndOriginCX(const World* w) {
+    return worldOverworldChunksX(w) + WORLD_NETHER_CHUNKS;
+}
+#define WORLD_NETHER_ORIGIN_CZ 0
+#define WORLD_END_ORIGIN_CZ    0
 
 // True if (cx,cz) falls inside the reserved X-column range for a
 // 1024-preset world (chunk X [WORLD_PRESET_1024_CHUNKS,
@@ -211,9 +258,9 @@ extern volatile bool g_terrainThreadDone;
 // already avoided this range structurally; this is the matching guard for
 // any *other* code path that might claim a chunk later.
 static inline bool worldChunkIsReserved(const World* w, int cx, int cz) {
-    if (w->sizeX != WORLD_PRESET_1024_TOTAL_X_CHUNKS) return false;
-    return cx >= WORLD_PRESET_1024_CHUNKS && cx < WORLD_PRESET_1024_TOTAL_X_CHUNKS &&
-           cz >= 0 && cz < WORLD_PRESET_1024_CHUNKS;
+    if (!worldHasReservedRegions(w)) return false;
+    return cx >= worldOverworldChunksX(w) && cx < w->sizeX &&
+           cz >= 0 && cz < w->sizeZ;
 }
 
 // True for the subset of worldChunkIsReserved's footprint that's
@@ -228,8 +275,8 @@ static inline bool worldChunkIsReserved(const World* w, int cx, int cz) {
 // End strip -- which has no generator yet -- keeps its existing
 // claimed-but-empty behavior.
 static inline bool worldChunkIsNether(const World* w, int cx, int cz) {
-    (void)w;
-    return cx >= WORLD_NETHER_ORIGIN_CX && cx < WORLD_NETHER_ORIGIN_CX + WORLD_NETHER_CHUNKS &&
+    int ox = worldNetherOriginCX(w);
+    return cx >= ox && cx < ox + WORLD_NETHER_CHUNKS &&
            cz >= WORLD_NETHER_ORIGIN_CZ && cz < WORLD_NETHER_ORIGIN_CZ + WORLD_NETHER_CHUNKS;
 }
 

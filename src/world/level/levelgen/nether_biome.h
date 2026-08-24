@@ -18,6 +18,9 @@ struct World;
 // worldX/worldZ are the same flat world-block coordinate space every
 // other worldBlock/setBlock call already uses (i.e. already offset into
 // the reserved Nether X-column, not a Nether-local 0-based space).
-NetherBiomeId classifyNetherBiome(long worldSeed, int worldX, int worldZ);
+// Takes the World because the strip's X origin now varies by preset
+// (worldNetherOriginCX in world.h) -- the seed points have to be laid out
+// over wherever this world's Nether actually is.
+NetherBiomeId classifyNetherBiome(long worldSeed, const World* w, int worldX, int worldZ);
 
 #endif
