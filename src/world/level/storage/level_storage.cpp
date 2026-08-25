@@ -1,4 +1,5 @@
 #include "world/level/storage/level_storage.h"
+#include "world/level/tile/nether_portal.h"
 #include "world/level/level.h"
 #include "world/entity/local_player.h"
 #include "world/level/storage/region_file.h"
@@ -206,6 +207,21 @@ static bool saveLevelDat(World* w, const char* absDir, long seed, int gameType, 
     // same pattern SpawnY already uses for its own optional-field case.
     root.putInt("WorldSizeX", w->sizeX);
     root.putInt("WorldSizeZ", w->sizeZ);
+
+    // Where this world's Nether-side portal stands. World-scoped, not
+    // player-scoped: there is one canonical Nether portal per world (see
+    // nether_portal.h), and unlike the player's return position it
+    // describes a structure in the terrain rather than anything about the
+    // player. Written only once a portal has actually been sited, so a
+    // world nobody has crossed into simply has no such field and the
+    // search runs fresh the first time it is needed.
+    if (netherPortalAnchorKnown()) {
+        int nax, nay, naz;
+        netherPortalGetAnchor(&nax, &nay, &naz);
+        root.putInt("NetherPortalX", nax);
+        root.putInt("NetherPortalY", nay);
+        root.putInt("NetherPortalZ", naz);
+    }
     root.putCompound("Player", buildPlayerTag(w));
 
     MemWriter mw;
@@ -275,6 +291,16 @@ static void loadLevelDat(World* w, const char* absDir, long* outSeed, int* outGa
                 } else {
                     w->sizeX = WORLD_DEFAULT_SIZE_CHUNKS;
                     w->sizeZ = WORLD_DEFAULT_SIZE_CHUNKS;
+                }
+
+                // Absent on any world that has never been crossed into,
+                // and on every save that predates the field -- both of
+                // which correctly leave the anchor unset, so the site
+                // search runs the first time a crossing happens.
+                if (tag->contains("NetherPortalY")) {
+                    netherPortalSetAnchor(tag->getInt("NetherPortalX"),
+                                          tag->getInt("NetherPortalY"),
+                                          tag->getInt("NetherPortalZ"));
                 }
 
                 if (tag->contains("SpawnY")) {
@@ -598,6 +624,12 @@ bool load(World* w, const char* absDir, long* outSeed, int* outGameType) {
     if (!hasSave(absDir)) return false;
     if (!worldAllocArrays(w)) return false;
     clearLoadedHotbar();
+    // Drop any anchor left over from a previously-loaded world before
+    // loadLevelDat below has the chance to install this one's. Without
+    // this, quitting to the menu and opening a different save would carry
+    // the old world's Nether portal coordinate across and build a frame at
+    // whatever happens to be there.
+    netherPortalResetAnchor();
     g_level.removeAllEntities();
     g_level.removeAllTileEntities();
 

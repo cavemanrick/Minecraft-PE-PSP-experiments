@@ -20,6 +20,9 @@ PigZombie::PigZombie(Level* level)
 
 int PigZombie::getEntityTypeId() const { return EntityTypes::IdPigZombie; }
 
+// See the note in pig_zombie.h: light level is deliberately not consulted.
+bool PigZombie::canSpawn() { return Mob::canSpawn(); }
+
 void PigZombie::tick() {
     if (stunedTime > 0) stunedTime--;
     if (playAngrySoundIn > 0) {

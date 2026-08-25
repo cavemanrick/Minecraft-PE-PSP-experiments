@@ -5,9 +5,11 @@ struct World;
 class LocalPlayer;
 
 // See debug_teleport.cpp -- TEMPORARY dev/testing scaffolding, delete once
-// real Nether portals exist. Toggles the player between wherever they were
-// standing and a safe platform inside the reserved Nether region. No-op on
-// any world that isn't the 1024x1024 preset.
+// portals are no longer the thing under test. Starts the same Nether
+// crossing that standing in a lit portal starts (fade to black, arrival
+// stepped clear of the frame facing away from it), choosing its direction
+// from whichever side the player is currently on. No-op on a world with no
+// reserved region.
 void debugToggleNetherTeleport(World* w, LocalPlayer* player);
 
 #endif

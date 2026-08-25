@@ -35,6 +35,7 @@
 #include "world/entity/item_entity.h"
 #include "world/entity/entity_types.h"
 #include "client/renderer/item_hand.h"
+#include "client/gui/hud.h" // guiFill -- portal crossing fade overlay
 
 #include <pspgu.h>
 #include <pspgum.h>
@@ -133,6 +134,7 @@ int main(int argc, char* argv[]) {
     pathInit(argc > 0 ? argv[0] : 0);
 
     detectLowMemPsp();
+    srand((unsigned int)sceKernelGetSystemTimeWide());
     soundInit();
     musicInit();
     optionsLoad();
@@ -311,7 +313,7 @@ int main(int argc, char* argv[]) {
         panoramaSetLoaded(s.screen != SCREEN_GAME && !g_worldBuilt);
 
         worldIconsSetLoaded(s.screen == SCREEN_WORLDS || s.screen == SCREEN_DELETE);
-        guStartFrame(s.screen == SCREEN_GAME ? g_skyColorNow : 0xFF000000u);
+        guStartFrame(s.screen == SCREEN_GAME ? gameClearColor() : 0xFF000000u);
 
         if (s.screen == SCREEN_GAME) {
             gameRender(s);
@@ -427,6 +429,22 @@ int main(int argc, char* argv[]) {
             if (Screen* over = overlayScreen()) over->render(s);
 
             gameHintsDraw(s);
+
+            // Nether-portal crossing fade. Drawn last of everything in the
+            // game frame so it covers the HUD, hints and debug text as
+            // well as the world -- a transition that leaves the hotbar
+            // floating over a black screen reads as a bug rather than a
+            // transition. Ortho is already set and depth testing is
+            // already off at this point, which is exactly what guiFill
+            // wants; re-enabling depth happens immediately below.
+            if (g_worldBuilt && g_level.player) {
+                float pa = g_level.player->portalFadeAlpha();
+                if (pa > 0.0f) {
+                    unsigned int a = (unsigned int)(pa * 255.0f);
+                    if (a > 255u) a = 255u;
+                    guiFill(0.0f, 0.0f, 480.0f, 272.0f, (a << 24));
+                }
+            }
 
             sceGuEnable(GU_DEPTH_TEST);
 

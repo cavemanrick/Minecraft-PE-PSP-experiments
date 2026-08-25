@@ -12,6 +12,9 @@
 #include "world/entity/monster/monster.h"
 #include "world/difficulty.h"
 #include "world/level/levelgen/Random.h"
+#include "world/level/levelgen/nether_gen.h"    // netherShellFloorBaseY/CeilBaseY
+#include "world/level/levelgen/nether_biome.h"  // classifyNetherBiome
+#include "world/level/levelgen/mcpegen.h"       // worldGenSeed
 #include <pspkernel.h>
 #include <cmath>
 
@@ -37,6 +40,25 @@ static const SpawnEntry MONSTER_TABLE[] = {
 static const int MONSTER_COUNT = (int)(sizeof(MONSTER_TABLE) / sizeof(MONSTER_TABLE[0]));
 
 static const int MONSTER_TOTAL_WEIGHT = 30;
+
+// Nether Wastes gets its own monster table. Zombified piglins are the
+// biome's signature mob and, until ghasts and magma cubes exist here, its
+// only one -- so this is a single-entry table rather than a weighted mix.
+// The weight still has to match NETHER_WASTES_TOTAL_WEIGHT because
+// spawnMonsters derives a per-type population cap from
+// (weight / totalWeight), and a mismatch would silently cap the only mob
+// in the table at a fraction of the level limit.
+//
+// The other two Nether biomes deliberately still fall through to
+// MONSTER_TABLE above. Giving Soul Sand Valley skeletons and Warped Forest
+// its own spawns is a separate piece of work; leaving them alone here
+// keeps this change to the one biome that was asked for rather than
+// quietly redesigning Nether spawning as a whole.
+static const SpawnEntry NETHER_WASTES_TABLE[] = {
+    { EntityTypes::IdPigZombie, 30, 2, 4 },
+};
+static const int NETHER_WASTES_COUNT = (int)(sizeof(NETHER_WASTES_TABLE) / sizeof(NETHER_WASTES_TABLE[0]));
+static const int NETHER_WASTES_TOTAL_WEIGHT = 30;
 
 static const int MIN_SPAWN_DISTANCE = 24;
 
@@ -126,6 +148,31 @@ static int probeStandableY(Level* L, int x, int z) {
     return -1;
 }
 
+// Vertical probe for the Nether, replacing the Overworld one.
+//
+// probeStandableY's surface branch calls getTopSolidBlock, which reads the
+// world heightmap -- and in the Nether that is the top of the sealed
+// bedrock roof, not any floor a mob could stand on. Worse, the space above
+// the roof is plain air, so spawnOk cheerfully accepts "standing on
+// bedrock at y=39" and the spawner was free to populate the outside of the
+// Nether's ceiling with mobs the player can never see. Its other branch
+// picks a random y across the full 128-block world height, of which only
+// the bottom 40 exist here at all, so roughly two thirds of attempts were
+// thrown away before they started.
+//
+// This samples only the shell interior, which is both correct and about
+// three times as likely to land somewhere usable per attempt.
+static int netherProbeStandableY(Level* L, int x, int z) {
+    int lo = netherShellFloorBaseY();
+    int hi = netherShellCeilBaseY();
+    int y0 = lo + s_rng.nextInt(hi - lo + 1);
+    for (int d = 0; d <= PROBE_SNAP; d++) {
+        if (y0 - d >= lo && spawnOk(L, x, y0 - d, z)) return y0 - d;
+        if (d && y0 + d <= hi && spawnOk(L, x, y0 + d, z)) return y0 + d;
+    }
+    return -1;
+}
+
 static void spawnMonsters(Level* level) {
     LocalPlayer* p = level->player;
     if (!p) return;
@@ -146,10 +193,33 @@ static void spawnMonsters(Level* level) {
 
         if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
 
+        // worldChunkIsNether deliberately does not check world size or the
+        // reserved bound itself (see its comment in world.h), so
+        // worldChunkIsReserved is checked alongside it rather than assumed
+        // -- on an infinite world those chunk coordinates are ordinary
+        // walkable overworld and must not be treated as the Nether.
+        bool nether = worldChunkIsReserved(level->w, cx, cz) &&
+                      worldChunkIsNether(level->w, cx, cz);
+
         int xStart = cx * 16 + s_rng.nextInt(16);
         int zStart = cz * 16 + s_rng.nextInt(16);
-        int yStart = probeStandableY(level, xStart, zStart);
+        int yStart = nether ? netherProbeStandableY(level, xStart, zStart)
+                            : probeStandableY(level, xStart, zStart);
         if (yStart < 0) continue;
+
+        // Biome is classified once per attempt, at the attempt's origin,
+        // rather than per pack member: a pack wanders up to a few blocks
+        // from the origin while placing, and re-rolling the table midway
+        // through would let a single pack come out half piglin and half
+        // zombie on a biome border.
+        const SpawnEntry* table = MONSTER_TABLE;
+        int tableCount = MONSTER_COUNT;
+        int tableWeight = MONSTER_TOTAL_WEIGHT;
+        if (nether && classifyNetherBiome(worldGenSeed(), level->w, xStart, zStart) == NB_WASTES) {
+            table = NETHER_WASTES_TABLE;
+            tableCount = NETHER_WASTES_COUNT;
+            tableWeight = NETHER_WASTES_TOTAL_WEIGHT;
+        }
 
         if (level->isSolidBlockingTile(xStart, yStart, zStart)) continue;
         if (level->getTile(xStart, yStart, zStart) != BLOCK_AIR) continue;
@@ -171,10 +241,10 @@ static void spawnMonsters(Level* level) {
                 if (level->getNearestPlayer(xx, yy, zz, (float)MIN_SPAWN_DISTANCE)) continue;
 
                 if (!type) {
-                    type = &pickWeighted(MONSTER_TABLE, MONSTER_COUNT, MONSTER_TOTAL_WEIGHT, s_rng);
+                    type = &pickWeighted(table, tableCount, tableWeight, s_rng);
 
                     int typeMax = (int)(1.5f * type->weight * MobCategory::monster.maxPerLevel)
-                                  / MONSTER_TOTAL_WEIGHT;
+                                  / tableWeight;
                     if (level->countInstanceOfType(type->mobId) >= typeMax) break;
                     packMax = type->minCount + s_rng.nextInt(1 + type->maxCount - type->minCount);
                 }

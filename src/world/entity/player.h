@@ -71,31 +71,65 @@ public:
         netherReturnYRot = yRot; netherReturnXRot = xRot;
     }
 
-    // Portal re-entry latch. Replaces the old tick-counter cooldown in
-    // nether_portal.cpp, which did not work: Tile::entityInside is called
-    // once per *overlapping block* per tick (see the triple loop at the end
-    // of Entity::move in entity.cpp), not once per tick, so a counter
-    // incremented there measured "portal blocks touched" rather than time.
-    // Its value therefore depended on how wide the portal was and where in
-    // it the player stood, and it froze entirely the moment the player
-    // stepped out of a portal.
+    // --- Nether portal crossing state ------------------------------------
+    // Crossing is no longer instantaneous. Standing in a portal charges
+    // portalCharge one step per tick; the screen darkens in proportion,
+    // and only when it reaches PORTAL_CHARGE_TICKS does the teleport
+    // actually fire. Stepping out before then drains the charge back down
+    // again, so the fade reverses and nothing happens -- which is both the
+    // vanilla behaviour and the thing that makes a portal feel like a
+    // portal rather than a trip hazard.
     //
-    // The latch is the vanilla rule instead: once a teleport fires, no
-    // further teleport may fire until the player has spent a whole tick not
-    // touching any portal block. This is what stops the ping-pong when the
-    // return trip drops the player straight back inside the Overworld
-    // portal they left from (their recorded return position is, by
-    // definition, a spot inside a portal).
+    // After the teleport, portalArrive counts back down to zero and the
+    // screen brightens from black, so the far side is revealed rather than
+    // cut to.
     //
-    // inPortalThisTick is set by netherPortalEntityInside during move();
-    // portalTickEnd() is called once per tick afterwards (end of
-    // LocalPlayer::aiStep) to consume it. Not saved to NBT -- a fresh load
-    // starting unlatched is correct, since the player is not mid-crossing.
-    bool inPortalThisTick;
-    bool portalLatched;
-    void portalTickEnd() {
-        if (!inPortalThisTick) portalLatched = false;
-        inPortalThisTick = false;
+    // inPortalThisTick is set by netherPortalEntityInside during move().
+    // Tile::entityInside is called once per *overlapping block* per tick
+    // (see the triple loop at the end of Entity::move in entity.cpp), not
+    // once per tick, so it can only ever be a flag -- a counter
+    // incremented there would measure "portal blocks touched" rather than
+    // time, which depends on how wide the portal is and where in it the
+    // player is standing. netherPortalPlayerTick (nether_portal.cpp) is
+    // what consumes the flag, exactly once per tick, from the end of
+    // LocalPlayer::aiStep.
+    //
+    // portalLatched is the re-entry guard: once a teleport fires, no
+    // further teleport may fire until the player has spent a whole tick
+    // not touching any portal block. It stops the ping-pong that would
+    // otherwise happen when an arrival lands the player in contact with
+    // the portal on the far side.
+    //
+    // portalForced is the debug teleport's way in (see debug_teleport.cpp):
+    // it charges the same counter without requiring a portal block, so the
+    // dev shortcut gets the identical fade and arrival treatment the real
+    // portal does instead of being a hard cut to a different place.
+    //
+    // None of this is saved to NBT: a fresh load starting uncharged and
+    // unlatched is correct, since the player is by definition not
+    // mid-crossing.
+    enum { PORTAL_CHARGE_TICKS = 40, PORTAL_ARRIVE_TICKS = 16 };
+    bool  inPortalThisTick;
+    bool  portalLatched;
+    bool  portalForced;
+    short portalCharge;
+    short portalArrive;
+    // The portal block most recently touched. Used at fire time to work
+    // out which side of the world this portal is on and which way its
+    // plane faces, so the player can be stepped clear of it and turned to
+    // face away. havePortalBlock is false for a forced (debug) crossing,
+    // where there is no portal involved at all.
+    bool  havePortalBlock;
+    int   portalBlockX, portalBlockY, portalBlockZ;
+
+    // 0 = clear, 1 = fully black. Drives the screen overlay (see
+    // portalRenderFade in main.cpp). The arrival fade takes priority over
+    // the charge fade so that the tick the teleport fires reads as one
+    // continuous black-out rather than a flash back to clear.
+    float portalFadeAlpha() const {
+        if (portalArrive > 0) return (float)portalArrive / (float)PORTAL_ARRIVE_TICKS;
+        if (portalCharge <= 0) return 0.0f;
+        return (float)portalCharge / (float)PORTAL_CHARGE_TICKS;
     }
 
     bool isSleeping() const { return sleeping; }

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <pspctrl.h>
+#include "world/level/tile/nether_portal.h"
 
 extern World g_world;
 
@@ -123,13 +124,14 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
     travel(xs, yf);
     walkingSpeed = baseWalkSpeed;
 
-    // Consume the Nether-portal re-entry latch. This must sit immediately
-    // after travel(), because travel() -> move() is what runs the
-    // block-overlap loop that calls Tile::entityInside (entity.cpp), and
-    // therefore what sets inPortalThisTick. Anything earlier reads a stale
-    // flag; anything after an early return never runs at all. See
-    // Player::portalTickEnd in player.h.
-    portalTickEnd();
+    // Advance the Nether-portal crossing. This must sit immediately after
+    // travel(), because travel() -> move() is what runs the block-overlap
+    // loop that calls Tile::entityInside (entity.cpp), and therefore what
+    // sets inPortalThisTick. Anything earlier reads a stale flag; anything
+    // after an early return never runs at all. This is also what fires the
+    // teleport once the charge is full -- see the block comment on
+    // Player::inPortalThisTick in player.h.
+    netherPortalPlayerTick(&g_world, this);
 
     extern int g_autoJump;
     if (g_autoJump && onGround && horizontalCollision && !flying && !isInWater() && !isInLava()) {

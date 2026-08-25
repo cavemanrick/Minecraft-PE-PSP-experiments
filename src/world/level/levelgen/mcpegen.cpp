@@ -11,6 +11,7 @@
 #include <pspthreadman.h>
 
 #include "world/level/levelgen/mcpegen_internal.h"
+#include "world/level/tile/nether_portal.h"
 #include "world/level/levelgen/biome.h"
 
 #define MCPE_DEPTH    128
@@ -552,6 +553,13 @@ bool chunkPostProcessPhase(World* w, int cx, int cz, int phase) {
 
 void worldGenerateMCPE(World* w, long seed, int genMask) {
     worldGenInit(seed, genMask);
+
+    // A brand-new world has no Nether portal yet. Clearing here (rather
+    // than relying on process lifetime) matters because creating a world
+    // after having played another one in the same session would otherwise
+    // inherit the previous world's anchor -- see the same reset on the
+    // load path in LevelStorage::load.
+    netherPortalResetAnchor();
 
     // Three cases:
     //  - World fits entirely in the resident window: generate exactly

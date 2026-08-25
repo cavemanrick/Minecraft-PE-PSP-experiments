@@ -5,6 +5,10 @@
 #include "world/level/chunk/chunk_cache.h"
 #include "world/entity/entity.h"
 #include "world/entity/player.h"
+#include "world/level/levelgen/nether_gen.h" // netherFindPortalSite -- the
+                      // shell's own geometry decides what a good portal
+                      // site is, so the search lives with the generator
+#include <math.h>     // sinf/cosf for the exit-face heading test
 #include "util/mth.h" // Mth::floor -- (int) truncation is wrong for negative
                       // coordinates, and the Overworld return position can
                       // legitimately be negative on an Infinite-origin world
@@ -194,84 +198,189 @@ bool netherPortalTryIgnite(World* w, int x, int y, int z) {
 // and Level::getCubes' synthetic boundary wall (level.cpp) only blocks
 // *walking* across the seam, not a direct position set like moveTo does.
 
-// Fixed Nether-side portal location -- same single-entry-point design as
-// the existing debug teleport (see debug_teleport.cpp), and deliberately
-// reused as the SAME coordinate: one canonical Nether portal for the
-// whole world, matching this project's "fixed single entry point, no
-// coordinate mapping" scope decision.
+// Where the Nether-side portal is looked for. One canonical Nether portal
+// for the whole world, matching this project's "fixed single entry point,
+// no coordinate mapping" scope decision -- but the exact block is now
+// found by searching the terrain around this chunk rather than being the
+// chunk's centre block regardless of what is there (see the anchor
+// machinery below).
 // No longer compile-time constants: the strip's X origin depends on the
 // preset's overworld width (worldNetherOriginCX in world.h).
 static int netherPortalCX(const World* w) { return worldNetherOriginCX(w) + WORLD_NETHER_CHUNKS / 2; }
-// Offset from the debug teleport's own entry point so the two don't
-// overlap. WORLD_NETHER_CHUNKS is 16 now, so +2 rather than the old +4 --
-// +4 would land 4 chunks from an 8-chunk half-width, uncomfortably close
-// to the strip's bedrock side wall.
-static int netherPortalCZ(void) { return WORLD_NETHER_CHUNKS / 2 + 2; }
+static int netherPortalCZ(void) { return WORLD_NETHER_CHUNKS / 2; }
 
-// Inside the guaranteed navigable gap of the 40-tall shell. The worst-case
-// gap runs y=15..27 (floor hills top out at 14, ceiling hills bottom out
-// at 28 -- see the budget check on NETHER_H in nether_gen.cpp), and the
-// portal frame occupies y-1 through y+3, so 18 puts the frame at 17..21,
-// clear at both ends even on the tightest column. The old value of 60 is
-// now above the bedrock ceiling entirely.
-#define kNetherPortalY 18
-
-// The Nether-side frame's anchor block, derived in exactly one place so
-// the builder and the teleporter cannot disagree about where it is.
+// How far out from that chunk the site search may look, tried in order.
+// Every chunk in a radius has to be generated before the search runs (the
+// search only reads blocks; it never generates), so the radius is also the
+// cost: 1 means a 3x3 block of synchronous chunk generations, 2 means 5x5.
 //
-// Both coordinates are chunk-CENTRED (+8), which is the fix for a real
-// fall-to-your-death bug: kNetherPortalCZ * 16 with no +8 put the frame on
-// the very first block of chunk Z 20, so the landing spot one block in
-// front of it (bz - 1 = 319) fell in chunk Z *19* -- a chunk
-// ensureNetherSidePortal never claimed. carveSafePortalLanding's writes
-// there were silently dropped by setBlock's own !worldReady guard
-// (features_common.cpp), so no netherrack floor was ever placed under the
-// arrival point; and an unloaded chunk reads back as
-// BLOCK_INVISIBLE_BEDROCK, which shapeOf maps to SHAPE_AIR (tile.cpp) and
-// therefore produces no collision box at all. Arriving players were in
-// free fall from y=60 with the nearest real surface at the floor hills'
-// y=29 ceiling (NETHER_FLOOR_BASE_Y + NETHER_HILL_MAX_HEIGHT,
-// nether_gen.cpp). Centring keeps the frame, the 5x5 carved pocket and the
-// landing spot inside one chunk -- which is exactly why the debug
-// teleport, which has always used cz * 16 + 8, never showed this.
-static void netherSidePortalAnchor(const World* w, int* bx, int* by, int* bz) {
-    *bx = netherPortalCX(w) * 16 + 8;
-    *by = kNetherPortalY;
-    *bz = netherPortalCZ() * 16 + 8;
-}
-
-// How many chunks either side of a teleport destination to force-generate
-// before the player is placed there. r=1 (a 3x3 block of chunks) is
-// deliberate belt-and-braces: r=0 alone is enough to give the player solid
-// ground now that the landing spot is chunk-centred, but a one-chunk skirt
-// means they cannot walk off the edge of their own arrival chunk into
-// not-yet-streamed space in the first second after landing either.
+// Escalating rather than going straight to the wider search keeps the
+// common case cheap. Measured over ten seeds, radius 1 succeeds on eight;
+// the two failures are simply the canonical chunk happening to sit in the
+// middle of a large lava sea, and radius 2 finds a site on all ten. So the
+// wide search is only paid by the worlds that actually need it.
 //
-// Flagging the cost honestly rather than hiding it: this is up to 9
-// synchronous chunk generations on the teleport frame, which will be a
-// visible hitch on the S905 stick. It is acceptable because a teleport is
-// already a hard cut with no continuity to preserve, but if it measures
-// worse than expected, dropping this to 0 is safe and costs only the
-// walk-off-the-edge protection.
+// Worth noting the hitch is much less objectionable than it was: a
+// crossing is now a deliberate fade to black, so the chunk generation
+// happens behind a dark screen instead of freezing a visible frame.
+static const int kPortalSiteRadii[] = { 1, 2 };
+#define PORTAL_SITE_RADIUS_COUNT ((int)(sizeof(kPortalSiteRadii) / sizeof(kPortalSiteRadii[0])))
+
+// How many chunks either side of an arrival point to force-generate before
+// the player is placed there. A one-chunk skirt means they cannot walk off
+// the edge of their own arrival chunk into not-yet-streamed space in the
+// first second after landing.
 #define PORTAL_ARRIVAL_CHUNK_RADIUS 1
 
-// Land safely at (px, py, pz): force the destination's chunks into memory
-// first, then place the entity and clear its fall state.
+// --- Anchor storage ------------------------------------------------------
+// See the contract in nether_portal.h for why this has to be remembered
+// rather than recomputed.
+
+static bool s_anchorKnown = false;
+static int  s_anchorX = 0, s_anchorY = 0, s_anchorZ = 0;
+
+bool netherPortalAnchorKnown(void) { return s_anchorKnown; }
+
+void netherPortalGetAnchor(int* x, int* y, int* z) {
+    if (x) *x = s_anchorX;
+    if (y) *y = s_anchorY;
+    if (z) *z = s_anchorZ;
+}
+
+void netherPortalSetAnchor(int x, int y, int z) {
+    s_anchorX = x; s_anchorY = y; s_anchorZ = z;
+    s_anchorKnown = true;
+}
+
+void netherPortalResetAnchor(void) { s_anchorKnown = false; }
+
+// --- Orientation and exit ------------------------------------------------
+// A portal's interior is a flat plane one block thick, so the two
+// directions perpendicular to that plane are the two faces a player can
+// step out onto. Working out which axis the plane runs along is what makes
+// "face away from the portal" a well-defined instruction.
+//
+// Portal blocks carry no axis in their data nibble (fillFrameInterior and
+// ensureNetherSidePortal both write data 0), so the axis is recovered from
+// the neighbours instead. The minimum interior width is 2 (see
+// PORTAL_MIN_INTERIOR_W), so any portal block always has at least one
+// portal neighbour along the plane's horizontal axis and never has one
+// across it -- which makes this test exact rather than a heuristic.
+//
+// Returns true if the plane runs along X (so the faces are +z and -z).
+static bool portalPlaneAlongX(World* w, int x, int y, int z) {
+    if (worldBlock(w, x + 1, y, z) == BLOCK_PORTAL) return true;
+    if (worldBlock(w, x - 1, y, z) == BLOCK_PORTAL) return true;
+    if (worldBlock(w, x, y, z + 1) == BLOCK_PORTAL) return false;
+    if (worldBlock(w, x, y, z - 1) == BLOCK_PORTAL) return false;
+    // A one-block portal cannot be built through netherPortalTryIgnite, so
+    // reaching here means the frame was broken between the crossing
+    // starting and it firing. Either answer is as good as the other; X
+    // matches the orientation ensureNetherSidePortal builds.
+    return true;
+}
+
+// Is (bx, by, bz) somewhere a player can stand -- feet and head clear, and
+// something solid underfoot? Deliberately checks for solid ground rather
+// than merely "not air": stepping out of a portal into a two-block hole
+// over a lava sea is not an exit.
+static bool portalStandable(World* w, int bx, int by, int bz) {
+    unsigned char feet = worldBlock(w, bx, by, bz);
+    unsigned char head = worldBlock(w, bx, by + 1, bz);
+    if (feet != BLOCK_AIR || head != BLOCK_AIR) return false;
+    unsigned char floorId = worldBlock(w, bx, by - 1, bz);
+    if (floorId == BLOCK_AIR || isLiquidId(floorId)) return false;
+    return true;
+}
+
+// Yaw for a unit cardinal direction. This codebase's yaw convention is
+// forward = (sin(yaw), cos(yaw)) -- see Mob::mobMoveRelative in mob.cpp,
+// which adds `xs * cy + yf * sy` to xd and `yf * cy - xs * sy` to zd, and
+// Mob::aiStep, which recovers a yaw from a movement vector with
+// atan2f(mdx, mdz). Note this is NOT vanilla's convention, which negates
+// the x term; deriving the numbers from the code rather than from vanilla
+// is the difference between facing away from the portal and facing along
+// it.
+static float portalYawFor(int dx, int dz) {
+    if (dz > 0) return 0.0f;     // +z
+    if (dz < 0) return 180.0f;   // -z
+    if (dx > 0) return 90.0f;    // +x
+    return 270.0f;               // -x
+}
+
+// Picks the spot to put an arriving player: one block clear of the portal
+// plane, on a face they can actually stand on, turned to look directly
+// away from the portal they just came out of.
+//
+// preferDx/preferDz is the direction to try first when both faces are
+// usable -- normally the player's own heading, so someone who walked north
+// into a portal comes out still heading north rather than being spun
+// around. It is only a preference; a blocked preferred face falls through
+// to the other one.
+//
+// Returns false when neither face is standable (a frame built flush
+// against a wall on both sides, or one whose surroundings were mined out
+// after it was lit), leaving the caller to fall back rather than placing
+// the player inside terrain.
+static bool portalExitSpot(World* w, int px, int py, int pz,
+                           float preferYaw,
+                           float* ox, float* oy, float* oz, float* oyaw) {
+    bool alongX = portalPlaneAlongX(w, px, py, pz);
+
+    // The two faces, as unit offsets.
+    int fdx = alongX ? 0 : 1;
+    int fdz = alongX ? 1 : 0;
+
+    // Which of the two the player is already heading toward. Same yaw
+    // convention as portalYawFor above.
+    float rad = preferYaw * 3.14159265f / 180.0f;
+    float hx = sinf(rad), hz = cosf(rad);
+    float dot = (float)fdx * hx + (float)fdz * hz;
+
+    int order[2];
+    order[0] = (dot >= 0.0f) ? +1 : -1;
+    order[1] = -order[0];
+
+    // The frame's floor course sits one below the bottom interior row, so
+    // walk down to the portal's own base before stepping sideways: entering
+    // at head height and exiting at head height would drop the player onto
+    // the frame's roof.
+    int baseY = py;
+    while (worldBlock(w, px, baseY - 1, pz) == BLOCK_PORTAL) baseY--;
+
+    for (int i = 0; i < 2; i++) {
+        int dx = fdx * order[i], dz = fdz * order[i];
+        int ex = px + dx, ez = pz + dz;
+        if (!portalStandable(w, ex, baseY, ez)) continue;
+        *ox = (float)ex + 0.5f;
+        *oy = (float)baseY;
+        *oz = (float)ez + 0.5f;
+        *oyaw = portalYawFor(dx, dz);
+        return true;
+    }
+    return false;
+}
+
+// Land at (px, py, pz): force the destination's chunks into memory first,
+// then place the entity and clear its fall state.
 //
 // The chunk claim is not optional on EITHER side of the trip. worldStream
 // evicts every chunk outside radius R+1 of the player (chunk_cache.cpp),
 // so by the time someone in the Nether steps back into the return portal,
 // the Overworld chunks around their recorded return position are long
 // gone. teleportToOverworld previously called nothing at all here, so it
-// dropped the player into unloaded space, which -- per the
-// BLOCK_INVISIBLE_BEDROCK / SHAPE_AIR chain described above -- is not
-// solid, and they fell until the streamer caught up underneath them.
+// dropped the player into unloaded space, which is not solid (an unloaded
+// chunk reads back as BLOCK_INVISIBLE_BEDROCK, which shapeOf maps to
+// SHAPE_AIR in tile.cpp, producing no collision box at all), and they fell
+// until the streamer caught up underneath them.
 //
 // Zeroing fallDistance and yd matters too: Entity::moveTo (entity.cpp)
 // sets position and rotation only. It does not touch velocity or
 // accumulated fall damage, so without this a player who crossed while
 // falling kept both across the teleport and took the damage on landing at
 // the far end.
+//
+// py is FEET, not eye height -- moveTo adds heightOffset itself.
 static void arriveAt(World* w, Entity* e, float px, float py, float pz, float yr, float xr) {
     worldEnsureArea(w, Mth::floor(px) >> 4, Mth::floor(pz) >> 4, PORTAL_ARRIVAL_CHUNK_RADIUS);
     e->moveTo(px, py, pz, yr, xr);
@@ -279,55 +388,69 @@ static void arriveAt(World* w, Entity* e, float px, float py, float pz, float yr
     e->yd = 0.0f;
 }
 
-static void carveSafePortalLanding(World* w, int bx, int by, int bz) {
-    // Same reasoning as debug_teleport.cpp's carveSafePlatform: the
-    // landing spot needs a guaranteed-safe pocket regardless of whatever
-    // real terrain happens to already be there, and a netherrack floor
-    // rather than stone so it looks right sitting inside real Nether
-    // terrain. Runs before the frame is built (see ensureNetherSidePortal
-    // below), so there's nothing here yet worth preserving -- the frame's
-    // obsidian posts and portal blocks get written on top of this
-    // clearing immediately afterward, overwriting whatever this leaves in
-    // their footprint.
-    for (int dx = -2; dx <= 2; dx++)
-    for (int dz = -2; dz <= 2; dz++) {
-        setBlock(w, bx + dx, by - 1, bz + dz, BLOCK_NETHERRACK);
-        for (int dy = 0; dy < 4; dy++)
-            setBlock(w, bx + dx, by + dy, bz + dz, BLOCK_AIR);
+// --- Nether-side portal --------------------------------------------------
+
+// Resolves this world's Nether-side anchor, searching for one the first
+// time it is needed and remembering it afterwards.
+//
+// The search replaces the old carveSafePortalLanding, which bulldozed a
+// 5x5x4 pocket with a netherrack floor at a fixed chunk-centre coordinate
+// whatever happened to be there -- including straight through the middle
+// of a lava sea, which is precisely the failure that made a safety
+// platform feel necessary in the first place. Looking for terrain that is
+// already the right shape produces a portal that sits in the landscape
+// instead of one standing on a slab punched into it.
+static bool resolveNetherAnchor(World* w, int* bx, int* by, int* bz) {
+    if (s_anchorKnown) {
+        *bx = s_anchorX; *by = s_anchorY; *bz = s_anchorZ;
+        // Still claim the chunks: the anchor may have been loaded from
+        // level.dat with nothing around it resident yet.
+        worldEnsureArea(w, (*bx) >> 4, (*bz) >> 4, PORTAL_ARRIVAL_CHUNK_RADIUS);
+        return true;
     }
+
+    int cx = netherPortalCX(w), cz = netherPortalCZ();
+    for (int i = 0; i < PORTAL_SITE_RADIUS_COUNT; i++) {
+        int r = kPortalSiteRadii[i];
+        worldEnsureArea(w, cx, cz, r);
+        if (!netherFindPortalSite(w, cx, cz, r, bx, by, bz)) continue;
+        netherPortalSetAnchor(*bx, *by, *bz);
+        return true;
+    }
+    return false;
 }
 
 // Builds a minimal 4-wide x 5-tall obsidian frame (2x3 interior) at the
-// fixed Nether-side location if one doesn't already exist there.
-// Idempotent -- safe to call every time a player arrives, since it first
-// checks whether a portal block already sits there.
-static void ensureNetherSidePortal(World* w) {
+// resolved Nether-side anchor if one isn't already there. Idempotent --
+// safe to call every time a player arrives, since it first checks whether
+// a portal block already sits at the anchor.
+//
+// Returns false when no site could be found at all, so the caller can
+// decline to strand the player rather than building into whatever happens
+// to occupy the fallback coordinate.
+static bool ensureNetherSidePortal(World* w, int* obx, int* oby, int* obz) {
     int bx, by, bz;
-    netherSidePortalAnchor(w, &bx, &by, &bz);
+    if (!resolveNetherAnchor(w, &bx, &by, &bz)) return false;
 
-    // Claim the arrival chunk and its skirt up front, so every write below
-    // lands in a ready chunk instead of being dropped by setBlock's
-    // worldReady guard.
-    worldEnsureArea(w, netherPortalCX(w), netherPortalCZ(), PORTAL_ARRIVAL_CHUNK_RADIUS);
+    *obx = bx; *oby = by; *obz = bz;
 
-    if (worldBlock(w, bx, by, bz) == BLOCK_PORTAL) return; // already built
-
-    carveSafePortalLanding(w, bx, by, bz);
+    if (worldBlock(w, bx, by, bz) == BLOCK_PORTAL) return true; // already built
 
     // Frame: interior 2 wide (x) x 3 tall (y) at fixed z=bz, matching the
-    // alongX=true orientation tryFindFrame/fillFrameInterior use.
+    // alongX=true orientation tryFindFrame/fillFrameInterior use. The site
+    // search guarantees the four columns share one flat, solid, non-lava
+    // surface at by-1 and that by..by+4 is clear air, so the obsidian is
+    // bedded in real ground and nothing needs clearing first.
     //
     // worldSetBlockAndData, not blockPut. blockPut writes the block store
     // and nothing else (block_store.cpp): no data-nibble write, no
     // worldMarkDirty, and -- the one that actually showed -- no
     // lightOnBlockChanged. BLOCK_PORTAL emits light level 11 (tile.cpp),
     // but worldUpdateLights only drains a BFS queue that
-    // lightOnBlockChanged is what fills, so the auto-built Nether frame
-    // never seeded its own glow and sat dark while player-lit Overworld
-    // portals (which go through fillFrameInterior, and so through
-    // worldSetBlockAndData) lit up correctly. The missing dirty flag was
-    // masked only by carveSafePortalLanding happening to dirty the same
-    // sections a moment earlier via setBlock.
+    // lightOnBlockChanged is what fills, so an auto-built Nether frame
+    // written with blockPut never seeded its own glow and sat dark while
+    // player-lit Overworld portals (which go through fillFrameInterior,
+    // and so through worldSetBlockAndData) lit up correctly.
     for (int dx = -1; dx <= 2; dx++) {
         for (int dy = -1; dy <= 3; dy++) {
             bool isPost = (dx == -1 || dx == 2 || dy == -1 || dy == 3);
@@ -340,75 +463,152 @@ static void ensureNetherSidePortal(World* w) {
 
     worldNotifyNeighborsChanged(w, bx, by, bz);
     worldUpdateLights(w);
+    return true;
 }
 
-static void teleportToNether(World* w, Entity* e) {
-    // e is guaranteed isPlayer() by the caller (netherPortalEntityInside),
-    // and Player is the only isPlayer()==true class in this codebase (see
-    // Entity::isPlayer's default-false / Player's override-true split in
-    // entity.h/player.h) -- same cast convention already used elsewhere
-    // for g_level.player (see animal/cow.cpp) despite -fno-exceptions/
-    // -fno-rtti ruling out a checked dynamic_cast.
-    Player* p = (Player*)e;
-    p->setNetherReturnPosition(e->x, e->y, e->z, e->yRot, e->xRot);
+// --- The two crossings ---------------------------------------------------
 
-    ensureNetherSidePortal(w);
+static bool teleportToNether(World* w, Player* p) {
+    // Record the Overworld side BEFORE moving. FEET, not eye height:
+    // Entity::y already includes heightOffset, and Entity::moveTo adds
+    // heightOffset again on arrival, so storing the raw y made the player
+    // gain about 1.6 blocks of altitude on every single round trip.
+    p->setNetherReturnPosition(p->x, p->y - p->heightOffset, p->z, p->yRot, p->xRot);
 
     int bx, by, bz;
-    netherSidePortalAnchor(w, &bx, &by, &bz);
-    // Land just in front of the portal plane (bz - 1), not inside the
-    // portal blocks themselves. The re-entry latch would hold either way,
-    // but landing outside the portal face means the latch releases on the
-    // very next tick, so the player can turn around and go straight back
-    // if they want to.
-    arriveAt(w, e, (float)bx + 0.5f, (float)by, (float)(bz - 1) + 0.5f, e->yRot, e->xRot);
+    if (!ensureNetherSidePortal(w, &bx, &by, &bz)) return false;
+
+    float ex, ey, ez, eyaw;
+    if (!portalExitSpot(w, bx, by, bz, p->yRot, &ex, &ey, &ez, &eyaw)) {
+        // The site search requires a standable face, so this only happens
+        // for an anchor loaded from an older save whose surroundings have
+        // since been built over. Put the player in the frame itself rather
+        // than nowhere; the re-entry latch holds until they walk clear.
+        ex = (float)bx + 0.5f; ey = (float)by; ez = (float)bz + 0.5f;
+        eyaw = p->yRot;
+    }
+    arriveAt(w, p, ex, ey, ez, eyaw, 0.0f);
+    return true;
 }
 
-static void teleportToOverworld(World* w, Entity* e) {
-    Player* p = (Player*)e; // see teleportToNether's comment on this cast
+static bool teleportToOverworld(World* w, Player* p) {
     if (!p->hasNetherReturnPosition()) {
         // No recorded Overworld portal (e.g. someone reached the Nether
-        // portal some other way without ever crossing from the Overworld
-        // side, on this save or a previous one) -- nothing sensible to
-        // return to, so this is a no-op rather than guessing a position.
-        // Matches this project's existing convention of failing closed
-        // rather than teleporting somewhere arbitrary (see
-        // worldChunkIsReserved's guards).
-        return;
+        // some other way without ever crossing from the Overworld side, on
+        // this save or a previous one) -- nothing sensible to return to,
+        // so this fails rather than guessing a position. Matches this
+        // project's existing convention of failing closed rather than
+        // teleporting somewhere arbitrary (see worldChunkIsReserved's
+        // guards).
+        return false;
     }
-    // The recorded position is, by construction, a spot inside the
-    // Overworld portal (it is where the player was standing when the
-    // outbound teleport fired), so the player arrives inside portal
-    // blocks. That is fine and matches vanilla: the latch below holds
-    // until they step clear of the portal, at which point it releases and
-    // the portal works again.
-    arriveAt(w, e, p->netherReturnX, p->netherReturnY, p->netherReturnZ,
-             p->netherReturnYRot, p->netherReturnXRot);
+
+    float rx = p->netherReturnX, ry = p->netherReturnY, rz = p->netherReturnZ;
+
+    // The recorded position is a spot inside the Overworld portal, since
+    // it is where the player stood when the outbound crossing fired. The
+    // chunks around it have long since been evicted by the streamer, so
+    // claim them before reading any blocks there -- an unloaded chunk
+    // reads as BLOCK_INVISIBLE_BEDROCK and portalPlaneAlongX would get a
+    // meaningless answer from it.
+    int rbx = Mth::floor(rx), rbz = Mth::floor(rz);
+    worldEnsureArea(w, rbx >> 4, rbz >> 4, PORTAL_ARRIVAL_CHUNK_RADIUS);
+
+    int rby = Mth::floor(ry);
+    if (worldBlock(w, rbx, rby, rbz) == BLOCK_PORTAL) {
+        float ex, ey, ez, eyaw;
+        if (portalExitSpot(w, rbx, rby, rbz, p->netherReturnYRot, &ex, &ey, &ez, &eyaw)) {
+            arriveAt(w, p, ex, ey, ez, eyaw, 0.0f);
+            return true;
+        }
+    }
+    // Portal gone (mined out, or an old save recorded before exit spots
+    // existed): drop the player where they were, facing as they were.
+    arriveAt(w, p, rx, ry, rz, p->netherReturnYRot, p->netherReturnXRot);
+    return true;
+}
+
+// --- Per-tick crossing state ---------------------------------------------
+
+// Which side is a given chunk on? worldChunkIsNether deliberately does not
+// check world size or the reserved-region bound itself (see its comment in
+// world.h), so worldChunkIsReserved is checked alongside it rather than
+// assumed.
+static bool chunkIsNetherSide(World* w, int cx, int cz) {
+    return worldChunkIsReserved(w, cx, cz) && worldChunkIsNether(w, cx, cz);
 }
 
 void netherPortalEntityInside(World* w, int x, int y, int z, Entity* e) {
     if (!netherPortalsSupported(w)) return;  // see netherPortalsSupported
     if (!e || !e->isPlayer()) return;        // players only for this pass -- see nether_portal.h
 
+    // e is guaranteed isPlayer() by the check above, and Player is the only
+    // isPlayer()==true class in this codebase (see Entity::isPlayer's
+    // default-false / Player's override-true split in entity.h/player.h) --
+    // same cast convention already used elsewhere for g_level.player (see
+    // animal/cow.cpp) despite -fno-exceptions/-fno-rtti ruling out a
+    // checked dynamic_cast.
     Player* p = (Player*)e;
 
-    // Re-entry latch, replacing the old tick-counter cooldown. See the
-    // comment on Player::inPortalThisTick in player.h for why a counter
-    // incremented here could never measure time: this function runs once
-    // per overlapping portal block per tick, not once per tick.
+    // No teleport here any more, just a note that contact happened. This
+    // function runs once per overlapping portal block per tick, which is
+    // why it cannot own the timing; netherPortalPlayerTick below is the
+    // once-per-tick half. Recording the block lets that half work out the
+    // portal's orientation without having to search for it again.
     p->inPortalThisTick = true;
-    if (p->portalLatched) return;
+    p->havePortalBlock = true;
+    p->portalBlockX = x; p->portalBlockY = y; p->portalBlockZ = z;
+}
+
+void netherPortalBeginForcedCrossing(Player* p) {
+    if (!p) return;
+    if (p->portalCharge > 0 || p->portalArrive > 0) return; // already crossing
+    p->portalForced = true;
+    p->havePortalBlock = false;
+}
+
+void netherPortalPlayerTick(World* w, Player* p) {
+    if (!p) return;
+
+    // Arrival fade runs down regardless of anything else.
+    if (p->portalArrive > 0) p->portalArrive--;
+
+    bool charging = p->inPortalThisTick || p->portalForced;
+    p->inPortalThisTick = false;
+
+    if (!charging) {
+        // A whole tick clear of any portal releases the re-entry latch.
+        p->portalLatched = false;
+        // Drain the charge so a partial crossing fades back in rather than
+        // holding the screen half-dark until the player commits.
+        if (p->portalCharge > 0) p->portalCharge--;
+        return;
+    }
+
+    if (p->portalLatched) return;   // stood in the arrival portal; wait until clear
+
+    if (++p->portalCharge < Player::PORTAL_CHARGE_TICKS) return;
+
+    // Fully charged: cross now, with the screen at full black.
+    p->portalCharge = 0;
     p->portalLatched = true;
+    p->portalForced = false;
 
-    // Which side is this portal on? worldChunkIsNether deliberately does
-    // not check world size or the reserved-region bound itself (see its
-    // comment in world.h), so worldChunkIsReserved is checked alongside it
-    // rather than assumed -- netherPortalsSupported above has already
-    // established that this world HAS a reserved region, and this
-    // establishes that this particular portal is inside it.
-    int cx = x >> 4, cz = z >> 4;
-    bool onNetherSide = worldChunkIsReserved(w, cx, cz) && worldChunkIsNether(w, cx, cz);
+    if (!netherPortalsSupported(w)) return;
 
-    if (onNetherSide) teleportToOverworld(w, e);
-    else              teleportToNether(w, e);
+    // Which way? From the portal block if there is one, otherwise (a
+    // forced/debug crossing) from where the player is standing.
+    int cx, cz;
+    if (p->havePortalBlock) { cx = p->portalBlockX >> 4; cz = p->portalBlockZ >> 4; }
+    else                    { cx = Mth::floor(p->x) >> 4; cz = Mth::floor(p->z) >> 4; }
+
+    bool ok = chunkIsNetherSide(w, cx, cz) ? teleportToOverworld(w, p)
+                                           : teleportToNether(w, p);
+
+    // Only fade back in if something actually happened. A failed crossing
+    // (no site found, no recorded return position) leaves the player where
+    // they were with a clear screen, rather than blacking out and back for
+    // a move that never took place.
+    if (ok) p->portalArrive = Player::PORTAL_ARRIVE_TICKS;
+    p->havePortalBlock = false;
 }

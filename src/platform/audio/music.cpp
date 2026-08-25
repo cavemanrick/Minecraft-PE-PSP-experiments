@@ -204,6 +204,7 @@ void musicSetFormat(unsigned int sampleRate, int channels) {
 // random rotation).
 static char g_rotationTracks[MAX_ROTATION_TRACKS][PATH_LEN];
 static int  g_rotationCount = 0;
+static int  g_rotationIdx   = 0; // next track to play, sequential loop
 
 static bool isSpecialTrack(const char* filename) {
     return strcmp(filename, "menu.raw") == 0 || strcmp(filename, "danny.raw") == 0;
@@ -211,6 +212,7 @@ static bool isSpecialTrack(const char* filename) {
 
 static void scanMusicFolder(void) {
     g_rotationCount = 0;
+    g_rotationIdx   = 0;
 
     DIR* d = opendir(assetPath(MUSIC_DIR));
     if (!d) return;
@@ -235,19 +237,16 @@ static void scanMusicFolder(void) {
     printf("[music] %d rotation track(s) found in %s\n", g_rotationCount, MUSIC_DIR);
 }
 
-static const char* pickRotationTrack(void) {
-    // If data/music/ holds nothing but menu.raw and danny.raw -- which is
-    // the out-of-the-box state -- the rotation pool is empty, and the old
-    // code's answer to that was to return NULL and reschedule five seconds
-    // later, forever. Gameplay music therefore ended permanently the
-    // moment danny.raw finished, with nothing in the log to say why.
-    //
-    // Falling back to danny.raw means "one music file installed" behaves
-    // like a one-track rotation rather than like a bug. Drop the fallback
-    // only if silence-after-one-track is ever actually wanted.
-    if (g_rotationCount == 0) return FIRST_TRACK;
-    int idx = rand() % g_rotationCount;
-    return g_rotationTracks[idx];
+static const char* nextRotationTrack(void) {
+    // Sequential loop through whatever's in data/music/ (excluding
+    // menu.raw/danny.raw), in the order scanMusicFolder() found them.
+    // Deterministic on purpose: whether rotation is actually advancing
+    // is now visible just by listening for the loop, rather than relying
+    // on rand() output or a console log to confirm.
+    if (g_rotationCount == 0) return NULL;
+    const char* track = g_rotationTracks[g_rotationIdx];
+    g_rotationIdx = (g_rotationIdx + 1) % g_rotationCount;
+    return track;
 }
 
 // ---- playback state machine -----------------------------------------------
@@ -274,19 +273,24 @@ void musicInit(void) {
                                    PSP_AUDIO_FORMAT_STEREO);
     if (g_channel < 0) return;
 
-    // Reader thread: same priority as the SFX mixer thread's disk-adjacent
-    // work would be, but it's fine to run slightly lower priority than
-    // the output thread since it's allowed to fall behind briefly (the
-    // ring absorbs that) -- it just must never be starved indefinitely.
+    // Priority: PSPSDK gives the main thread a default priority of 32
+    // (0x20) unless PSP_MAIN_THREAD_PRIORITY overrides it, which this
+    // project doesn't set. Lower priority NUMBER wins pre-emption on PSP,
+    // so a music thread at 0x13/0x14 -- as this was originally set --
+    // runs at *higher* priority than the game loop, meaning it can
+    // pre-empt rendering/gameplay logic on every ~23ms block boundary.
+    // With the output thread looping tightly on
+    // sceAudioOutputPannedBlocking(), that adds up to a measurable frame
+    // hit. 0x25/0x26 keep both music threads below the main thread's
+    // priority (and below sound_thread's 0x12, which predates this and
+    // isn't implicated), so they only run when the main thread isn't
+    // ready -- gameplay is not starved for the sake of buffering ahead.
     int readerThid = sceKernelCreateThread("music_reader_thread", musicReaderThread,
-                                           0x14, 0x10000, PSP_THREAD_ATTR_USER, 0);
+                                           0x26, 0x10000, PSP_THREAD_ATTR_USER, 0);
     if (readerThid < 0) { g_channel = -1; return; }
 
-    // Output thread: higher priority (lower number) than the reader, so
-    // it always gets CPU time to hand the next ready block to the
-    // hardware right on schedule.
     int outputThid = sceKernelCreateThread("music_output_thread", musicOutputThread,
-                                           0x13, 0x10000, PSP_THREAD_ATTR_USER, 0);
+                                           0x25, 0x10000, PSP_THREAD_ATTR_USER, 0);
     if (outputThid < 0) { g_channel = -1; return; }
 
     sceKernelStartThread(readerThid, 0, 0);
@@ -376,7 +380,7 @@ void musicUpdate(bool inMainMenu, bool inGameplay) {
 
         case PHASE_WAIT_ROTATION:
             if (now >= g_phaseUntil) {
-                const char* track = pickRotationTrack();
+                const char* track = nextRotationTrack();
                 if (track) {
                     musicPlay(track, false);
                     g_phase = PHASE_PLAYING_ROTATION;

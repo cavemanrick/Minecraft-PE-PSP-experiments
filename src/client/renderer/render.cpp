@@ -130,6 +130,85 @@ unsigned int g_skyColorNow = SKY_COLOR;
 static unsigned int g_skyDomeColorNow = SKY_DOME_COLOR;
 static unsigned int g_cloudColorNow = 0xCCFFFFFFu;
 
+// --- Nether atmosphere ---------------------------------------------------
+//
+// The Nether is not a separate Level in this port -- it is a reserved strip
+// of chunks inside the same world (see worldChunkIsNether in world.h), so
+// "which dimension is the camera in" is a position test, not a stored
+// dimension id. That is why this is recomputed per frame from the eye
+// position rather than read off the player or the level.
+//
+// Three things have to agree for red mist to read as mist rather than as a
+// coloured wall hanging in front of the player:
+//
+//   * the fog colour,
+//   * the sky-dome colour, and
+//   * the frame clear colour -- main.cpp clears to g_skyColorNow.
+//
+// The clear colour is the one that matters most and is the easiest to miss.
+// It is what shows through wherever no chunk has been meshed yet: past
+// g_fogCullDist, past the streaming radius, and through the gaps while
+// chunks are still building. If it does not match the fog colour *exactly*,
+// terrain that has already faded fully into fog still sits against a
+// visibly different background, and that seam draws a hard circle around
+// the player at the draw distance -- the exact artifact the fog exists to
+// hide. Driving all three from g_skyColorNow keeps them in lockstep for
+// free, which is what the overworld path already relies on.
+//
+// Colours are ABGR (0xAABBGGRR), matching SKY_COLOR and scaleABGR above --
+// not the RGBA you would write in a shader.
+#define NETHER_FOG_COLOR   0xFF1A2472u   // r=114 g=36  b=26  -- smoky ember red
+#define NETHER_DOME_COLOR  0xFF0D1238u   // r=56  g=18  b=13  -- darker, for the dome
+
+// How far the mist reaches, as a fraction of the effective view distance,
+// then clamped. The Nether shell is a low enclosed box (roughly y=8..46, see
+// NETHER_LAND_BASE_Y / NETHER_CEIL_BASE_Y in nether_gen.cpp), so letting the
+// fog run the full view-distance slider would leave far bedrock crisp and
+// undo the effect at exactly the settings where it matters most.
+#define NETHER_FOG_FRACTION 0.55f
+#define NETHER_FOG_MIN      16.0f
+#define NETHER_FOG_MAX      48.0f
+
+// Mist, not a wall. The overworld starts its fade at 25% of the far plane,
+// which gives a long clear stretch and then a fairly abrupt ramp. Starting
+// much closer means haze is already faintly present a few blocks out and
+// thickens gradually -- that gradient is what the eye reads as hanging mist.
+#define NETHER_FOG_NEAR_FRAC 0.08f
+
+bool g_inNether = false;
+
+// Reserved-region membership, from an eye position in world block space.
+// worldChunkIsNether deliberately does not check world size or the
+// reserved-region bound itself (see its comment in world.h), so
+// worldChunkIsReserved is checked alongside it rather than assumed -- the
+// same pairing chunkIsNetherSide uses in nether_portal.cpp. Worlds with no
+// reserved regions answer false here, so smaller presets keep the overworld
+// sky unconditionally.
+static inline bool eyeInNether(const World* w, float x, float z) {
+    int cx = ((int)floorf(x)) >> 4, cz = ((int)floorf(z)) >> 4;
+    return worldChunkIsReserved(w, cx, cz) && worldChunkIsNether(w, cx, cz);
+}
+
+// The clear colour for the frame that is about to be drawn.
+//
+// main.cpp clears the framebuffer *before* calling gameRender, so reading
+// g_skyColorNow there uses the value gameRender left behind last frame. For
+// the overworld that has always been fine -- day/night drifts slowly enough
+// that a one-frame-stale sky is not perceptible. A portal teleport is not
+// slow: it changes the answer between two consecutive frames. Without this,
+// the first frame in the Nether would clear to overworld blue and then draw
+// red-fogged terrain over it, flashing blue through every gap that has not
+// meshed yet -- which, on arrival, is most of the screen.
+//
+// Resolved from the player position rather than the camera because the
+// camera basis for this frame has not been computed yet at clear time.
+unsigned int gameClearColor(void) {
+    if (!g_worldBuilt || !g_level.player) return g_skyColorNow;
+    if (eyeInNether(&g_world, g_level.player->x, g_level.player->z))
+        return NETHER_FOG_COLOR;
+    return g_skyColorNow;
+}
+
 static unsigned int scaleABGR(unsigned int c, float fr, float fg, float fb) {
     unsigned int r = (unsigned int)(( c        & 0xFF) * fr);
     unsigned int g = (unsigned int)(((c >> 8)  & 0xFF) * fg);
@@ -170,6 +249,23 @@ static float skySunIntensity(float alpha, float yawDeg, float pitchDeg, float mi
 static float g_camYawNow = 0.0f, g_camPitchNow = 0.0f;
 
 static void updateDayColors(float alpha) {
+    if (g_inNether) {
+        // Returning here, rather than tinting red at the end, is the whole
+        // point of the branch. There is no sun below, so the day/night and
+        // sunrise terms are meaningless -- but the altitude term at the
+        // bottom of this function is actively destructive: it darkens the
+        // sky toward black below y=32 to sell being underground, by
+        // (y/32)^2. The Nether shell only spans roughly y=8..46, so that
+        // curve would multiply the mist by about 0.1 at the floor and ~0.4
+        // at head height, crushing the red to near-black across essentially
+        // the entire dimension. Ambient darkening is not wanted here anyway:
+        // Nether fog is uniform regardless of depth or time.
+        g_skyColorNow     = NETHER_FOG_COLOR;
+        g_skyDomeColorNow = NETHER_DOME_COLOR;
+        g_cloudColorNow   = NETHER_DOME_COLOR;
+        return;
+    }
+
     float td = worldTimeOfDay(g_world.dayTime, alpha);
     float c = cosf(td * 2.0f * 3.14159265f);
 
@@ -1421,6 +1517,13 @@ void gameRender(MenuState& s) {
     }
 
     g_camYawNow = iyaw; g_camPitchNow = ipitch;
+
+    // From the interpolated eye position, not the raw player position, so the
+    // atmosphere switches on the same frame the camera actually crosses --
+    // and so third-person / camera-pullback cases follow the camera rather
+    // than the body. Must be set before updateDayColors, which branches on it.
+    g_inNether = eyeInNether(&g_world, ix, iz);
+
     updateDayColors(a);
 
     profBegin(PROF_SKY);
@@ -1435,11 +1538,26 @@ void gameRender(MenuState& s) {
         sceGuEnable(GU_FOG);
 
         sceGuFog(0.0f, 150.0f, g_skyColorNow);
-        renderSky(px0, py0, pz0);
 
-        renderSunOrMoon(a, true,  px0, py0, pz0);
-        renderSunOrMoon(a, false, px0, py0, pz0);
-        renderStars(a, px0, py0, pz0);
+        // Nothing celestial exists under a bedrock ceiling, so the dome, sun,
+        // moon and stars are all skipped. Note what is deliberately *not*
+        // skipped: the enclosing g_beautifulSkies block still runs its
+        // projection push/pop and still leaves depth-test enabled with the
+        // depth mask closed below. renderSky happens to leave that same
+        // state, so short-circuiting the whole block instead would silently
+        // change depth state for every later pass depending on a settings
+        // toggle. Skipping only the draws keeps the state path identical.
+        //
+        // Dropping the dome also leaves the frame clear colour showing
+        // wherever geometry does not cover -- which is exactly what is
+        // wanted, since that clear is now the same red as the fog.
+        if (!g_inNether) {
+            renderSky(px0, py0, pz0);
+
+            renderSunOrMoon(a, true,  px0, py0, pz0);
+            renderSunOrMoon(a, false, px0, py0, pz0);
+            renderStars(a, px0, py0, pz0);
+        }
         sceGumMatrixMode(GU_PROJECTION);
         sceGumPopMatrix();
 
@@ -1495,6 +1613,32 @@ void gameRender(MenuState& s) {
         SET_WORLD_FOG(0.0f, 3.0f, 0xFF000000u | (b << 16) | (g << 8) | r);
         g_fogCullDist = 3.0f + 24.0f;
     }
+    else if (g_inNether) {
+        // Ordered after the water and lava cases on purpose: a head submerged
+        // in Nether lava should still get the tight orange lava fog, not the
+        // ambient mist. Being in the Nether describes the air around you, and
+        // only applies when the eye is actually in air.
+        //
+        // g_skyColorNow is used rather than NETHER_FOG_COLOR directly so this
+        // stays tied to the same value main.cpp clears the framebuffer with.
+        // If the two ever drift apart, the fade-out stops being seamless --
+        // see the note at NETHER_FOG_COLOR.
+        float fogDist = vdEff * NETHER_FOG_FRACTION;
+        if (fogDist > NETHER_FOG_MAX) fogDist = NETHER_FOG_MAX;
+        if (fogDist < NETHER_FOG_MIN) fogDist = NETHER_FOG_MIN;
+
+        SET_WORLD_FOG(fogDist * NETHER_FOG_NEAR_FRAC, fogDist, g_skyColorNow);
+
+        // Pulling the cull distance in behind the fog is what turns this from
+        // a pure visual change into a performance win. Anything past fogDist
+        // has already resolved to solid fog colour, and the background it
+        // would be drawn against is that same colour, so skipping it is
+        // invisible. worldDraw and worldDrawWater both route their radius
+        // through drawCull, so setting this alone shrinks the opaque, no-mip,
+        // leaf and water passes together. The +24 keeps a block of margin so
+        // sections do not pop at the boundary while still fully fogged.
+        if (fogDist < vdEff) g_fogCullDist = fogDist + 24.0f;
+    }
     else {
 
         float fogDist = vdEff;
@@ -1537,7 +1681,13 @@ void gameRender(MenuState& s) {
         playerModelRender(a);
     profEnd(PROF_ENTITY);
 
-    if (g_worldBuilt && g_beautifulSkies && g_cloudMode) {
+    if (g_worldBuilt && g_beautifulSkies && g_cloudMode && !g_inNether) {
+        // Clouds sit at y=128, far above the Nether's bedrock ceiling (~y=46),
+        // so in the overworld they would be invisible from inside the shell
+        // anyway -- but the pass still costs a full grid of geometry and, more
+        // to the point, it rebinds fog to the cloud band and then restores the
+        // world fog from s_worldFogNear/Far/Color. Skipping it outright avoids
+        // paying for a pass that can never be seen from inside the Nether.
         loadWorldView(ex, ey, ez, ctrX, ctrY, ctrZ, roll, 0.0f, 0.0f, 0.0f);
         renderCloudPass(a, px0, py0, pz0);
         loadWorldView(ex, ey, ez, ctrX, ctrY, ctrZ, roll, g_relBaseX, g_relBaseY, g_relBaseZ);

@@ -8,33 +8,70 @@
 #include "world/level/world.h"
 
 #include <math.h>
+#include <stdlib.h>  // qsort -- noise-field calibration (see ensureNetherNoise)
 
 // --- Vertical shell -----------------------------------------------------
-// Floor-hills / ceiling-hills shape (replaces the earlier tunnel-carved-
-// solid-shell approach): a sealed 100-tall bedrock box, a shallow lava
-// floor, netherrack hills rising from the floor and hanging from the
-// ceiling with gaps between them for lava seas/rivers, a guaranteed
-// navigable air gap, and a few spots where the two hill layers are
-// allowed to touch into a single pillar.
-// Vertical shell, now 40 blocks tall (was 100). Every figure below was
-// rescaled together rather than just clamping the top, because the four
-// numbers are interdependent: the floor hills and ceiling hills each grow
-// toward each other out of NETHER_FLOOR_BASE_Y / NETHER_CEIL_BASE_Y, and
-// NETHER_MIN_GAP is what keeps them from meeting. Leaving the old hill
-// heights against a 40-tall box would have made the gap clamp fire on
-// nearly every column, flattening the hills into a featureless slab.
+// SOLID-FIRST model: the Nether begins as a slab of netherrack twenty
+// blocks deep, and lava is CARVED OUT of it. Land is the default state;
+// seas and rivers are subtractive.
 //
-// Budget check, worst case: floor base 4 + max hill 10 = top at 14;
-// ceiling base 38 - max hill 10 = bottom at 28; gap = 14, exactly
-// NETHER_MIN_GAP. So the clamp is reached but never violated, and the
-// Nether stays navigable end to end.
-#define NETHER_H                40     // total column height, y=0..39
+// This replaces a floor-hills model that worked the other way round: a
+// permanent three-block lava sheet spanning the entire strip, with
+// netherrack hills standing on top of it, so a column was land only where
+// the hill noise cleared a fixed threshold. That coupled "how much lava
+// exists" to the ABSOLUTE value of a Perlin field -- and that field
+// carries a large per-seed constant offset (see the calibration note
+// further down), so whole worlds came out as unbroken lava with no floor
+// at all. Measured over ten seeds, land coverage ran 13%-86%, and on the
+// low seeds every local window sampled was 100% sea.
+//
+// Carving inverts the dependency. An uncarved column is land by
+// construction, so the worst a badly-offset noise field can now do is
+// give a world slightly more or slightly fewer seas than intended -- it
+// can no longer remove the ground.
+#define NETHER_H                48    // total column height, y=0..47
+
+// Raised from 40. This is free: block storage is sectioned in 16-block
+// slices (SECTION_SY in chunk.h), and y=0..47 occupies sections 0-2 --
+// exactly the same three sections y=0..39 already did. The extra eight
+// blocks cost no memory and buy the headroom a twenty-deep floor slab
+// needs in order to still leave a navigable cavern above it.
 #define NETHER_BEDROCK_BOTTOM   0
-#define NETHER_BEDROCK_TOP      (NETHER_H - 1)  // y=39
-#define NETHER_LAVA_FLOOR_TOP   3       // y=1..3 is the lava floor, y=0 is bedrock
-#define NETHER_FLOOR_BASE_Y     (NETHER_LAVA_FLOOR_TOP + 1) // y=4, hills rise from here
-#define NETHER_CEIL_BASE_Y      (NETHER_BEDROCK_TOP - 1)    // y=38, hills hang from here
-#define NETHER_MIN_GAP          14      // guaranteed navigable air thickness between the two hill layers
+#define NETHER_BEDROCK_TOP      (NETHER_H - 1)   // y=47
+
+// The lava level: every carved basin floods to exactly this height, the
+// way the Overworld has one sea level. "Twenty blocks of netherrack" is
+// literally this number -- an uncarved column is solid netherrack from
+// y=1 to y=20 before any hill relief is added on top of it.
+#define NETHER_LAVA_LEVEL_Y     20
+
+// Deepest a sea carve may cut, so a full-strength sea is
+// (NETHER_LAVA_LEVEL_Y - NETHER_BASIN_FLOOR_Y) blocks of lava deep.
+#define NETHER_BASIN_FLOOR_Y    15
+
+// Rivers cut shallower than seas: a channel reads as a winding stream
+// rather than a canyon, and a shallower cut leaves more of the slab
+// intact where rivers cross hills.
+#define NETHER_RIVER_FLOOR_Y    17
+
+// Lowest possible land surface, one above the lava level -- so any column
+// that is not carved is dry by construction, and the shoreline of every
+// sea is exactly one block of netherrack standing proud of the lava.
+#define NETHER_LAND_BASE_Y      (NETHER_LAVA_LEVEL_Y + 1)   // y=21
+#define NETHER_HILL_MAX_HEIGHT  7      // land tops out at y=28
+
+#define NETHER_CEIL_BASE_Y      (NETHER_BEDROCK_TOP - 1)    // y=46
+#define NETHER_CEIL_HILL_MAX    7      // ceiling bottoms out at y=39
+#define NETHER_MIN_GAP          10     // guaranteed navigable air between the two layers
+
+// Lowest y any downward surface scan needs to reach: the bottom of the
+// deepest possible basin. Nothing standable exists below this.
+#define NETHER_SCAN_MIN_Y       NETHER_BASIN_FLOOR_Y
+
+// Budget check, worst case: land top 21+7 = 28; ceiling bottom 46-7 = 39;
+// gap = 11, one clear of NETHER_MIN_GAP. The clamp below therefore never
+// fires on ordinary terrain and exists purely as a guard for the rare
+// touch-point columns' neighbours.
 
 #define MCPE_PI 3.14159265f
 
@@ -55,24 +92,105 @@ static bool isNetherStripEdgeZ1(const World*, int cz) { return cz == WORLD_NETHE
 
 // --- Height fields --------------------------------------------------------
 // Two independent 2D noise fields sampled in *global* block coordinates
-// (not chunk-local) so hills stay continuous across chunk borders, same
+// (not chunk-local) so terrain stays continuous across chunk borders, same
 // requirement the old cave-carving code had for its own tunnel math.
 // Values are held in file-local statics and lazily built per world seed,
 // same lifetime pattern nether_biome.cpp already uses for its own seed-
 // derived state.
 static bool s_noiseReady = false;
 static long s_noiseForSeed = 0;
-static PerlinNoise* s_floorNoise = 0;   // drives floor-hill height + "skip" gaps
-static PerlinNoise* s_ceilNoise = 0;    // drives ceiling-hill depth + "skip" gaps
-static PerlinNoise* s_touchNoise = 0;   // sparse noise field picking the rare touch-point columns
+static PerlinNoise* s_floorNoise = 0;   // land relief + which columns are sea
+static PerlinNoise* s_ceilNoise = 0;    // ceiling-hill depth
+static PerlinNoise* s_touchNoise = 0;   // sparse field picking touch-point columns
 static PerlinNoise* s_riverNoise = 0;   // ridged field tracing lava river channels
 
-static void ensureNetherNoise(long worldSeed) {
+// --- Field calibration ----------------------------------------------------
+// PerlinNoise::getValue halves `pow` on each octave, so octave i is
+// sampled at x*pow -- progressively LOWER frequency -- and divided by pow
+// -- progressively HIGHER amplitude. The most heavily weighted octave is
+// therefore also the flattest one. At NETHER_HILL_NOISE_SCALE that
+// dominant term varies by well under one noise unit across the entire
+// 256-block strip, so in practice it acts as a per-seed constant OFFSET
+// rather than as terrain variation.
+//
+// The previous code fought this with fixed divisors (NETHER_FLOOR_NOISE_
+// GAIN and friends). A divisor cannot fix an offset: it rescales the
+// spread and leaves the centre exactly where it was, which is why a
+// threshold that selected a quarter of columns on one seed selected all
+// of them on another.
+//
+// So the thresholds are not compile-time constants any more. Once per
+// world, each field is sampled on a coarse grid over the strip's real
+// footprint, and each threshold is taken as the QUANTILE of that sample
+// for the coverage actually wanted. Asking for "the lowest 32% of columns
+// are sea" yields 32% on every seed, because the number being compared
+// against is derived from that seed's own distribution rather than
+// guessed in advance.
+//
+// The knobs below are now stated as fractions of columns, which is both
+// what we actually care about and directly checkable by measurement.
+#define NETHER_SEA_FRACTION        0.32f  // columns that are open lava sea
+#define NETHER_HILL_FULL_QUANTILE  0.92f  // land value at which hills reach full height
+#define NETHER_RIVER_FRACTION      0.030f // columns in a river channel proper
+#define NETHER_RIVER_SHORE_EXTRA   0.055f // further columns forming the sloped banks
+#define NETHER_TOUCH_FRACTION      0.015f // columns allowed to become floor-to-ceiling pillars
+
+#define NETHER_HILL_NOISE_SCALE  0.02f
+#define NETHER_RIVER_NOISE_SCALE 0.010f
+#define NETHER_TOUCH_NOISE_SCALE 0.008f
+
+// Calibrated thresholds, in the fields' own raw units.
+static float s_seaThreshold    = 0.0f;
+static float s_seaDeepAt       = 0.0f;
+static float s_hillFullAt      = 1.0f;
+static float s_ceilThreshold   = 0.0f;
+static float s_ceilFullAt      = 1.0f;
+static float s_riverMedian     = 0.0f;
+static float s_riverHalfWidth  = 0.0f;
+static float s_riverShoreOuter = 0.0f;
+static float s_touchThreshold  = 0.0f;
+
+// 40x40 samples across the strip. 1600 noise evaluations per field, four
+// fields, once per world -- negligible against the cost of generating even
+// a single chunk, and it happens during world load rather than in play.
+#define NETHER_CAL_GRID 40
+static float s_calBuf[NETHER_CAL_GRID * NETHER_CAL_GRID];
+
+static int netherCalCompare(const void* a, const void* b) {
+    float fa = *(const float*)a, fb = *(const float*)b;
+    return (fa < fb) ? -1 : ((fa > fb) ? 1 : 0);
+}
+
+// Fills s_calBuf with a coarse sample of `p` across the strip, sorted
+// ascending. Returns the sample count.
+static int netherCalSample(PerlinNoise* p, float scale, int ox, int oz) {
+    const int stripBlocks = WORLD_NETHER_CHUNKS * 16;
+    int step = stripBlocks / NETHER_CAL_GRID;
+    if (step < 1) step = 1;
+
+    int n = 0;
+    for (int i = 0; i < NETHER_CAL_GRID; i++)
+        for (int j = 0; j < NETHER_CAL_GRID; j++) {
+            float gx = (float)(ox + i * step), gz = (float)(oz + j * step);
+            s_calBuf[n++] = p->getValue(gx * scale, gz * scale);
+        }
+    qsort(s_calBuf, n, sizeof(float), netherCalCompare);
+    return n;
+}
+
+static float netherCalAt(int n, float q) {
+    int i = (int)(q * (float)(n - 1) + 0.5f);
+    if (i < 0) i = 0;
+    if (i >= n) i = n - 1;
+    return s_calBuf[i];
+}
+
+static void ensureNetherNoise(long worldSeed, const World* w) {
     if (s_noiseReady && s_noiseForSeed == worldSeed) return;
     // Different XOR constants per field (and different again from
-    // nether_biome.cpp's own 0x4E45544CL) so the three noise fields and
-    // the biome placement are all independent of one another even though
-    // they share the same world seed.
+    // nether_biome.cpp's own 0x4E45544CL) so the four noise fields and the
+    // biome placement are all independent of one another even though they
+    // share the same world seed.
     Random rf(worldSeed ^ 0x466C6F6FL); // "Floo"r
     Random rc(worldSeed ^ 0x4365696CL); // "Ceil"
     Random rt(worldSeed ^ 0x546F7563L); // "Touc"h
@@ -82,138 +200,142 @@ static void ensureNetherNoise(long worldSeed) {
     s_ceilNoise  = new PerlinNoise(&rc, 4);
     s_touchNoise = new PerlinNoise(&rt, 2);
     s_riverNoise = new PerlinNoise(&rr, 3);
+
+    // Calibrate over where this world's Nether actually is. The strip's X
+    // origin depends on the preset's overworld width (worldNetherOriginCX
+    // in world.h), and sampling the wrong window would calibrate against a
+    // part of the noise field the player never sees.
+    int ox = worldNetherOriginCX(w) * 16;
+    int oz = WORLD_NETHER_ORIGIN_CZ * 16;
+
+    int n = netherCalSample(s_floorNoise, NETHER_HILL_NOISE_SCALE, ox, oz);
+    s_seaThreshold = netherCalAt(n, NETHER_SEA_FRACTION);
+    // Where a sea reaches its full depth: the very bottom of the
+    // distribution, so basin depth spreads across the whole sea band
+    // rather than saturating immediately past the shoreline.
+    s_seaDeepAt    = netherCalAt(n, 0.0f);
+    s_hillFullAt   = netherCalAt(n, NETHER_HILL_FULL_QUANTILE);
+
+    n = netherCalSample(s_ceilNoise, NETHER_HILL_NOISE_SCALE, ox, oz);
+    s_ceilThreshold = netherCalAt(n, NETHER_SEA_FRACTION);
+    s_ceilFullAt    = netherCalAt(n, NETHER_HILL_FULL_QUANTILE);
+
+    // The river field is RIDGED: the feature is "close to the middle of
+    // the distribution", not "low in it", so its thresholds are quantiles
+    // of |value - median| rather than of the value. Taking the median
+    // first and then re-sorting the absolute deviations is valid because
+    // only the multiset of values matters here, not which column each came
+    // from.
+    n = netherCalSample(s_riverNoise, NETHER_RIVER_NOISE_SCALE, ox, oz);
+    s_riverMedian = netherCalAt(n, 0.5f);
+    for (int i = 0; i < n; i++) {
+        float d = s_calBuf[i] - s_riverMedian;
+        s_calBuf[i] = (d < 0.0f) ? -d : d;
+    }
+    qsort(s_calBuf, n, sizeof(float), netherCalCompare);
+    s_riverHalfWidth  = netherCalAt(n, NETHER_RIVER_FRACTION);
+    s_riverShoreOuter = netherCalAt(n, NETHER_RIVER_FRACTION + NETHER_RIVER_SHORE_EXTRA);
+
+    n = netherCalSample(s_touchNoise, NETHER_TOUCH_NOISE_SCALE, ox, oz);
+    s_touchThreshold = netherCalAt(n, 1.0f - NETHER_TOUCH_FRACTION);
+
     s_noiseForSeed = worldSeed;
     s_noiseReady = true;
 }
 
-// PerlinNoise::getValue does NOT return [-1,1]. It sums octave i as
-// `value += octave / pow` with `pow` HALVING each level, so the octave
-// weights are 1, 2, 4, 8... and the raw range for L levels is roughly
-// +-(2^L - 1). Measured over a 300x300 sample of the 4-octave floor
-// field, the real range is about -5.8 .. +7.3, with |raw| > 1 for 68% of
-// columns.
-//
-// The old code did `v = n * 0.5f + 0.5f` on that raw value, treating it
-// as if it were already [-1,1]. The result saturated: essentially every
-// column clipped to either 0 or 1 after the subsequent remap, so the
-// Nether came out as flat plains abutting max-height plateaus with no
-// rolling middle ground at all -- and, critically, almost nothing ever
-// landed in the "gap" band that was supposed to expose the lava.
-//
-// The divisor is a measured gain, not the theoretical 2^L - 1. Dividing
-// by the theoretical maximum (15) over-compresses -- everything lands
-// between 0.4 and 0.7 and the terrain goes flat the other way. 6 puts
-// the p5..p95 spread at roughly 0.20..1.00 with only ~5% of columns
-// clipping, which is the usable range.
-#define NETHER_FLOOR_NOISE_GAIN 6.0f
-#define NETHER_TOUCH_NOISE_GAIN 1.5f
-#define NETHER_RIVER_NOISE_GAIN 3.0f
-
-static float netherNoise01(PerlinNoise* p, float x, float y, float gain) {
-    float v = p->getValue(x, y) / gain * 0.5f + 0.5f;
-    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+// Safe division for a calibrated span that could in principle collapse to
+// zero width (a degenerate, perfectly flat noise field).
+static float netherSpanT(float v, float lo, float hi) {
+    float span = hi - lo;
+    if (span <= 0.000001f) return (v >= hi) ? 1.0f : 0.0f;
+    float t = (v - lo) / span;
+    if (t < 0.0f) return 0.0f;
+    if (t > 1.0f) return 1.0f;
+    return t;
 }
 
-#define NETHER_HILL_NOISE_SCALE 0.02f
-#define NETHER_HILL_MAX_HEIGHT  10   // was 22; see the budget check on NETHER_H
+// --- Rock top -------------------------------------------------------------
+// The y of the highest solid netherrack block in a column. Above
+// NETHER_LAVA_LEVEL_Y this is dry land; below it, the fill loop floods
+// everything up to the lava level, which is what makes a sea a sea.
+//
+// Note there is no "sea sentinel" height any more. The old code needed
+// NETHER_SEA_FLOOR_H = -1 as a magic negative because a height of 0 still
+// laid one netherrack course and capped the lava sheet underneath it. In a
+// carved model the sea is simply a column whose rock top sits below the
+// lava level, so the sea and the land are described by the same number and
+// there is nothing to special-case.
+static int netherRockTop(int gx, int gz) {
+    float v = s_floorNoise->getValue(gx * NETHER_HILL_NOISE_SCALE,
+                                     gz * NETHER_HILL_NOISE_SCALE);
+    int top;
 
-// Below this normalized floor-noise value the column is open lava sea.
-// Measured at ~25% of columns, which reads as large seas broken up by
-// hill masses rather than either a lava lake with islands or a solid
-// netherrack blanket.
-#define NETHER_SEA_THRESHOLD    0.44f
-
-// Normalized floor-noise value at which a hill reaches full height. The
-// obvious choice is 1.0 -- map the whole remaining range -- but the
-// normalized field's 95th percentile only just reaches 1.0, so almost no
-// column ever got near the top and measured hill heights topped out
-// around 4 of a possible 10. Saturating at 0.78 instead spreads real
-// heights across the whole 1..10 range. Measured over a full 256x256
-// Nether: heights 1-10 all represented, on two different seeds.
-#define NETHER_HILL_FULL_AT     0.78f
-
-// Lava rivers: |ridged noise| near zero traces winding lines through the
-// terrain, so channels cut across hills instead of only appearing where
-// the hill field already happened to be low. Half-width 0.04 covers ~5%
-// of columns; the shore band tapers hill height back up over the next
-// 0.08 so a river has banks rather than sheer walls.
-#define NETHER_RIVER_NOISE_SCALE 0.010f
-#define NETHER_RIVER_HALF_WIDTH  0.04f
-#define NETHER_RIVER_SHORE_BAND  0.08f
-
-// Returned by floorHillHeight for any column that should be open lava.
-// It has to be NEGATIVE, not 0: floorTopY = NETHER_FLOOR_BASE_Y + h, and
-// the column fill writes netherrack for every y <= floorTopY. With h == 0
-// that still lays one netherrack course at NETHER_FLOOR_BASE_Y, capping
-// the lava sheet underneath -- which is exactly why the old generator
-// produced no visible lava anywhere despite placing a lava layer under
-// every single column. -1 puts floorTopY at NETHER_LAVA_FLOOR_TOP, where
-// the earlier lava branch already claims the block, so no netherrack is
-// written and the lava surface is exposed.
-#define NETHER_SEA_FLOOR_H (-1)
-
-static int floorHillHeight(int gx, int gz) {
-    float v = netherNoise01(s_floorNoise, gx * NETHER_HILL_NOISE_SCALE,
-                            gz * NETHER_HILL_NOISE_SCALE, NETHER_FLOOR_NOISE_GAIN);
-    if (v < NETHER_SEA_THRESHOLD) return NETHER_SEA_FLOOR_H; // open lava sea
-
-    float t = (v - NETHER_SEA_THRESHOLD) / (NETHER_HILL_FULL_AT - NETHER_SEA_THRESHOLD);
-    if (t > 1.0f) t = 1.0f;
-    // Gentle curve rather than a plain t*t. Squaring pulled mid-range
-    // columns below 1 block, and anything that truncates to 0 becomes
-    // sea -- which is how an intended ~25% lava coverage measured 66%.
-    float h = (0.35f + 0.65f * t) * t * NETHER_HILL_MAX_HEIGHT;
-
-    // River channels cut through whatever the hill field wanted here.
-    float r = s_riverNoise->getValue(gx * NETHER_RIVER_NOISE_SCALE,
-                                     gz * NETHER_RIVER_NOISE_SCALE) / NETHER_RIVER_NOISE_GAIN;
-    if (r < 0.0f) r = -r;
-    if (r < NETHER_RIVER_HALF_WIDTH) return NETHER_SEA_FLOOR_H; // in the channel
-    if (r < NETHER_RIVER_HALF_WIDTH + NETHER_RIVER_SHORE_BAND) {
-        float bank = (r - NETHER_RIVER_HALF_WIDTH) / NETHER_RIVER_SHORE_BAND;
-        h *= bank; // sloped bank rather than a cliff edge
+    if (v < s_seaThreshold) {
+        // Carved basin. Depth ramps from one block at the shoreline to the
+        // full basin floor at the very bottom of the distribution, so seas
+        // shelve away from their edges instead of being flat-bottomed pits
+        // with vertical walls.
+        //
+        // Starting the ramp AT the threshold (rock top = lava level - 1,
+        // i.e. already one block of lava) rather than at zero depth is what
+        // makes NETHER_SEA_FRACTION mean what it says: every column below
+        // the threshold genuinely holds lava, so the measured coverage
+        // matches the requested fraction instead of falling short of it by
+        // however many columns were only shallowly dipped.
+        float u = 1.0f - netherSpanT(v, s_seaDeepAt, s_seaThreshold);
+        top = (NETHER_LAVA_LEVEL_Y - 1)
+            - (int)(u * (float)((NETHER_LAVA_LEVEL_Y - 1) - NETHER_BASIN_FLOOR_Y) + 0.5f);
+    } else {
+        // Dry land. Gentle curve rather than a plain t*t: squaring pulled
+        // mid-range columns below one block, flattening most of the map
+        // into a plain at exactly the base height.
+        float t = netherSpanT(v, s_seaThreshold, s_hillFullAt);
+        float h = (0.35f + 0.65f * t) * t * (float)NETHER_HILL_MAX_HEIGHT;
+        top = NETHER_LAND_BASE_Y + (int)(h + 0.5f);
     }
 
-    // Round, and floor at 1. Past the sea/river tests above, this column
-    // is land by definition, so it must lay at least one netherrack
-    // course to cap the lava sheet -- otherwise the shore taper silently
-    // turns riverbanks back into more river.
-    int hi = (int)(h + 0.5f);
-    return (hi < 1) ? 1 : hi;
+    // River channels cut through whatever the field wanted here, including
+    // straight across hills -- min(), so a river crossing an existing sea
+    // does nothing rather than deepening it into a trench.
+    float r = s_riverNoise->getValue(gx * NETHER_RIVER_NOISE_SCALE,
+                                     gz * NETHER_RIVER_NOISE_SCALE) - s_riverMedian;
+    if (r < 0.0f) r = -r;
+    if (r < s_riverShoreOuter) {
+        float strength;
+        if (r < s_riverHalfWidth) strength = 1.0f;
+        else strength = 1.0f - netherSpanT(r, s_riverHalfWidth, s_riverShoreOuter);
+        int riverTop = (NETHER_LAVA_LEVEL_Y - 1)
+                     - (int)(strength * (float)((NETHER_LAVA_LEVEL_Y - 1) - NETHER_RIVER_FLOOR_Y) + 0.5f);
+        if (riverTop < top) top = riverTop;
+    }
+
+    if (top < NETHER_BASIN_FLOOR_Y) top = NETHER_BASIN_FLOOR_Y;
+    return top;
 }
 
 static int ceilHillDepth(int gx, int gz) {
-    float v = netherNoise01(s_ceilNoise, gx * NETHER_HILL_NOISE_SCALE,
-                            gz * NETHER_HILL_NOISE_SCALE, NETHER_FLOOR_NOISE_GAIN);
-    if (v < NETHER_SEA_THRESHOLD) return 0; // flat ceiling, not a hole -- the roof stays sealed
-    float t = (v - NETHER_SEA_THRESHOLD) / (NETHER_HILL_FULL_AT - NETHER_SEA_THRESHOLD);
-    if (t > 1.0f) t = 1.0f;
-    return (int)((0.35f + 0.65f * t) * t * NETHER_HILL_MAX_HEIGHT + 0.5f);
+    float v = s_ceilNoise->getValue(gx * NETHER_HILL_NOISE_SCALE,
+                                    gz * NETHER_HILL_NOISE_SCALE);
+    if (v < s_ceilThreshold) return 0; // flat ceiling, not a hole -- the roof stays sealed
+    float t = netherSpanT(v, s_ceilThreshold, s_ceilFullAt);
+    return (int)((0.35f + 0.65f * t) * t * (float)NETHER_CEIL_HILL_MAX + 0.5f);
 }
 
 // True for the rare columns chosen to be touch-point pillars, where the
-// floor and ceiling hills are deliberately allowed to meet instead of
-// being held apart by NETHER_MIN_GAP. Sparse low-frequency noise
-// thresholded very high, so genuine touch points are isolated and
-// uncommon rather than forming a whole wall of pillars.
-#define NETHER_TOUCH_NOISE_SCALE 0.008f
-#define NETHER_TOUCH_THRESHOLD   0.96f
-
+// floor and ceiling are deliberately allowed to meet instead of being held
+// apart by NETHER_MIN_GAP. Sparse low-frequency noise thresholded very
+// high, so genuine touch points are isolated rather than forming a whole
+// wall of pillars.
 static bool isTouchPointColumn(int gx, int gz) {
-    // Same normalization bug as the hill fields had: the raw 2-octave
-    // value spans about -1.3..1.5, so `n * 0.5 + 0.5 >= 0.965` demanded a
-    // raw value of 0.93 out of a field whose usable top end is 1.5 --
-    // rare, but far rarer than intended, and the threshold was tuned as
-    // if the input were [-1,1]. Normalized, 0.96 selects ~1.7% of columns.
-    float v = netherNoise01(s_touchNoise, gx * NETHER_TOUCH_NOISE_SCALE,
-                            gz * NETHER_TOUCH_NOISE_SCALE, NETHER_TOUCH_NOISE_GAIN);
-    return v >= NETHER_TOUCH_THRESHOLD;
+    float v = s_touchNoise->getValue(gx * NETHER_TOUCH_NOISE_SCALE,
+                                     gz * NETHER_TOUCH_NOISE_SCALE);
+    return v >= s_touchThreshold;
 }
 
-// --- Bulk fill: bedrock box, lava floor, floor hills, ceiling hills -------
+// --- Bulk fill: bedrock box, netherrack slab, carved lava, ceiling hills --
 
 static void netherFillColumn(World* w, int cx, int cz) {
-    ensureNetherNoise(worldGenSeed());
+    ensureNetherNoise(worldGenSeed(), w);
 
     int xo = cx * 16, zo = cz * 16;
     bool edgeX0 = isNetherStripEdgeX0(w, cx), edgeX1 = isNetherStripEdgeX1(w, cx);
@@ -223,8 +345,8 @@ static void netherFillColumn(World* w, int cx, int cz) {
         for (int z = 0; z < 16; z++) {
             int gx = xo + x, gz = zo + z;
 
-            // Side-wall bedrock: only the single outermost block-column
-            // on whichever of the 4 sides this chunk actually touches.
+            // Side-wall bedrock: only the single outermost block-column on
+            // whichever of the 4 sides this chunk actually touches.
             bool onSideWall = (edgeX0 && x == 0) || (edgeX1 && x == 15) ||
                                (edgeZ0 && z == 0) || (edgeZ1 && z == 15);
             if (onSideWall) {
@@ -232,59 +354,49 @@ static void netherFillColumn(World* w, int cx, int cz) {
                 continue;
             }
 
-            int floorH = floorHillHeight(gx, gz);
-            int ceilH  = ceilHillDepth(gx, gz);
+            int rockTop = netherRockTop(gx, gz);
+            int ceilH   = ceilHillDepth(gx, gz);
 
-            bool touch = isTouchPointColumn(gx, gz);
-            if (!touch) {
-                // Hold the two hill layers apart by at least
-                // NETHER_MIN_GAP: if they'd encroach past that, shrink
-                // whichever one is taller/deeper just enough to restore
-                // the minimum gap, rather than shrinking both blindly --
-                // preserves the more prominent hill's shape.
-                int floorTopY = NETHER_FLOOR_BASE_Y + floorH;
+            if (!isTouchPointColumn(gx, gz)) {
+                // Hold the two layers apart by at least NETHER_MIN_GAP. Only
+                // the ceiling is ever shortened here: trimming the floor
+                // instead could drop a land column below the lava level and
+                // silently flood it, turning "this cavern was a bit tight"
+                // into "there is a lake here", which is exactly the kind of
+                // coupling the carved model exists to remove.
                 int ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
-                int gap = ceilBottomY - floorTopY;
+                int gap = ceilBottomY - rockTop;
                 if (gap < NETHER_MIN_GAP) {
                     int deficit = NETHER_MIN_GAP - gap;
-                    // Clamp the floor to NETHER_SEA_FLOOR_H, not 0: 0 would
-                    // re-cap an open lava column with a netherrack course
-                    // and quietly undo the sea in exactly the tight spots
-                    // where a lavafall under a low ceiling looks best.
-                    if (floorH >= ceilH) floorH = (floorH - deficit < NETHER_SEA_FLOOR_H) ? NETHER_SEA_FLOOR_H : floorH - deficit;
-                    else                 ceilH  = (ceilH  - deficit < 0) ? 0 : ceilH  - deficit;
+                    ceilH = (ceilH - deficit < 0) ? 0 : ceilH - deficit;
                 }
             }
-            // touch==true columns skip the gap clamp entirely -- their
-            // floor/ceiling heights are used as-is, and since both noise
-            // fields tend toward their max near the same low-frequency
-            // peaks the touch-noise threshold selects, floor and ceiling
-            // naturally meet or nearly meet at these columns without
-            // needing to force-inflate either height field.
+            // touch==true columns skip the clamp entirely -- their floor and
+            // ceiling heights are used as-is, and since both noise fields
+            // tend toward their extremes near the same low-frequency peaks
+            // the touch field selects, they naturally meet or nearly meet
+            // without either height needing to be force-inflated.
 
-            int floorTopY = NETHER_FLOOR_BASE_Y + floorH;
             int ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
 
             for (int y = 0; y < NETHER_H; y++) {
                 unsigned char id;
                 if (y == NETHER_BEDROCK_BOTTOM || y == NETHER_BEDROCK_TOP) {
                     id = BLOCK_BEDROCK;
-                } else if (y <= NETHER_LAVA_FLOOR_TOP) {
-                    id = BLOCK_CALM_LAVA; // the floor's lava sea, always present under every column
-                } else if (y <= floorTopY) {
-                    id = BLOCK_NETHERRACK; // floor hill
+                } else if (y <= rockTop) {
+                    id = BLOCK_NETHERRACK;      // the slab, whatever survived the carve
+                } else if (y <= NETHER_LAVA_LEVEL_Y) {
+                    id = BLOCK_CALM_LAVA;       // carved basin, flooded to the lava level
                 } else if (y >= ceilBottomY) {
-                    id = BLOCK_NETHERRACK; // ceiling hill
+                    id = BLOCK_NETHERRACK;      // ceiling hill
                 } else {
-                    id = BLOCK_AIR; // navigable gap
+                    id = BLOCK_AIR;             // navigable gap
                 }
                 blockPut(w, gx, y, gz, id);
             }
         }
     }
 }
-
-
 // --- Per-biome decoration -----------------------------------------------
 // Decoration only ever lands on hill surfaces (netherrack exposed to an
 // open air pocket, per netherFillColumn's floor/ceiling hill shape above)
@@ -306,7 +418,11 @@ static void decorateWastes(World* w, Random& random, int xo, int zo) {
         // Magma sits just above the lava line. Scaled with the shell: the
         // old span of 6 reached y=12, which is now most of the way up a
         // max-height floor hill rather than a fringe near the lava.
-        int y = NETHER_LAVA_FLOOR_TOP + 1 + random.nextInt(3);
+        // Shoreline band. Was NETHER_LAVA_FLOOR_TOP + 1 + rand(3), which
+        // tracked the old permanent lava sheet at the very bottom of the
+        // world; with lava now pooled at NETHER_LAVA_LEVEL_Y, the strip of
+        // netherrack just proud of the lava is where magma belongs.
+        int y = NETHER_LAVA_LEVEL_Y + 1 + random.nextInt(2);
         if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
         if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
         int blobSize = 2 + random.nextInt(4);
@@ -326,7 +442,7 @@ static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
     for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
             int gx = xo + x, gz = zo + z;
-            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y; y--) {
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
                 if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
                 if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
                 // Top-of-floor netherrack exposed to an open pocket above it.
@@ -468,7 +584,7 @@ static void growHugeWarpedFungus(World* w, Random& random, int x, int y, int z) 
 
 // First air block sitting directly on warped nylium in this column.
 static bool findNyliumSurface(World* w, int x, int z, int* outY) {
-    for (int y = NETHER_CEIL_BASE_Y; y > NETHER_FLOOR_BASE_Y; y--) {
+    for (int y = NETHER_CEIL_BASE_Y; y > NETHER_SCAN_MIN_Y; y--) {
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         *outY = y;
@@ -510,6 +626,28 @@ static void growWarpedTree(World* w, Random& random, int x, int y, int z) {
         setBlock(w, x, capY + 1, z, BLOCK_WARPED_WART_BLOCK);
 }
 
+// --- Warped Forest density -----------------------------------------------
+// These four numbers are the whole answer to "the warped trees are too
+// frequent". They were tuned when both tree scales were mostly failing to
+// place: growHugeWarpedFungus was rolling heights taller than the entire
+// navigable gap, and both placers were picking a random y in the 34-block
+// span and requiring it to already be the block sitting on nylium, so the
+// overwhelming majority of attempts silently did nothing. The counts were
+// pushed up to compensate for that waste.
+//
+// Both of those bugs were then fixed (findNyliumSurface searches down for
+// the real surface, and the fungus height is clamped to actual headroom),
+// which turned nearly every attempt into a successful placement -- and the
+// inflated counts, which had been producing a reasonable-looking forest by
+// accident, suddenly produced roughly four times as many structures as
+// intended. Halving the tree attempts and cutting the mega fungi to a
+// quarter puts real placed counts back where the original numbers were
+// aiming.
+#define NETHER_HUGE_FUNGUS_TRIES_MIN   2   // was 8
+#define NETHER_HUGE_FUNGUS_TRIES_VAR   3   // was 8
+#define NETHER_WARPED_TREE_TRIES_MIN   6   // was 14
+#define NETHER_WARPED_TREE_TRIES_VAR   5   // was 10
+
 static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     // Real warped nylium/wart block/fungus/roots/sprouts now exist as
     // block ids (see chunk.h) -- this replaces the earlier wool-color and
@@ -517,7 +655,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
             int gx = xo + x, gz = zo + z;
-            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y; y--) {
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
                 if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
                 if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
                 setBlock(w, gx, y, gz, BLOCK_WARPED_NYLIUM);
@@ -534,7 +672,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int fungusTries = 4 + random.nextInt(4);
     for (int i = 0; i < fungusTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        int y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_FUNGUS);
@@ -552,7 +690,8 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     // majority of tries missed the ground entirely before any of the
     // clearance logic even ran. Searching down for the surface makes every
     // try a real attempt.
-    int hugeFungusTries = 8 + random.nextInt(8);
+    int hugeFungusTries = NETHER_HUGE_FUNGUS_TRIES_MIN
+                        + random.nextInt(NETHER_HUGE_FUNGUS_TRIES_VAR);
     for (int i = 0; i < hugeFungusTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
         int y;
@@ -565,7 +704,8 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     // the 1-block BLOCK_WARPED_FUNGUS sprite and the mega structure, with
     // nothing in between, so a warped forest read as bare nylium with the
     // occasional tower. These fill the canopy in.
-    int treeTries = 14 + random.nextInt(10);
+    int treeTries = NETHER_WARPED_TREE_TRIES_MIN
+                  + random.nextInt(NETHER_WARPED_TREE_TRIES_VAR);
     for (int i = 0; i < treeTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
         int y;
@@ -576,7 +716,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int wartTries = 2 + random.nextInt(3);
     for (int i = 0; i < wartTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        int y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_WART_BLOCK);
@@ -592,7 +732,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int rootsTries = 3 + random.nextInt(4);
     for (int i = 0; i < rootsTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        int y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_WARPED_ROOTS);
@@ -601,7 +741,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int sproutTries = 2 + random.nextInt(3);
     for (int i = 0; i < sproutTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        int y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (worldBlock(w, x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
         setBlock(w, x, y, z, BLOCK_NETHER_SPROUTS);
@@ -614,7 +754,7 @@ static void decorateWarpedForest(World* w, Random& random, int xo, int zo) {
     int vineTries = 2 + random.nextInt(3);
     for (int i = 0; i < vineTries; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        int y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y);
+        int y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y);
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (!isNetherrackFace(w, x, y + 1, z)) continue;
         setBlock(w, x, y, z, BLOCK_TWISTING_VINES);
@@ -680,7 +820,7 @@ static void netherOreFeature(World* w, Random& random, int x, int y, int z, unsi
 // silently did nothing, which is the real reason glowstone was so sparse.
 // This search finds the face every time.
 static bool findCeilingFaceSpot(World* w, int x, int z, int* outY) {
-    for (int y = NETHER_CEIL_BASE_Y; y > NETHER_LAVA_FLOOR_TOP; y--) {
+    for (int y = NETHER_CEIL_BASE_Y; y > NETHER_SCAN_MIN_Y; y--) {
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue;
         if (!isNetherrackFace(w, x, y + 1, z)) continue;
         *outY = y;
@@ -689,10 +829,28 @@ static bool findCeilingFaceSpot(World* w, int x, int z, int* outY) {
     return false;
 }
 
+// Glowstone density. 8-15 clusters per chunk of 5-11 blocks each is
+// 40-165 glowstone blocks in every single 16x16 -- the ceiling was
+// effectively paved with it, and the Nether was lit like a supermarket.
+// Same story as the warped trees above: the count was raised while
+// findCeilingFaceSpot did not yet exist and the placer was picking a
+// random y and demanding it already be the ceiling face, so almost every
+// cluster silently failed. With the face search landing every attempt,
+// the raised count became the real count.
+//
+// 1-3 clusters of 4-9 blocks reads as occasional glowing patches on the
+// roof, which is both what vanilla looks like and what makes the stuff
+// worth mining for.
+#define NETHER_GLOWSTONE_CLUSTERS_MIN 1   // was 8
+#define NETHER_GLOWSTONE_CLUSTERS_VAR 3   // was 8
+#define NETHER_GLOWSTONE_BLOB_MIN     4   // was 5
+#define NETHER_GLOWSTONE_BLOB_VAR     6   // was 7
+
 static void placeCeilingGlowstone(World* w, int xo, int zo, Random& random) {
     // Applies to every biome (not just Wastes) -- glowstone clusters are a
     // blanket ambient feature of the whole Nether.
-    int clusters = 8 + random.nextInt(8);
+    int clusters = NETHER_GLOWSTONE_CLUSTERS_MIN
+                 + random.nextInt(NETHER_GLOWSTONE_CLUSTERS_VAR);
     for (int i = 0; i < clusters; i++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
         int y;
@@ -700,7 +858,7 @@ static void placeCeilingGlowstone(World* w, int xo, int zo, Random& random) {
 
         // Clusters hang a little way down from the face rather than being
         // a flat one-block sheet, so they read as blobs from below.
-        int blobSize = 5 + random.nextInt(7);
+        int blobSize = NETHER_GLOWSTONE_BLOB_MIN + random.nextInt(NETHER_GLOWSTONE_BLOB_VAR);
         for (int b = 0; b < blobSize; b++) {
             int bx = x + random.nextInt(5) - 2, bz = z + random.nextInt(5) - 2;
             int by = y - random.nextInt(2);
@@ -725,28 +883,83 @@ static void placeCeilingGlowstone(World* w, int xo, int zo, Random& random) {
 // hardware should be asked to do. A pre-baked column is deterministic,
 // costs nothing at runtime, and looks identical standing still -- it
 // simply will not re-flow if the player mines into it.
-#define NETHER_LAVAFALL_MAX_DROP 26
+// Falls now only ever appear OVER LAVA. Both placers pick a column that is
+// already open sea or river and work upward from it, rather than picking a
+// spot anywhere and pouring until something stops the column. Two things
+// fall out of that:
+//
+//   * The old drop cap is gone as a tuning value. It was 26, sized for the
+//     original 100-tall shell and never rescaled when the shell came down
+//     to 40, which is precisely why falls hung in mid-air: a ceiling face
+//     sat near y=37 and the exposed lava was at y=3, a drop of 34, so the
+//     cap fired at y=11 and left the column stopping eight blocks above
+//     anything. It survives only as a runaway guard, derived from the box
+//     height so it cannot go stale again.
+//
+//   * The splash-pool code is gone entirely. It existed to give a fall
+//     landing on dry netherrack something to feed, by digging a shallow
+//     basin under it and flooding that. A fall that by construction lands
+//     in a lava sea already terminates in lava at the shared lava level,
+//     so digging a private pool for it would only carve a dent in a
+//     surface that is already the right height.
+#define NETHER_LAVAFALL_MAX_DROP NETHER_H
+#define NETHER_LAVAFALL_MIN_DROP 4
 
-static void pourLavafall(World* w, int x, int yTop, int z) {
-    for (int y = yTop; y > NETHER_LAVA_FLOOR_TOP; y--) {
-        if (yTop - y >= NETHER_LAVAFALL_MAX_DROP) break;
-        if (worldBlock(w, x, y, z) != BLOCK_AIR) break; // landed on a hill or the sea
-        setBlock(w, x, y, z, BLOCK_CALM_LAVA);
-    }
+// Is this column open lava at the shared lava level? That is the whole
+// definition of "sea or river" in the carved model -- a column is flooded
+// exactly when its rock top fell below NETHER_LAVA_LEVEL_Y, and decoration
+// never writes at or below that level (it only ever targets netherrack
+// with open air above it), so this stays true after decoration has run.
+static bool netherColumnIsLava(World* w, int x, int z) {
+    return worldBlock(w, x, NETHER_LAVA_LEVEL_Y, z) == BLOCK_CALM_LAVA;
 }
 
+// Pours a column of lava down from yTop. Returns false without writing
+// anything if the drop would be too short to read as a fall -- measuring
+// first means a rejected fall costs nothing to unwind.
+static bool pourLavafall(World* w, int x, int yTop, int z) {
+    int yLand = yTop;
+    while (yLand > NETHER_LAVA_LEVEL_Y && worldBlock(w, x, yLand, z) == BLOCK_AIR) {
+        if (yTop - yLand >= NETHER_LAVAFALL_MAX_DROP) break;
+        yLand--;
+    }
+    if (yTop - yLand < NETHER_LAVAFALL_MIN_DROP) return false;
+
+    for (int y = yTop; y > yLand; y--)
+        setBlock(w, x, y, z, BLOCK_CALM_LAVA);
+    return true;
+}
+
+// One fall roughly every six chunks, rather than the old average of one
+// per chunk (nextInt(3), mean 1). A feature that appears in every chunk is
+// not a feature; it is terrain. Restricting falls to lava columns thins
+// them further on its own, since only about a third of columns qualify.
+#define NETHER_CEILING_FALL_ODDS 6
+
 static void placeCeilingLavafalls(World* w, int xo, int zo, Random& random) {
-    int falls = random.nextInt(3); // 0-2 per chunk; common enough to see often, rare enough to stay a feature
-    for (int i = 0; i < falls; i++) {
+    if (random.nextInt(NETHER_CEILING_FALL_ODDS) != 0) return;
+
+    // A handful of tries for ONE fall, rather than several independent
+    // falls: a rejected spot (too short a drop, no ceiling face) should
+    // cost another look at this chunk, not silently reduce the rate.
+    // More tries than before, because most candidates are now rejected for
+    // being over dry land: eight looks give a lava chunk a fair chance of
+    // finding its spot, while a chunk with no lava in it at all simply
+    // produces nothing however many times it looks.
+    for (int t = 0; t < 8; t++) {
         int x = xo + 1 + random.nextInt(14), z = zo + 1 + random.nextInt(14);
+        if (!netherColumnIsLava(w, x, z)) continue;   // falls only over lava
         int y;
         if (!findCeilingFaceSpot(w, x, z, &y)) continue;
+        if (!pourLavafall(w, x, y, z)) continue;
         // Set the source block into the ceiling itself so the fall reads as
         // pouring OUT of the rock rather than starting in mid-air.
         setBlock(w, x, y + 1, z, BLOCK_CALM_LAVA);
-        pourLavafall(w, x, y, z);
+        return;
     }
 }
+
+#define NETHER_HILLSIDE_FALL_ODDS 8
 
 static void placeHillsideLavafalls(World* w, int xo, int zo, Random& random) {
     // Lava breaking out of the side of a floor hill and running down it.
@@ -756,14 +969,19 @@ static void placeHillsideLavafalls(World* w, int xo, int zo, Random& random) {
     static const int dx4[4] = { 1, -1, 0, 0 };
     static const int dz4[4] = { 0, 0, 1, -1 };
 
-    int tries = 3 + random.nextInt(3);
+    // Was an unconditional 3-5 attempts in every chunk, on top of the
+    // ceiling falls above. Now a minority of chunks get a hillside
+    // breakout at all, and those that do get one.
+    if (random.nextInt(NETHER_HILLSIDE_FALL_ODDS) != 0) return;
+
+    int tries = 4;
     for (int t = 0; t < tries; t++) {
         int x = xo + 1 + random.nextInt(14), z = zo + 1 + random.nextInt(14);
         int y;
         // Reuse the floor-surface search, but require real elevation: a
         // breakout at the waterline of the lava sea would be invisible.
         bool found = false;
-        for (y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y + 4; y--) {
+        for (y = NETHER_CEIL_BASE_Y; y >= NETHER_LAND_BASE_Y + 2; y--) {
             if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
             if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
             found = true;
@@ -775,16 +993,22 @@ static void placeHillsideLavafalls(World* w, int xo, int zo, Random& random) {
         int nx = x + dx4[d], nz = z + dz4[d];
         if (worldBlock(w, nx, y, nz) != BLOCK_AIR) continue;      // must be the lip
         if (worldBlock(w, nx, y - 1, nz) != BLOCK_AIR) continue;  // and a real drop below it
+        // ...and the drop must be into lava. This is the "only over a lava
+        // sea" rule for hillside breakouts: the classic look is lava
+        // spilling off a shore cliff into the sea below it, not a fall
+        // running down a hillside onto more dry rock.
+        if (!netherColumnIsLava(w, nx, nz)) continue;
 
+        if (!pourLavafall(w, nx, y, nz)) continue;
         setBlock(w, x, y, z, BLOCK_CALM_LAVA); // the source, embedded in the hill face
-        pourLavafall(w, nx, y, nz);
+        return;
     }
 }
 
 static bool findFloorSurfaceSpot(World* w, int xo, int zo, Random& random, int tries, int* outX, int* outY, int* outZ) {
     for (int t = 0; t < tries; t++) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_FLOOR_BASE_Y; y--) {
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
             if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
             if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
             *outX = x; *outY = y + 1; *outZ = z;
@@ -816,6 +1040,184 @@ static void placeAmbientFires(World* w, int xo, int zo, Random& random) {
         if (worldBlock(w, x, y, z) != BLOCK_AIR) continue; // don't stomp the torch or other decoration
         firePlace(w, x, y, z);
     }
+}
+
+// --- Portal site search ---------------------------------------------------
+// See the contract in nether_gen.h. This lives here rather than in
+// nether_portal.cpp because it is the shell's own geometry that decides
+// what "a good spot" means, and both the real portal and the debug
+// teleport need the same answer.
+
+// Lowest y a mob or player can stand on. Not the bottom of the terrain:
+// every column whose rock top falls below NETHER_LAVA_LEVEL_Y is flooded
+// to that level by construction, so nothing below NETHER_LAND_BASE_Y is
+// ever standable and probing down there is wasted effort.
+int netherShellFloorBaseY(void) { return NETHER_LAND_BASE_Y; }
+int netherShellCeilBaseY(void)  { return NETHER_CEIL_BASE_Y; }
+
+// The frame is 4 columns wide (interior 2, plus a post either side) and 5
+// tall (interior 3, plus floor and ceiling courses). Offsets are relative
+// to the bottom-interior block the search reports.
+#define PORTAL_SITE_DX0      (-1)
+#define PORTAL_SITE_DX1      ( 2)
+#define PORTAL_SITE_CLEAR_H  ( 5)  // interior 3 + top course + one block of headroom
+#define PORTAL_SITE_LAVA_MARGIN 2  // how far around the footprint must be lava-free
+
+// Surface height cache for the searched region: the y of the topmost
+// non-air block in the shell interior, or -1 for a column with no floor
+// at all (open lava sea reaching the roof is impossible, but a column can
+// be solid all the way up at a touch-point pillar).
+//
+// File-scope rather than a local: the searched region is up to 5x5 chunks
+// of 16x16 columns, and 6400 shorts is far too much to put on a PSP thread
+// stack. This is only ever touched by netherFindPortalSite, which runs a
+// handful of times per save at most.
+#define PORTAL_SITE_MAX_CHUNK_R 2
+#define PORTAL_SITE_SPAN ((2 * PORTAL_SITE_MAX_CHUNK_R + 1) * 16)
+static short s_siteSurface[PORTAL_SITE_SPAN * PORTAL_SITE_SPAN];
+
+// Blocks a frame may legitimately stand on. Deliberately a whitelist and
+// not "anything solid": glowstone, warped stem/wart and the huge fungi
+// are all solid, and standing a portal on top of a tree is exactly the
+// kind of result the old carve-a-platform approach was hiding.
+static bool netherSiteGroundOk(unsigned char id) {
+    return id == BLOCK_NETHERRACK || id == BLOCK_WARPED_NYLIUM ||
+           id == BLOCK_SOUL_SAND  || id == BLOCK_SOUL_SOIL ||
+           id == BLOCK_NETHER_QUARTZ_ORE;
+}
+
+// A ceiling hill also presents "solid with air above" when scanned from
+// the top down, so the raw scan above can report the underside of the roof
+// as a floor. Walk on down past any hanging mass to the first solid block
+// that has genuine open space above it and more solid beneath it.
+static bool netherSiteFloorAt(World* w, int gx, int gz, int* outY) {
+    int y = NETHER_CEIL_BASE_Y;
+    // Skip the ceiling hill, if this column has one.
+    while (y >= NETHER_SCAN_MIN_Y && worldBlock(w, gx, y, gz) != BLOCK_AIR) y--;
+    // Now fall through the open gap to the floor.
+    while (y >= NETHER_SCAN_MIN_Y && worldBlock(w, gx, y, gz) == BLOCK_AIR) y--;
+    if (y < NETHER_SCAN_MIN_Y) return false;
+    if (isLavaId(worldBlock(w, gx, y, gz))) return false;
+    *outY = y;
+    return true;
+}
+
+static bool netherSiteNoLavaNear(World* w, int bx, int by, int bz) {
+    const int M = PORTAL_SITE_LAVA_MARGIN;
+    for (int dx = PORTAL_SITE_DX0 - M; dx <= PORTAL_SITE_DX1 + M; dx++)
+    for (int dz = -M; dz <= M; dz++)
+    for (int dy = -1; dy <= 1; dy++)
+        if (isLavaId(worldBlock(w, bx + dx, by + dy, bz + dz))) return false;
+    return true;
+}
+
+// Is (bx, by, bz) somewhere the player can stand: feet block and the block
+// above both clear, solid ground underneath.
+static bool netherSiteStandable(World* w, int bx, int by, int bz) {
+    if (worldBlock(w, bx, by, bz) != BLOCK_AIR) return false;
+    if (worldBlock(w, bx, by + 1, bz) != BLOCK_AIR) return false;
+    return netherSiteGroundOk(worldBlock(w, bx, by - 1, bz));
+}
+
+// Full test for one candidate. `strict` adds the lava-margin and
+// step-out-space requirements; the relaxed pass drops them so a Nether
+// that genuinely has no ideal site still yields a workable one rather
+// than nothing at all.
+static bool netherSiteOk(World* w, int bx, int bz, int surfY, bool strict) {
+    int by = surfY + 1; // bottom interior / feet level
+
+    // The frame's ceiling course sits at by+3 and needs a block of
+    // headroom above it, so the column must stay inside the shell.
+    if (by + PORTAL_SITE_CLEAR_H > NETHER_CEIL_BASE_Y) return false;
+
+    for (int dx = PORTAL_SITE_DX0; dx <= PORTAL_SITE_DX1; dx++) {
+        int gx = bx + dx;
+        // Flat: every frame column must sit on the same surface height,
+        // so the obsidian floor course is bedded in ground rather than
+        // floating over a drop on one side.
+        int cs;
+        if (!netherSiteFloorAt(w, gx, bz, &cs)) return false;
+        if (cs != surfY) return false;
+        if (!netherSiteGroundOk(worldBlock(w, gx, surfY, bz))) return false;
+
+        for (int dy = 0; dy < PORTAL_SITE_CLEAR_H; dy++)
+            if (worldBlock(w, gx, by + dy, bz) != BLOCK_AIR) return false;
+    }
+
+    if (!strict) return true;
+
+    if (!netherSiteNoLavaNear(w, bx, by, bz)) return false;
+
+    // At least one face has room to step out onto, across both interior
+    // columns, so arriving players are not walled in against the frame.
+    bool front = netherSiteStandable(w, bx, by, bz - 1) &&
+                 netherSiteStandable(w, bx + 1, by, bz - 1);
+    bool back  = netherSiteStandable(w, bx, by, bz + 1) &&
+                 netherSiteStandable(w, bx + 1, by, bz + 1);
+    return front || back;
+}
+
+bool netherFindPortalSite(World* w, int cxCentre, int czCentre, int searchChunkR,
+                          int* outX, int* outY, int* outZ) {
+    if (searchChunkR < 0) searchChunkR = 0;
+    if (searchChunkR > PORTAL_SITE_MAX_CHUNK_R) searchChunkR = PORTAL_SITE_MAX_CHUNK_R;
+
+    int span = (2 * searchChunkR + 1) * 16;
+    int ox = (cxCentre - searchChunkR) * 16;
+    int oz = (czCentre - searchChunkR) * 16;
+
+    for (int i = 0; i < span * span; i++) s_siteSurface[i] = -1;
+    for (int lx = 0; lx < span; lx++)
+    for (int lz = 0; lz < span; lz++) {
+        int y;
+        if (netherSiteFloorAt(w, ox + lx, oz + lz, &y)) s_siteSurface[lx * span + lz] = (short)y;
+    }
+
+    // Two passes over the same candidate ordering: take the best-quality
+    // site anywhere in range before settling for a merely workable one.
+    for (int pass = 0; pass < 2; pass++) {
+        bool strict = (pass == 0);
+
+        // Candidates are visited in rings out from the centre of the
+        // region, so the portal lands as close to the canonical spot as
+        // the terrain allows instead of wherever the scan order happened
+        // to reach first.
+        int mid = span / 2;
+        for (int ring = 0; ring <= mid; ring++) {
+            for (int lx = mid - ring; lx <= mid + ring; lx++) {
+                if (lx < 0 || lx >= span) continue;
+                for (int lz = mid - ring; lz <= mid + ring; lz++) {
+                    if (lz < 0 || lz >= span) continue;
+                    // Only the ring's boundary; the interior was covered
+                    // by a previous, smaller ring.
+                    int adx = lx - mid, adz = lz - mid;
+                    if (adx < 0) adx = -adx;
+                    if (adz < 0) adz = -adz;
+                    if (adx != ring && adz != ring) continue;
+
+                    short surfY = s_siteSurface[lx * span + lz];
+                    if (surfY < 0) continue;
+
+                    int bx = ox + lx, bz = oz + lz;
+                    // Keep the whole footprint and its margin inside the
+                    // scanned region, so neighbouring ungenerated chunks
+                    // are never read.
+                    if (lx + PORTAL_SITE_DX0 - PORTAL_SITE_LAVA_MARGIN < 0) continue;
+                    if (lx + PORTAL_SITE_DX1 + PORTAL_SITE_LAVA_MARGIN >= span) continue;
+                    if (lz - PORTAL_SITE_LAVA_MARGIN < 0) continue;
+                    if (lz + PORTAL_SITE_LAVA_MARGIN >= span) continue;
+
+                    if (!netherSiteOk(w, bx, bz, surfY, strict)) continue;
+
+                    *outX = bx;
+                    *outY = surfY + 1;
+                    *outZ = bz;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 // --- Entry point ----------------------------------------------------------
@@ -856,7 +1258,7 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
     if (biome == NB_WASTES || biome == NB_SOUL_SAND_VALLEY) {
         int veins = 1 + random.nextInt(3);
         for (int i = 0; i < veins; i++) {
-            int x = xo + random.nextInt(16), y = NETHER_FLOOR_BASE_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_FLOOR_BASE_Y), z = zo + random.nextInt(16);
+            int x = xo + random.nextInt(16), y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y), z = zo + random.nextInt(16);
             netherOreFeature(w, random, x, y, z, BLOCK_NETHER_QUARTZ_ORE, 12);
         }
     }
