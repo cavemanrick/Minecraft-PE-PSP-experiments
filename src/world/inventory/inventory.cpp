@@ -47,8 +47,8 @@ static const short kPalette[] = {
 
     ITEM_SEEDS_WHEAT, ITEM_SEEDS_MELON, ITEM_BONEMEAL,
     ITEM_HOE_IRON,
-    ITEM_CAKE, ITEM_EGG,
-    ITEM_SWORD_IRON, ITEM_BOW, ITEM_SIGN,
+    ITEM_CAKE, ITEM_EGG, ITEM_FISH_RAW, ITEM_FISH_COOKED,
+    ITEM_SWORD_IRON, ITEM_BOW, ITEM_FISHING_ROD, ITEM_SIGN,
     ITEM_FLINT_AND_STEEL,
     ITEM_CAMERA,
 
@@ -81,8 +81,8 @@ static const unsigned char kPaletteData[] = {
     0, 1, 2,
     0, 1, 2, 0,                                 // oak/spruce/birch leaves, then dark oak
     0, 0, 15,
-    0, 0, 0,
-    0, 0, 0,
+    0, 0, 0, 0, 0,                              // hoe, cake, egg, raw fish, cooked fish
+    0, 0, 0, 0,                                 // sword, bow, fishing rod, sign
     0,
     0,
     12, 11, 10, 13,

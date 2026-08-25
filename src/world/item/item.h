@@ -89,6 +89,12 @@ enum {
     ITEM_CHICKEN_RAW    = 365,
     ITEM_CHICKEN_COOKED = 366,
     ITEM_NETHER_BRICK   = 405,
+    // Vanilla ids, kept so a future save-format bridge doesn't have to
+    // remap them. 347 (clock) and 348 (glowstone dust) sit between and are
+    // already claimed above, which is why these are not contiguous.
+    ITEM_FISHING_ROD    = 346,
+    ITEM_FISH_RAW       = 349,
+    ITEM_FISH_COOKED    = 350,
     ITEM_NETHER_QUARTZ  = 406,
     ITEM_CAMERA         = 456
 };

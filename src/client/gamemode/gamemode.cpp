@@ -15,6 +15,7 @@
 #include "world/entity/animal/pig.h"
 #include "world/entity/entity_types.h"
 #include "world/item/item.h"
+#include "world/item/fishing_rod_item.h"
 #include "world/item/tile_item.h"
 #include "world/item/food_item.h"
 #include "world/level/chunk/chunk.h"
@@ -480,6 +481,29 @@ void GameMode::handleInput(unsigned int pressed, unsigned int held) {
         }
     }
 
+    // Fishing rod: press to cast, press again to reel. A press-toggle
+    // rather than the press-and-hold the bow and food use -- holding does
+    // nothing while a line is out, and the bite window needs a discrete
+    // reaction, not a charge-up.
+    //
+    // fishingTick runs unconditionally, outside the "is a rod selected"
+    // test, because its whole job is cutting the line in the cases where
+    // the rod ISN'T selected any more. See fishing_rod_item.cpp.
+    if (g_worldBuilt) {
+        fishingTick();
+        ItemInstance* rodSel = g_level.player->inventory->getSelected();
+        if (rodSel && rodSel->id == ITEM_FISHING_ROD) {
+            if (pressed & PSP_CTRL_LTRIGGER) {
+                if (fishingLineIsOut()) fishingReel();
+                else                    fishingCast();
+                playerSwing();
+            }
+            // Swallowed so the cast doesn't also try to place a block or
+            // run useOn against whatever the crosshair happens to be on.
+            pressed &= ~PSP_CTRL_LTRIGGER;
+        }
+    }
+
     if (g_worldBuilt) {
         static bool s_eating = false;
         static unsigned int s_eatStart = 0;
@@ -648,6 +672,11 @@ CrosshairTarget gameModeCrosshairTarget() {
          g_level.player->health < g_level.player->getMaxHealth())) {
         t.useLabel = "Eat";
         return t;
+    }
+
+    {
+        const char* fishLabel = fishingUseLabel();
+        if (fishLabel) { t.useLabel = fishLabel; return t; }
     }
 
     if (sel && sel->id == ITEM_CAMERA) {

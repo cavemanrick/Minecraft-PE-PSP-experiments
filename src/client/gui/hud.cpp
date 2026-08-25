@@ -268,6 +268,9 @@ const char* getBlockName(short id, unsigned char data) {
             case ITEM_PAINTING: return "Painting";
             case ITEM_SIGN: return "Sign";
             case ITEM_BOW: return "Bow";
+            case ITEM_FISHING_ROD: return "Fishing Rod";
+            case ITEM_FISH_RAW: return "Raw Fish";
+            case ITEM_FISH_COOKED: return "Cooked Fish";
 
             case ITEM_SWORD_WOOD: return "Wooden Sword";
             case ITEM_SWORD_STONE: return "Stone Sword";
@@ -581,6 +584,9 @@ const char* getBlockDescription(short id, unsigned char data) {
             case ITEM_COMPASS: return "Points to your start point.";
             case ITEM_CLOCK: return "Displays positions of the Sun and Moon.";
             case ITEM_BOW: return "Allows for ranged attacks by using arrows.";
+            case ITEM_FISHING_ROD: return "Cast the line into water and reel in when the bobber is pulled under.";
+            case ITEM_FISH_RAW: return "Caught by fishing. Restores a little health, and more once cooked.";
+            case ITEM_FISH_COOKED: return "Raw fish cooked in a furnace. Restores more health than raw.";
             case ITEM_SIGN: return "Shows text entered by you or other players.";
             case ITEM_PAINTING: return "Used as decoration.";
 

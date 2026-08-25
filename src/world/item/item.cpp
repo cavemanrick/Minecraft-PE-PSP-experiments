@@ -12,6 +12,7 @@
 #include "world/item/sign_item.h"
 #include "world/item/bonemeal_item.h"
 #include "world/item/bow_item.h"
+#include "world/item/fishing_rod_item.h"
 #include "world/item/spawn_egg_item.h"
 #include "world/entity/entity_types.h"
 
@@ -92,6 +93,11 @@ void Item::initItems() {
     new FoodItem(ITEM_CHICKEN_RAW,     2, true,  ic(9,  7));
     new FoodItem(ITEM_CHICKEN_COOKED,  6, true,  ic(10, 7));
 
+    // NOTE: the ic() value every item below passes is DEAD. Nothing calls
+    // Item::getIcon(); all icon lookup goes through kItemIcon[] in
+    // src/gpu/item_icons.h, which is indexed 32-wide while ic() is 16-wide.
+    // A new item is invisible until it has a kItemIcon entry, regardless of
+    // what is passed here. The fishing items below have theirs.
     new SimpleItem(ITEM_ARROW,          ic(5, 2));
     new SimpleItem(ITEM_COAL,           ic(7, 0));
     new SimpleItem(ITEM_DIAMOND,        ic(7, 3));
@@ -139,6 +145,9 @@ void Item::initItems() {
     new SignItem(ITEM_SIGN, ic(10, 2));
     new BonemealItem(ITEM_BONEMEAL);
     new BowItem(ITEM_BOW);
+    new FishingRodItem(ITEM_FISHING_ROD);
+    new FoodItem(ITEM_FISH_RAW,        2, true, ic(9,  5));
+    new FoodItem(ITEM_FISH_COOKED,     5, true, ic(10, 5));
     new SpawnEggItem();
 
     {

@@ -81,6 +81,7 @@ OBJS = \
 	src/world/item/item.o \
 	src/world/item/item_instance.o \
 	src/world/item/tile_item.o src/world/item/bucket_item.o \
+	src/world/item/fishing_rod_item.o \
 	src/world/item/hoe_item.o \
 	src/world/item/seed_item.o \
 	src/world/item/hanging_entity_item.o \
@@ -95,6 +96,7 @@ OBJS = \
 	src/world/entity/painting.o \
 	src/world/entity/arrow.o \
 	src/world/entity/throwable.o \
+	src/world/entity/fishing_bobber.o \
 	src/world/entity/falling_tile.o \
 	src/world/entity/primed_tnt.o \
 	src/world/entity/item_entity.o \

@@ -19,6 +19,20 @@
 #define II_SPAWN_EGG_BASE     118
 #define II_SPAWN_EGG_OVERLAY  119
 
+// Fishing rod: real art, at index 19 (an unused violet placeholder slot in
+// gui_blocks.png before this). The two fish icons are still a stopgap: no
+// dedicated raw/cooked fish sprite exists yet, so they point at the
+// raw/cooked chicken art (indices 34/35) -- fish and chicken currently
+// look identical in the inventory.
+//
+// Free sprite slots exist (125-147 and 0,1,2,6,7,8,9,11,12,13) for
+// whenever real fish art is drawn in. column = index & 31,
+// row = 27 + (index >> 5), same binary (0/255) alpha convention this
+// atlas already uses throughout.
+#define II_FISHING_ROD               19
+#define II_FISH_RAW_PLACEHOLDER      34
+#define II_FISH_COOKED_PLACEHOLDER   35
+
 // Real fishing rod art now lives at index 19 -- see the comment there. The
 // two fish icons are still a stopgap: no dedicated raw/cooked fish sprite
 // exists in gui_blocks.png yet, so they point at the raw/cooked chicken

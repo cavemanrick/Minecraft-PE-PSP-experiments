@@ -26,6 +26,12 @@ namespace EntityTypes {
     const int IdSnowball    = 81;
     const int IdThrownEgg   = 82;
     const int IdPainting    = 83;
+    // The fishing bobber. Deliberately never persisted -- FishingBobber
+    // overrides save() to refuse, because a bobber reloaded without the
+    // cast that produced it is an orphan nothing can reel in. It is
+    // therefore also absent from EntityFactory::createEntity: nothing can
+    // ask for one by type id, only the rod can create one.
+    const int IdFishingBobber = 84;
 }
 
 #endif

@@ -9,6 +9,7 @@ extern World g_world;
 #include "client/renderer/entity/primed_tnt_renderer.h"
 #include "client/renderer/entity/item_renderer.h"
 #include "client/renderer/entity/throwable_renderer.h"
+#include "client/renderer/entity/fishing_bobber_renderer.h"
 #include "client/renderer/entity/pig_renderer.h"
 #include "client/renderer/entity/cow_renderer.h"
 #include "client/renderer/entity/chicken_renderer.h"
@@ -35,6 +36,7 @@ EntityRenderDispatcher::EntityRenderDispatcher() {
 
     assign(ER_SNOWBALL_RENDERER, new ThrowableRenderer());
     assign(ER_THROWNEGG_RENDERER, new ThrowableRenderer());
+    assign(ER_FISHING_BOBBER_RENDERER, new FishingBobberRenderer());
     assign(ER_PIG_RENDERER, new PigRenderer());
     assign(ER_COW_RENDERER, new CowRenderer());
     assign(ER_CHICKEN_RENDERER, new ChickenRenderer());

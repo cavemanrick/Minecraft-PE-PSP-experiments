@@ -111,6 +111,11 @@ Recipes::Recipes() {
                         "# X",
                         " #X", { ITEM('X', ITEM_STRING), ITEM('#', ITEM_STICK) });
 
+        addShapedRecipe(ItemInstance(ITEM_FISHING_ROD, 1, 0),
+                        "  #",
+                        " #X",
+                        "# X", { ITEM('X', ITEM_STRING), ITEM('#', ITEM_STICK) });
+
         addShapedRecipe(ItemInstance(ITEM_ARROW, 4, 0),
                         "X",
                         "#",
