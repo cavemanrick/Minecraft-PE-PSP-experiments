@@ -120,6 +120,7 @@ OBJS = \
 	src/client/renderer/entity/painting_renderer.o \
 	src/client/renderer/entity/arrow_renderer.o \
 	src/client/renderer/entity/falling_tile_renderer.o \
+	src/client/renderer/entity/fishing_bobber_renderer.o \
 	src/client/renderer/entity/primed_tnt_renderer.o \
 	src/client/renderer/entity/item_renderer.o \
 	src/client/renderer/entity/throwable_renderer.o \
@@ -184,7 +185,8 @@ OBJS = \
 	src/world/level/levelgen/debug_spawn_content.o \
 	src/world/level/levelgen/caves.o \
 	src/world/level/levelgen/nether_biome.o \
-	src/world/level/levelgen/nether_gen.o
+	src/world/level/levelgen/nether_gen.o \
+	src/world/level/levelgen/village_gen.o
 
 INCDIR = src
 # -MMD -MP: gcc writes a .d file next to every .o listing the headers that

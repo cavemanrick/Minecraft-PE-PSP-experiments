@@ -326,6 +326,8 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
     }
 }
 
+static int      g_genMask = 0;
+
 bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     int xo = chunkX * 16, zo = chunkZ * 16;
     switch (phase) {
@@ -525,8 +527,6 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
 
 static McpeGen* g_gen = 0;
 static long     g_genSeed = 0;
-static int      g_genMask = 0;
-
 void worldGenInit(long seed, int genMask) {
     if (g_gen && g_genSeed == seed) { g_genMask = genMask; return; }
     worldGenFree();
