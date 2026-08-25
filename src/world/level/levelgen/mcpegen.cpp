@@ -3,6 +3,7 @@
 #include "world/level/levelgen/features.h"
 #include "world/level/levelgen/caves.h"
 #include "world/level/levelgen/gen_features.h"
+#include "world/level/levelgen/village_gen.h"
 #include "world/level/levelgen/PerlinNoise.h"
 #include "world/level/world.h"
 
@@ -352,6 +353,7 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
         int x = xo + random.nextInt(16), y = random.nextInt(128), z = zo + random.nextInt(16);
         clayFeature(w, random, x, y, z);
     }
+
     return false; }
 
     case 1: {
@@ -494,6 +496,12 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     return false; }
 
     case 4: {
+
+    // Villages are generated after trees/ground cover so later vegetation
+    // passes cannot accidentally grow trees on rooftops. The generator is
+    // chunk-local and deterministic, so it remains safe for streaming.
+    if (genFeatureEnabled(g_genMask, GEN_FEATURE_VILLAGES))
+        villageGenerateChunk(w, worldSeed, chunkX, chunkZ);
 
     #define SPRING_WATER_TRIES 50
     #define SPRING_LAVA_TRIES  20

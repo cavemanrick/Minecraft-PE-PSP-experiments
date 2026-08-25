@@ -3,6 +3,7 @@
 const GenFeatureDef kGenFeatures[GEN_FEATURE_COUNT] = {
 
     { "Generate Caves", false },
+    { "Generate Villages", true },
 };
 
 int genFeaturesDefaultMask() {
