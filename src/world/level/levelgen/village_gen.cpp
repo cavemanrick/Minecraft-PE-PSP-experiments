@@ -39,10 +39,16 @@ static int villageHeight(World* w, int x, int z) {
     return 0;
 }
 
+// Sampled over the same 1..14 span that flatten() and the buildings
+// actually occupy, not a smaller 2..13 inset. The inset meant the outer
+// ring was never flatness-tested but was still bulldozed -- and house 2
+// (x0+10..x0+14) and house 3 (z0+10..z0+14) both reach x/z 14, so the
+// untested ring was load-bearing, not decorative. Testing what we build on
+// is the whole point of the check.
 static bool villageFlatEnough(World* w, int cx, int cz, int& baseY) {
     int minY = WORLD_H, maxY = 0, sum = 0, n = 0;
-    for (int z = 2; z <= 13; ++z) {
-        for (int x = 2; x <= 13; ++x) {
+    for (int z = 1; z <= 14; ++z) {
+        for (int x = 1; x <= 14; ++x) {
             int y = villageHeight(w, cx * 16 + x, cz * 16 + z);
             if (y <= 0 || y >= 120) return false;
             if (y < minY) minY = y;
@@ -50,7 +56,12 @@ static bool villageFlatEnough(World* w, int cx, int cz, int& baseY) {
             sum += y; ++n;
         }
     }
-    if (maxY - minY > 3) return false;
+    // Tolerance 4 rather than 3. baseY is the mean, so the worst cut or
+    // fill against a spread of 4 is about two blocks -- still a village
+    // sitting in the landscape rather than on a visible plinth -- and the
+    // looser bound is a large part of what makes villages actually appear
+    // on gently rolling plains instead of only on near-perfect flats.
+    if (maxY - minY > 4) return false;
     baseY = sum / n;
     if (baseY < 3 || baseY > 110) return false;
     return true;
@@ -120,12 +131,25 @@ static void buildHouse(World* w, int x0, int z0, int width, int depth,
 
     // Small roof cap. Flat roofs are deliberate: stairs have orientation
     // quirks and a slab roof is cheaper while still reading as a village home.
-    for (int z = z0 - 0; z < z0 + depth; ++z)
+    for (int z = z0; z < z0 + depth; ++z)
         for (int x = x0; x < x0 + width; ++x)
             put(w, x, y + 5, z, roof);
 
     // A torch inside each house makes the structure useful at night.
-    put(w, dx, y + 3, z0 + depth / 2, BLOCK_TORCH, 0);
+    //
+    // Data 1 = mounted on the wall to the WEST, i.e. supportCanSurvive
+    // tests the block at x-1 (see BLOCK_TORCH in tile_support.cpp). Placing
+    // it at x0+1 puts that test on the x0 wall column, which is solid
+    // cobble/sandstone at this height -- the y+2 window pane is a row
+    // lower, so it is never what the torch leans on.
+    //
+    // The previous version passed data 0 and hung the torch in mid-air at
+    // the centre of the room. Data 0 matches no case in the torch's
+    // support switch, so it falls through to `return false` and the torch
+    // deletes itself on the first block update that reaches it -- a
+    // village that is lit when you generate it and dark by the time you
+    // walk back to it.
+    put(w, x0 + 1, y + 3, z0 + depth / 2, BLOCK_TORCH, 1);
 }
 
 static void buildWell(World* w, int x0, int z0, int y) {
@@ -161,8 +185,21 @@ static void buildFarm(World* w, int x0, int z0, int y, bool desert) {
 
 void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
     unsigned int h = villageHash(worldSeed, chunkX, chunkZ);
-    // Roughly one village every 96 chunks, but only in suitable biomes.
-    if ((h % 96u) != 0u) return;
+    // Roughly one candidate chunk in 32, but only a fraction of those
+    // survive the biome and flatness gates below -- expect on the order of
+    // two or three villages on the 512 preset (1024 overworld chunks) and
+    // around ten on 1024 (4096 chunks).
+    //
+    // This used to be 96, which is where the "I have never seen a village"
+    // reports came from: 1024/96 is about ten candidate chunks per 512
+    // world, the plains-or-desert gate keeps roughly one in six of those,
+    // and the flatness gate then rejects most of the survivors. Zero
+    // villages was the common outcome, not the unlucky one. Three
+    // multiplied probabilities need the first one to be generous.
+    //
+    // This is the density knob. Lower for more villages, higher for fewer;
+    // nothing else needs to change alongside it.
+    if ((h % 32u) != 0u) return;
 
     int centerX = chunkX * 16 + 8;
     int centerZ = chunkZ * 16 + 8;
@@ -182,11 +219,31 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
     buildHouse(w, ox + 1,  oz + 1, 5, 6, baseY, desert, true);
     buildHouse(w, ox + 10, oz + 1, 5, 6, baseY, desert, true);
     buildHouse(w, ox + 5,  oz + 10, 5, 5, baseY, desert, false);
-    buildWell(w, ox + 7, oz + 7, baseY);
 
-    // Two-block-wide paths. Cobble in plains and sandstone in deserts gives
-    // the same geometry two distinct visual identities.
-    unsigned char path = desert ? BLOCK_SANDSTONE : BLOCK_GRAVEL;
+    // Two-block-wide paths, laid BEFORE the well.
+    //
+    // Order matters here and previously did not hold: the well was built
+    // first, and the two path runs below both sweep straight through its
+    // 3x3 footprint at ox+7..ox+9 / oz+7..oz+9. Between them they
+    // overwrote eight of the well's nine top blocks, the centre water
+    // included, so what actually generated was a fenced patch of paving
+    // with a plank floating over it. Building the well afterwards lets it
+    // stamp itself back over the junction, which is also what you want
+    // visually -- the paths run up to the well and stop.
+    //
+    // Plains paving is cobblestone rather than gravel. heightmapAt
+    // (features_common.cpp) counts gravel and sandstone as ground but not
+    // cobble, and treeBasic does no ground-material check at all before
+    // forcing the block beneath a sapling to dirt -- so a neighbouring
+    // forest chunk's tree pass, which reaches 8..23 blocks into this
+    // chunk, could plant a tree in the middle of a gravel path and punch a
+    // dirt hole through it. Cobble makes heightmapAt fall through to the
+    // dirt at baseY-1, and the clearance test then fails against the
+    // paving itself, so the tree is simply not placed. If you prefer the
+    // gravel look this is a one-word revert; the desert path is still
+    // sandstone and does still carry the original risk, which in practice
+    // needs a desert chunk bordering a forested one.
+    unsigned char path = desert ? BLOCK_SANDSTONE : BLOCK_COBBLESTONE;
     for (int x = 2; x <= 13; ++x) {
         put(w, ox + x, baseY, oz + 7, path);
         put(w, ox + x, baseY, oz + 8, path);
@@ -195,6 +252,8 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
         put(w, ox + 7, baseY, oz + z, path);
         put(w, ox + 8, baseY, oz + z, path);
     }
+
+    buildWell(w, ox + 7, oz + 7, baseY);
 
     // Small shared crop plot beside the southern house. The water strip is
     // central so every crop row is adjacent to irrigation.
