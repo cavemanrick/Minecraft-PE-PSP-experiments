@@ -13,6 +13,7 @@
 #include <pspctrl.h>
 #include "world/level/tile/nether_portal.h"
 #include "world/entity/animal/strider.h"
+#include "world/entity/entity_types.h"
 
 extern World g_world;
 
