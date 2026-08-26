@@ -333,12 +333,19 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             }
             break;
         case BLOCK_LEAVES_DARK_OAK:
-            // Real atlas tile now, at what used to be an unused violet
-            // placeholder slot. The colour is BAKED INTO THE TEXTURE
-            // (the oak leaf greyscale mask multiplied by 0xFF1F6B2E), so
-            // *tint stays white here -- setting a tint as well would
-            // modulate twice (mesh_block.cpp does mulColor(bright, tint)
-            // and the GU is in GU_TFX_MODULATE) and come out near-black.
+            // Purpose-drawn dark oak leaf art at (14,1), with the colour
+            // BAKED IN -- it is the (4,3) oak leaf mask multiplied through
+            // by a dark green, so *tint must stay white. Tinting as well
+            // would modulate twice (mesh_block.cpp does mulColor(bright,
+            // tint) with the GU in GU_TFX_MODULATE) and come out near
+            // black.
+            //
+            // Fire is the neighbouring cell at (15,1). If this block ever
+            // renders as flames again, the atlas being loaded is an older
+            // terrain.png that predates the dark oak art -- check
+            // terrainMipMapLevel2.png and terrainMipMapLevel3.png too,
+            // since a stale mip will show the wrong cell at distance even
+            // when the base atlas is correct.
             *col = 14; *row = 1;
             break;
         case BLOCK_MYCELIUM:

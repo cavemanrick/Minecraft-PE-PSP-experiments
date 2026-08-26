@@ -168,7 +168,17 @@ static inline int slabGuiIcon(short id, unsigned char data) {
     }
 }
 
-static inline int leafGuiIcon(unsigned char data) {
+// Takes the id as well as the data. Dark oak is its own block id with no
+// type field -- its data is always 0 -- so a data-only switch fell through
+// to the oak icon and dark oak leaves showed as oak in the inventory.
+//
+// 128 + II_LEAVES_DARK_OAK, not the bare value: drawBlockIcon reads
+// indices below 128 as 48x48 isometric cubes and anything from 128 up as
+// (index - 128) into the flat 16x16 grid. The other three leaves are real
+// isometric cubes; dark oak borrows a flat sprite instead of needing one
+// drawn.
+static inline int leafGuiIcon(short id, unsigned char data) {
+    if (id == BLOCK_LEAVES_DARK_OAK) return 128 + II_LEAVES_DARK_OAK;
     switch (data & LEAF_TYPE_MASK) {
         case LEAF_SPRUCE: return 84;
         case LEAF_BIRCH:  return 85;
@@ -192,7 +202,7 @@ static const short kWoolGuiIcon[16] = {
 
 int getGuiBlockIcon(short id, unsigned char data) {
     if (id >= 256) return -2;
-    return isLeaf(id) ? leafGuiIcon(data)
+    return isLeaf(id) ? leafGuiIcon(id, data)
          : (id == BLOCK_SAPLING) ? saplingGuiIcon(data)
          : isWool(id) ? kWoolGuiIcon[data & 0xF]
          : isLog(id) ? logGuiIcon(data)

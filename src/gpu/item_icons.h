@@ -19,43 +19,44 @@
 #define II_SPAWN_EGG_BASE     118
 #define II_SPAWN_EGG_OVERLAY  119
 
-// Fishing rod: real art, at index 19 (an unused violet placeholder slot in
-// gui_blocks.png before this). The two fish icons are still a stopgap: no
-// dedicated raw/cooked fish sprite exists yet, so they point at the
-// raw/cooked chicken art (indices 34/35) -- fish and chicken currently
-// look identical in the inventory.
+// Index 19 holds the fishing rod's art. It did NOT always: 19 was the
+// bow's idle icon, and the rod was painted over that cell. The bow's table
+// entry below was never moved off 19, so the two shared a sprite and a bow
+// in hand or in the hotbar looked exactly like a fishing rod -- which also
+// made the real rod look unobtainable, since the slot beside it in the
+// creative palette was an identical-looking bow.
 //
-// Free sprite slots exist (125-147 and 0,1,2,6,7,8,9,11,12,13) for
-// whenever real fish art is drawn in. column = index & 31,
-// row = 27 + (index >> 5), same binary (0/255) alpha convention this
-// atlas already uses throughout.
+// Real idle-bow art, vanilla items.png (5,1), pasted into free slot 125.
+// 19 is the fishing rod and was ALSO the bow's entry in the table below --
+// the rod had been painted over the bow's old idle cell without the bow
+// being moved off it, so a bow rendered as a rod and the real rod beside
+// it in the creative palette looked like a duplicate.
+#define II_BOW_IDLE                 125
 #define II_FISHING_ROD               19
-#define II_FISH_RAW_PLACEHOLDER      34
-#define II_FISH_COOKED_PLACEHOLDER   35
 
-// Real fishing rod art now lives at index 19 -- see the comment there. The
-// two fish icons are still a stopgap: no dedicated raw/cooked fish sprite
-// exists in gui_blocks.png yet, so they point at the raw/cooked chicken
-// art (indices 34/35), meaning fish and chicken currently look identical
-// in the inventory.
+// Real fish art, vanilla items.png (9,5) and (10,5). These pointed at the
+// raw/cooked CHICKEN cells (34/35) as a stopgap, so fish and chicken were
+// indistinguishable in the inventory.
+#define II_FISH_RAW                 126
+#define II_FISH_COOKED              127
+
+// Dark oak leaves, taken from terrain.png (14,1) -- already dark-tinted
+// there, so it needs no recolouring for the GUI.
 //
-// Free sprite slots do exist (125-147 and 0,1,2,6,7,8,9,11,12,13) for
-// whenever real fish art is drawn in. Placing it is the same recipe used
-// for the rod: paint a 16x16 sprite into gui_blocks.png at
-// column = index & 31, row = 27 + (index >> 5), with the exact convention
-// this atlas already uses -- binary (0/255) alpha, no partial edge pixels
-// -- then repoint just these two defines. Nothing else references them.
-//
-// Index 19 was the bow's idle icon before the rod was drawn in (see
-// II_BOW_PULL_0/1/2 a few lines up for the bow's OTHER three icons, which
-// are unrelated cells and still the bow -- only the single idle-hold icon
-// was ever shared with the rod placeholder).
-#define II_FISHING_ROD               19
-#define II_FISH_RAW_PLACEHOLDER      34
-#define II_FISH_COOKED_PLACEHOLDER   35
+// Referenced from hud.cpp as 128 + this value, NOT as this value: the
+// block-icon path treats indices under 128 as 48x48 isometric cubes and
+// anything at or above 128 as (index - 128) into this same 16x16 flat
+// grid. The other leaf variants are real isometric cubes at 83/84/85; a
+// flat sprite is the cheap way in without drawing a cube.
+#define II_LEAVES_DARK_OAK          128
+
+// Remaining free flat slots: 129, 139-141, 147-159, plus 0,6,7,9,107,108.
+// Same convention throughout this atlas -- 16x16 at
+// column = index & 31, row = 27 + (index >> 5), binary (0/255) alpha, no
+// partial edge pixels, because the loader is GU_PSM_5551 (1-bit alpha).
 
 static const short kItemIcon[256] = {
-       46,    45,    47,   103,   106,    19,    62,    -1,
+       46,    45,    47,   103,   106, II_BOW_IDLE,    62,    -1,   // 261 = ITEM_BOW at index 5
        25,    22,    21,    18,    57,    38,    36,    39,
        58,    42,    41,    43,    59,    49,    48,    50,
        37,    67,    66,    60,    53,    52,    54,    61,
@@ -66,7 +67,7 @@ static const short kItemIcon[256] = {
        29,     5,    -1,    20,     3,    -1,    -1,    -1,
        -1,    -1,    -1,    -1,    98,    -1,    71,    -1,
        31,    30,    10,    96,    97,    -1,    -1,    -1,
-      113,    -1, II_FISHING_ROD,    -1,    99, II_FISH_RAW_PLACEHOLDER, II_FISH_COOKED_PLACEHOLDER,    -1,
+      113,    -1, II_FISHING_ROD,    -1,    99, II_FISH_RAW,            II_FISH_COOKED,    -1,
        95,   101,   120,     4,    -1,    -1,    -1,    56,
        68,    -1,    15,    32,    33,    34,    35,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
