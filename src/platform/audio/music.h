@@ -28,8 +28,9 @@ void musicSetFormat(unsigned int sampleRate, int channels);
 //  - Main menu: loops menu.raw for as long as inMainMenu is true.
 //  - Gameplay: on first entering gameplay, waits 60s then plays danny.raw
 //    once. After it (or any subsequent track) finishes, waits a random
-//    60-180s, then plays a random track from the music folder (excluding
-//    menu.raw/danny.raw), repeating indefinitely.
+//    60-180s, then plays another discovered .raw track, repeating indefinitely.
+//    menu.raw is reserved for the title screen; danny.raw may appear again
+//    later in the gameplay rotation. Extension matching is case-insensitive.
 // Passing inMainMenu=false and inGameplay=false (e.g. a sub-menu screen)
 // leaves whatever's currently playing alone.
 void musicUpdate(bool inMainMenu, bool inGameplay);

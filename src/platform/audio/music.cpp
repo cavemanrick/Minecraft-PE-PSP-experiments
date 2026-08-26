@@ -31,10 +31,10 @@
 
 static FILE*        g_file        = NULL;
 static FILE*        g_pendingFile = NULL; // set by musicPlay(), consumed by mixer thread
-static bool         g_pendingLoop = false;
+static volatile int g_pendingLoop = 0;
 static volatile int g_pendingSwap = 0;    // 1 = mixer thread should swap in g_pendingFile
-static bool         g_loop        = false;
-static bool         g_playing     = false;
+static volatile int g_loop        = 0;
+static volatile int g_playing     = 0;
 static float        g_volume      = 1.0f;
 static unsigned int g_rate        = 44100;
 static int          g_channels    = 2;     // 1 = mono source, 2 = stereo source
@@ -82,7 +82,7 @@ static unsigned int ringFilled(void) { return g_ringWritten - g_ringRead; }
 
 static void closeTrack(void) {
     if (g_file) { fclose(g_file); g_file = NULL; }
-    g_playing  = false;
+    g_playing  = 0;
 }
 
 // Reads and mixes one stereo 16-bit block from the current stream into
@@ -94,7 +94,7 @@ static void musicFillBlock(short* out) {
         closeTrack();
         g_file    = g_pendingFile;
         g_loop    = g_pendingLoop;
-        g_playing = (g_file != NULL);
+        g_playing = (g_file != NULL) ? 1 : 0;
         g_pendingFile = NULL;
         g_pendingSwap = 0;
 
@@ -199,54 +199,93 @@ void musicSetFormat(unsigned int sampleRate, int channels) {
 
 // ---- track discovery ------------------------------------------------------
 
-// Rotation pool: every *.raw file directly in data/music/, EXCLUDING
-// menu.raw and danny.raw (those are special-cased, not part of the
-// random rotation).
+// Rotation pool: every *.raw file directly in data/music/, excluding only
+// menu.raw. danny.raw is used as the first gameplay track, then remains in
+// the rotation pool so it can be heard again later. Extension matching is
+// case-insensitive because Memory Stick filenames may not preserve the
+// exact case used by the source build.
 static char g_rotationTracks[MAX_ROTATION_TRACKS][PATH_LEN];
 static int  g_rotationCount = 0;
-static int  g_rotationIdx   = 0; // next track to play, sequential loop
+static int  g_lastRotation  = -1;
 
 static bool isSpecialTrack(const char* filename) {
-    return strcmp(filename, "menu.raw") == 0 || strcmp(filename, "danny.raw") == 0;
+    return strcmp(filename, "menu.raw") == 0 || strcmp(filename, "MENU.RAW") == 0;
+}
+
+static bool hasRawExtension(const char* filename) {
+    size_t len = strlen(filename);
+    if (len < 5) return false;
+    const char* ext = filename + len - 4;
+    return (ext[0] == '.' &&
+            (ext[1] == 'r' || ext[1] == 'R') &&
+            (ext[2] == 'a' || ext[2] == 'A') &&
+            (ext[3] == 'w' || ext[3] == 'W'));
 }
 
 static void scanMusicFolder(void) {
     g_rotationCount = 0;
-    g_rotationIdx   = 0;
+    g_lastRotation  = -1;
 
     DIR* d = opendir(assetPath(MUSIC_DIR));
-    if (!d) return;
+    if (!d) {
+        printf("[music] unable to open %s\n", assetPath(MUSIC_DIR));
+        return;
+    }
 
     struct dirent* ent;
     while ((ent = readdir(d)) != NULL && g_rotationCount < MAX_ROTATION_TRACKS) {
         const char* name = ent->d_name;
-        size_t len = strlen(name);
-        if (len < 5) continue; // need at least "X.raw"
-        if (strcmp(name + len - 4, ".raw") != 0) continue;
+        if (!hasRawExtension(name)) continue;
         if (isSpecialTrack(name)) continue;
 
         snprintf(g_rotationTracks[g_rotationCount], PATH_LEN,
                  "%s/%s", MUSIC_DIR, name);
+        printf("[music] track[%d] = %s\n", g_rotationCount,
+               g_rotationTracks[g_rotationCount]);
         g_rotationCount++;
     }
     closedir(d);
 
-    // Logged because an empty pool is invisible otherwise, and it is the
-    // difference between "rotation is working" and "rotation is falling
-    // back to danny.raw every time".
-    printf("[music] %d rotation track(s) found in %s\n", g_rotationCount, MUSIC_DIR);
+    // Danny is intentionally added to the rotation if it exists. This is
+    // useful on builds with only Danny plus one or two additional tracks,
+    // and prevents the playlist from becoming a one-way trip into silence.
+    char dannyPath[PATH_LEN];
+    snprintf(dannyPath, sizeof(dannyPath), "%s", FIRST_TRACK);
+    FILE* danny = fopen(assetPath(dannyPath), "rb");
+    if (!danny) danny = fopen(dannyPath, "rb");
+    if (danny) {
+        fclose(danny);
+        if (g_rotationCount < MAX_ROTATION_TRACKS) {
+            bool alreadyListed = false;
+            for (int i = 0; i < g_rotationCount; ++i) {
+                if (strcmp(g_rotationTracks[i], FIRST_TRACK) == 0) {
+                    alreadyListed = true;
+                    break;
+                }
+            }
+            if (!alreadyListed) {
+                snprintf(g_rotationTracks[g_rotationCount], PATH_LEN,
+                         "%s", FIRST_TRACK);
+                printf("[music] track[%d] = %s\n", g_rotationCount,
+                       g_rotationTracks[g_rotationCount]);
+                g_rotationCount++;
+            }
+        }
+    }
+
+    printf("[music] %d gameplay rotation track(s) found in %s\n",
+           g_rotationCount, MUSIC_DIR);
 }
 
 static const char* nextRotationTrack(void) {
-    // Sequential loop through whatever's in data/music/ (excluding
-    // menu.raw/danny.raw), in the order scanMusicFolder() found them.
-    // Deterministic on purpose: whether rotation is actually advancing
-    // is now visible just by listening for the loop, rather than relying
-    // on rand() output or a console log to confirm.
     if (g_rotationCount == 0) return NULL;
-    const char* track = g_rotationTracks[g_rotationIdx];
-    g_rotationIdx = (g_rotationIdx + 1) % g_rotationCount;
-    return track;
+
+    int idx = rand() % g_rotationCount;
+    if (g_rotationCount > 1 && idx == g_lastRotation) {
+        idx = (idx + 1 + (rand() % (g_rotationCount - 1))) % g_rotationCount;
+    }
+    g_lastRotation = idx;
+    return g_rotationTracks[idx];
 }
 
 // ---- playback state machine -----------------------------------------------
@@ -310,14 +349,14 @@ void musicPlay(const char* path, bool loop) {
     // block instead of us touching g_file directly from the main thread.
     if (g_pendingFile) fclose(g_pendingFile); // a swap was queued but never consumed
     g_pendingFile = f;
-    g_pendingLoop = loop;
+    g_pendingLoop = loop ? 1 : 0;
     g_pendingSwap = 1;
 }
 
 void musicStop(void) {
     if (g_pendingFile) { fclose(g_pendingFile); g_pendingFile = NULL; }
     g_pendingFile = NULL;
-    g_pendingLoop = false;
+    g_pendingLoop = 0;
     g_pendingSwap = 1; // swaps in a NULL file -> silence, applied on mixer thread
 }
 
