@@ -50,7 +50,7 @@ void StriderRenderer::render(Entity* e, float x, float y, float z, float rot, fl
         if (!haveTex) return;
     }
     Strider* strider = (Strider*)e;
-    const Texture* activeTex = &tex;
+    Texture* activeTex = &tex;
     if (strider->isSaddled()) {
         if (!haveSaddleTex)
             haveSaddleTex = textureLoad16("data/images/mob/strider_saddled.png", &saddleTex, GU_PSM_5551);
