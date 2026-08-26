@@ -4,6 +4,7 @@
 #include "world/entity/mob.h"
 
 class Player;
+class CompoundTag;
 
 // A deliberately lightweight Nether mob. It does not inherit PathfinderMob:
 // striders wander on lava and use direct movement, so adding them does not
@@ -29,15 +30,19 @@ public:
 
     void setRiderInput(float strafe, float forward);
     Player* getRider() const { return rider; }
+    bool isSaddled() const { return saddled; }
 
 private:
     Player* rider;
+    bool saddled;
     float riderStrafe;
     float riderForward;
     int lavaSnapTimer;
 
     int findLavaSurfaceY(int x, int z) const;
     void syncRider();
+    virtual void readAdditionalSaveData(CompoundTag* tag);
+    virtual void addAdditonalSaveData(CompoundTag* tag);
 };
 
 #endif

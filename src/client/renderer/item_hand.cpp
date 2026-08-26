@@ -28,6 +28,8 @@ extern int g_noMipmap;
 extern Texture g_terrain;
 extern Texture g_guiBlocks;
 extern bool g_haveGuiBlocks;
+extern Texture g_saddleItem;
+extern bool g_haveSaddleItem;
 
 extern int   g_viewBobbing;
 
@@ -217,12 +219,18 @@ int itemBuildFlatMesh(short id, unsigned char data, ChunkVertex* out, int bowSta
     float sx, sy;
     if (id >= 256) {
 
-        int icon = itemFlatIcon(id, data);
-        if (bowStage >= 0) icon = bowStage;
-        if (icon < 0) return 0;
-        sx = (icon & 31) * 16.0f;
-        sy = (27 + (icon >> 5)) * 16.0f;
-        tex_w = 512.0f;
+        if (id == ITEM_SADDLE && g_haveSaddleItem) {
+            sx = 0.0f;
+            sy = 0.0f;
+            tex_w = 16.0f;
+        } else {
+            int icon = itemFlatIcon(id, data);
+            if (bowStage >= 0) icon = bowStage;
+            if (icon < 0) return 0;
+            sx = (icon & 31) * 16.0f;
+            sy = (27 + (icon >> 5)) * 16.0f;
+            tex_w = 512.0f;
+        }
     } else {
         int i = getGuiBlockIcon(id, data);
         if (i >= 128) {
@@ -308,6 +316,7 @@ int itemBuildFlatMesh(short id, unsigned char data, ChunkVertex* out, int bowSta
 }
 
 const Texture* itemFlatTexture(short id, unsigned char data) {
+    if (id == ITEM_SADDLE) return g_haveSaddleItem ? &g_saddleItem : 0;
     if (id >= 256) return g_haveGuiBlocks ? &g_guiBlocks : 0;
     int i = getGuiBlockIcon(id, data);
     if (i >= 128) return g_haveGuiBlocks ? &g_guiBlocks : 0;
@@ -317,6 +326,11 @@ const Texture* itemFlatTexture(short id, unsigned char data) {
 const Texture* itemFlatIconUV(short id, unsigned char data,
                             float* u0, float* v0, float* u1, float* v1) {
     if (id >= 256) {
+        if (id == ITEM_SADDLE) {
+            if (!g_haveSaddleItem) return 0;
+            *u0 = 0.0f; *v0 = 0.0f; *u1 = 1.0f; *v1 = 1.0f;
+            return &g_saddleItem;
+        }
         if (!g_haveGuiBlocks) return 0;
         int icon = itemFlatIcon(id, data);
         if (icon < 0) return 0;

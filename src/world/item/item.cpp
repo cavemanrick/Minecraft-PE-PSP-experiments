@@ -138,6 +138,8 @@ void Item::initItems() {
     new DoorItem(ITEM_DOOR_IRON_ITEM, BLOCK_DOOR_IRON, ic(12, 2));
     new BedItem (ITEM_BED_ITEM,       BLOCK_BED,       ic(13, 2));
     new SimpleItem(ITEM_CAMERA,          ic(0, 14), 1);
+    // Saddle uses a dedicated 16x16 texture rather than the shared GUI atlas.
+    new SimpleItem(ITEM_SADDLE,          -1, 1);
 
     new SeedItem(ITEM_SEEDS_WHEAT, BLOCK_WHEAT, ic(9, 0));
     new SeedItem(ITEM_SEEDS_MELON, BLOCK_MELON_STEM, ic(14, 3));
@@ -165,6 +167,7 @@ void Item::initItems() {
             { ITEM_FLINT_AND_STEEL, 2 }, { ITEM_BOW, 2 }, { ITEM_ARROW, 2 }, { ITEM_COAL, 2 },
             { ITEM_BUCKET, 2 },
             { ITEM_STRING, 2 }, { ITEM_FEATHER, 2 }, { ITEM_GUNPOWDER, 2 }, { ITEM_FLINT, 2 },
+            { ITEM_SADDLE, 2 },
             { ITEM_LEATHER, 2 }, { ITEM_BONE, 2 }, { ITEM_SHEARS, 2 },
             { BLOCK_TNT, 2 }, { BLOCK_TORCH, 2 },
 

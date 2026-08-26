@@ -106,7 +106,13 @@ Recipes::Recipes() {
                             "#", { ITEM('#', ITEM_STICK), mat });
         }
 
-        addShapedRecipe(ItemInstance(ITEM_BOW, 1, 0),
+        // Custom PSP saddle recipe: 5 leather + 2 iron ingots.
+    addShapedRecipe(ItemInstance(ITEM_SADDLE, 1, 0),
+                    "LLL",
+                    "LIL",
+                    " I ", { ITEM('L', ITEM_LEATHER), ITEM('I', ITEM_IRON_INGOT) });
+
+    addShapedRecipe(ItemInstance(ITEM_BOW, 1, 0),
                         " #X",
                         "# X",
                         " #X", { ITEM('X', ITEM_STRING), ITEM('#', ITEM_STICK) });

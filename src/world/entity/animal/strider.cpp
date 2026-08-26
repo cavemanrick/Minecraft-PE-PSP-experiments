@@ -4,10 +4,13 @@
 #include "world/level/level.h"
 #include "world/level/chunk/chunk.h"
 #include "world/level/levelgen/nether_gen.h"
+#include "world/item/item.h"
+#include "world/inventory/inventory.h"
+#include "nbt/compound_tag.h"
 #include <cmath>
 
 Strider::Strider(Level* level)
-: Mob(level), rider(0), riderStrafe(0), riderForward(0), lavaSnapTimer(0) {
+: Mob(level), rider(0), saddled(false), riderStrafe(0), riderForward(0), lavaSnapTimer(0) {
     setSize(0.9f, 1.7f);
     heightOffset = 0.0f;
     footSize = 0.5f;
@@ -81,6 +84,15 @@ bool Strider::playerInteract() {
         riderStrafe = riderForward = 0.0f;
         return true;
     }
+
+    ItemInstance* sel = p->inventory ? p->inventory->getSelected() : 0;
+    if (!saddled) {
+        if (!sel || sel->id != ITEM_SADDLE) return false;
+        saddled = true;
+        if (!p->inventory->isCreative()) p->inventory->consumeSelected();
+        return true;
+    }
+
     if (p->isRiding()) return false;
 
     rider = p;
@@ -165,4 +177,14 @@ void Strider::travel(float xs, float yf) {
 
 void Strider::tick() {
     Mob::tick();
+}
+
+void Strider::addAdditonalSaveData(CompoundTag* tag) {
+    Mob::addAdditonalSaveData(tag);
+    tag->putBoolean("Saddled", saddled);
+}
+
+void Strider::readAdditionalSaveData(CompoundTag* tag) {
+    Mob::readAdditionalSaveData(tag);
+    saddled = tag->getBoolean("Saddled");
 }

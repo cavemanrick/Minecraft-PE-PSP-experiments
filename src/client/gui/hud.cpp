@@ -37,6 +37,8 @@ void hudChatMessage(const char* msg) {
 extern Texture g_terrain;
 extern bool    g_haveTerrain;
 extern Texture g_guiBlocks;
+extern Texture g_saddleItem;
+extern bool g_haveSaddleItem;
 extern bool    g_haveGuiBlocks;
 
 #define HUD_S   2.0f
@@ -223,6 +225,11 @@ void drawFlatIcon(int icon, float x, float y, float sizePx, unsigned int tint) {
 }
 
 void drawBlockIcon(short id, unsigned char data, float x, float y, float sizePx, unsigned int colorTint) {
+    if (id == ITEM_SADDLE && g_haveSaddleItem) {
+        textureBind(&g_saddleItem);
+        spriteDraw(&g_saddleItem, x, y, sizePx, sizePx, 0.0f, 0.0f, 16.0f, 16.0f, colorTint);
+        return;
+    }
     if (id >= 256) {
         if (id == ITEM_SPAWN_EGG) {
 
@@ -302,6 +309,7 @@ const char* getBlockName(short id, unsigned char data) {
             case ITEM_COMPASS: return "Compass";
             case ITEM_CLOCK: return "Clock";
             case ITEM_CAMERA: return "Camera";
+            case ITEM_SADDLE: return "Saddle";
 
             case ITEM_HELMET_CLOTH: return "Leather Cap";
             case ITEM_CHESTPLATE_CLOTH: return "Leather Tunic";
@@ -581,6 +589,7 @@ const char* getBlockDescription(short id, unsigned char data) {
                 return "Used to till dirt and grass blocks to prepare for crops.";
             case ITEM_FLINT_AND_STEEL: return "Used to detonate TNT.";
             case ITEM_SHEARS: return "Used to obtain wool from sheep and to harvest placeable Leaf blocks.";
+            case ITEM_SADDLE: return "Used to saddle and ride Striders.";
             case ITEM_COMPASS: return "Points to your start point.";
             case ITEM_CLOCK: return "Displays positions of the Sun and Moon.";
             case ITEM_BOW: return "Allows for ranged attacks by using arrows.";

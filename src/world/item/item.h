@@ -61,6 +61,7 @@ enum {
     ITEM_PAINTING       = 321,
     ITEM_SIGN           = 323,
     ITEM_DOOR_WOOD_ITEM = 324,
+    ITEM_SADDLE         = 329,
     ITEM_DOOR_IRON_ITEM = 330,
     ITEM_SNOWBALL       = 332,
     ITEM_LEATHER        = 334,

@@ -79,6 +79,8 @@ Texture g_particles;
 bool    g_haveParticles = false;
 Texture g_fireAtlas;
 bool    g_haveFireAtlas = false;
+Texture g_saddleItem;
+bool    g_haveSaddleItem = false;
 
 extern int g_cloudTicks;
 
@@ -1144,6 +1146,8 @@ void gameRender(MenuState& s) {
                 g_haveParticles = loadTex(&g_particles, "data/images/particles.png");
             if (!g_haveFireAtlas)
                 g_haveFireAtlas = loadTex(&g_fireAtlas, "data/images/fire_atlas.png");
+            if (!g_haveSaddleItem)
+                g_haveSaddleItem = loadTex16(&g_saddleItem, "data/images/item/saddle.png", GU_PSM_5551);
 
             bool sel = (s.worldSelected >= 0 && s.worldSelected < s.worlds.count);
             long seedVal = sel ? s.worlds.seeds[s.worldSelected] : 0;
