@@ -52,6 +52,39 @@ McpeGen::~McpeGen() {
 // replacing it, so the island keeps whatever rolling shape the noise gave it.
 #define MUSHROOM_ISLAND_LIFT 0.75f
 
+// How far the land is pulled down along a river seam, in the same yCenter
+// units as MUSHROOM_ISLAND_LIFT above -- one unit is NCELL_H (8) blocks, so
+// 0.7 is a little under six blocks at the centre of the valley, tapering
+// smoothly to nothing at RIVER_VALLEY_HALF_WIDTH.
+//
+// This is the half of rivers that makes them look like rivers. The channel
+// carve in buildSurfacesChunk can only ever REMOVE material, so on its own
+// it would cut a slot with vertical sides wherever the seam happened to
+// cross high ground. Sinking a wide valley here first means the water
+// almost always ends up at the bottom of ground that already slopes toward
+// it, and the carve is left doing very little work.
+//
+// Kept well under the island lift because it applies along every river
+// seam in the world rather than to one island: overdo it and the map turns
+// into a set of plateaus separated by canyons.
+#define RIVER_VALLEY_DROP 0.7f
+
+// Above this height the channel carve gives up rather than cutting a gorge
+// through a hillside. With the valley drop above this is rare -- it is a
+// backstop for the case where a seam crosses genuinely mountainous terrain,
+// where a river simply stopping reads better than a vertical-walled trench
+// full of water. Sea level is 64, so this allows a river to cut about ten
+// blocks into rising ground before it gives up.
+#define RIVER_CUT_CEILING_Y 74
+
+// Bed of the channel at its deepest (centre) and shallowest (bank). Water
+// fills from bed+1 up to sea level - 1 (y=63), so the centre of a river is
+// three blocks deep and the edges are one. Both values sit inside the
+// waterHeight-4..waterHeight+1 band that the surface pass treats as beach,
+// so the whole bed gets dressed in sand or gravel rather than dirt.
+#define RIVER_BED_CENTRE_Y 60
+#define RIVER_BED_BANK_Y   62
+
 float* McpeGen::getHeights(const World* w, int x, int y, int z, int xSize, int ySize, int zSize) {
     float s = 1 * 684.412f;
     float hs = 1 * 684.412f;
@@ -117,13 +150,23 @@ float* McpeGen::getHeights(const World* w, int x, int y, int z, int xSize, int y
             // cheap enough to sit in the density path, which is why the lift
             // lives here rather than being faked afterwards by stacking
             // blocks on top of a finished column.
+            //
+            // The river valley rides along on the same classification call
+            // -- the nearest-seed loop is the expensive part and it has
+            // already run, so asking it for the valley field as well costs
+            // essentially nothing. The two never overlap: seams touching
+            // the mushroom island are excluded from rivers entirely (see
+            // pairHasRiver in biome.cpp), so the lift and the drop can
+            // never both be non-zero for one sample.
             {
-                float margin = 0.0f;
+                float margin = 0.0f, valley = 0.0f;
                 BiomeId gb = classifyBiomeSpatialEx(worldSeed, w,
                                                     (x + xx) * NCELL_W, (z + zz) * NCELL_W,
-                                                    &margin);
+                                                    &margin, 0, &valley);
                 if (gb == B_MUSHROOM)
                     yCenter += MUSHROOM_ISLAND_LIFT * mushroomLandLift(margin);
+                if (valley > 0.0f)
+                    yCenter -= RIVER_VALLEY_DROP * valley;
             }
 
             pp++;
@@ -231,9 +274,9 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
         for (int z = 0; z < 16; z++) {
             float temp = 1;
 
-            float mushMargin = 0.0f;
+            float mushMargin = 0.0f, riverT = 0.0f;
             BiomeId biome = classifyBiomeSpatialEx(worldSeed, w, xOffs * 16 + x, zOffs * 16 + z,
-                                                   &mushMargin);
+                                                   &mushMargin, &riverT);
             unsigned char bTop, bMat;
             biomeSurface(biome, &bTop, &bMat);
 
@@ -275,6 +318,40 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
                         if (col[y] != BLOCK_AIR) col[y] = BLOCK_AIR;
                     } else if (col[y] == BLOCK_STONE) {
                         col[y] = BLOCK_CALM_WATER;
+                    }
+                }
+            }
+
+            // The river channel. Structurally identical to the moat carve
+            // above -- same "only ever removes material" rule, so a river
+            // crossing water that is already there changes nothing and no
+            // river can end up standing proud of the surrounding sea -- but
+            // with a bed that varies across the channel instead of a fixed
+            // one, which is what gives the water a sloped bottom rather
+            // than a flat trough with square sides.
+            //
+            // Never runs on a moat column: the two would be carving the
+            // same blocks to different depths, and biome.cpp already keeps
+            // rivers away from the island, so this is belt and braces.
+            if (riverT > 0.0f && !moat) {
+                // Find the current top of the column. A seam that has
+                // climbed above RIVER_CUT_CEILING_Y is left alone -- see
+                // the constant's comment for why stopping beats gorging.
+                int topY = -1;
+                for (int y = WORLD_H - 1; y >= 0; y--) {
+                    if (col[y] == BLOCK_STONE) { topY = y; break; }
+                }
+
+                if (topY >= 0 && topY <= RIVER_CUT_CEILING_Y) {
+                    int span = RIVER_BED_BANK_Y - RIVER_BED_CENTRE_Y;
+                    int bedY = RIVER_BED_BANK_Y - (int)(riverT * span + 0.5f);
+
+                    for (int y = WORLD_H - 1; y > bedY; y--) {
+                        if (y >= waterHeight) {
+                            if (col[y] != BLOCK_AIR) col[y] = BLOCK_AIR;
+                        } else if (col[y] == BLOCK_STONE) {
+                            col[y] = BLOCK_CALM_WATER;
+                        }
                     }
                 }
             }

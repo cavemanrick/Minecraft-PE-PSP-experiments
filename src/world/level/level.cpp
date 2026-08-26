@@ -1,4 +1,5 @@
 #include "world/level/level.h"
+#include "world/entity/path_finder_mob.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 #include "world/level/tile/material.h"
@@ -301,6 +302,13 @@ void Level::addEntity(Entity* e) {
 static const int SPAWN_INTERVAL = 2;
 
 void Level::tickEntities() {
+
+    // Refill the shared A* budget before any mob AI runs this tick. Has to
+    // be here rather than inside PathfinderMob: the budget is global, so
+    // whichever mob happens to tick first must not be the one that resets
+    // it, or every mob after it in the list would find the budget already
+    // spent or already refilled depending on iteration order.
+    PathfinderMob::resetPathBudget();
 
     static int s_spawnTimer = 0;
     if (++s_spawnTimer >= SPAWN_INTERVAL) { s_spawnTimer = 0; MobSpawner::tick(this, true, false); }

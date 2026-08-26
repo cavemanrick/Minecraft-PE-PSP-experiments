@@ -21,8 +21,22 @@ public:
     Entity(Level* level);
     virtual ~Entity();
 
-    static const int ENTITY_POOL = 96;
-    static const unsigned ENTITY_SLOT = 2560;
+    // Entity pool. POOL * SLOT bytes of static storage, and the product is
+    // deliberately unchanged from the old 96 * 2560: this is the same
+    // 240KB, just cut into more, smaller pieces.
+    //
+    // The old slot had to be 2560 because PathfinderMob embedded a Path by
+    // value -- 64 Nodes at 32 bytes each, so 2056 bytes, about 80% of the
+    // slot -- for scratch that only matters while a mob is actively
+    // walking a route. With paths moved to a shared pool (PathPool in
+    // pathfinder/path.h) a zombie or piglin is a few hundred bytes, so the
+    // same memory holds 240 entities instead of 96.
+    //
+    // Anything larger than SLOT still works: operator new below falls
+    // through to malloc. That is the expected path for the player, which
+    // carries an inventory and is the one genuinely large entity.
+    static const int ENTITY_POOL = 240;
+    static const unsigned ENTITY_SLOT = 1024;
     static bool  hasFreeSlot();
     static int   freeSlots();
     static void* operator new(unsigned n);

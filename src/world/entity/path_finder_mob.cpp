@@ -7,9 +7,56 @@
 static const float PF_PI = 3.14159265f;
 
 PathfinderMob::PathfinderMob(Level* level)
-:   Mob(level), attackTargetId(0), fleeTime(0), runSpeed(0.7f), holdGround(false) {}
+:   Mob(level), path(0), attackTargetId(0), fleeTime(0), runSpeed(0.7f), holdGround(false) {}
 
-bool PathfinderMob::isPathFinding() { return !path.isEmpty(); }
+PathfinderMob::~PathfinderMob() { releasePath(); }
+
+// How many A* searches may run across ALL mobs in one world tick.
+//
+// This is the real CPU governor, and it matters more than the size of the
+// path pool. A single search memsets an 8KB hash table before it starts
+// (PathFinder::findPathTo) and may expand up to MAX_NODES = 2048 nodes, so
+// it is not something to run once per mob per tick once there are dozens
+// of mobs. Capping searches rather than shrinking MAX_NODES bounds the
+// worst case without making any individual mob worse at navigating.
+//
+// Two per tick is 40 a second. A mob that misses its turn re-rolls next
+// tick; the visible effect is that a pack takes a moment longer to commit
+// to a route, not that it stops moving -- the fallback is Mob::updateAi's
+// wander, which is what an idle mob does anyway.
+static const int PATH_SEARCHES_PER_TICK = 2;
+static int s_pathBudget = PATH_SEARCHES_PER_TICK;
+
+void PathfinderMob::resetPathBudget() { s_pathBudget = PATH_SEARCHES_PER_TICK; }
+
+bool PathfinderMob::acquirePath() {
+    if (path) return true;
+    path = PathPool::acquire();
+    return path != 0;
+}
+
+void PathfinderMob::releasePath() { PathPool::release(path); }
+
+void PathfinderMob::tryFindPath(Entity* target, float maxDist) {
+    if (s_pathBudget <= 0) return;
+    if (!acquirePath()) return;
+    --s_pathBudget;
+    level->findPath(path, this, target, maxDist, false, false);
+    // An unreachable target leaves the path empty (findPathNodes calls
+    // destroy() on failure). Hand the slot straight back rather than
+    // holding it for a route that does not exist.
+    if (path->isEmpty()) releasePath();
+}
+
+void PathfinderMob::tryFindPath(int x, int y, int z, float maxDist) {
+    if (s_pathBudget <= 0) return;
+    if (!acquirePath()) return;
+    --s_pathBudget;
+    level->findPath(path, this, x, y, z, maxDist, false, false);
+    if (path->isEmpty()) releasePath();
+}
+
+bool PathfinderMob::isPathFinding() { return path && !path->isEmpty(); }
 
 float PathfinderMob::getWalkingSpeedModifier() {
     float speed = Mob::getWalkingSpeedModifier();
@@ -26,7 +73,7 @@ void PathfinderMob::updateAi() {
     if (attackTargetId == 0) {
         attackTarget = findAttackTarget();
         if (attackTarget) {
-            level->findPath(&path, this, attackTarget, maxDist, false, false);
+            tryFindPath(attackTarget, maxDist);
             attackTargetId = attackTarget->entityId;
         }
     } else {
@@ -64,17 +111,17 @@ void PathfinderMob::updateAi() {
             yRot += diff;
             xxa = 0; yya = runSpeed; xRot = 0; jumping = false;
             if (horizontalCollision) jumping = true;
-            if (!path.isEmpty()) path.destroy();
+            releasePath();
             applySwimUrge();
             return;
         }
     }
 
     bool doStroll = false;
-    if (attackTarget && (path.isEmpty() || sharedRandom.nextInt(20) == 0)) {
-        level->findPath(&path, this, attackTarget, maxDist, false, false);
+    if (attackTarget && (!isPathFinding() || sharedRandom.nextInt(20) == 0)) {
+        tryFindPath(attackTarget, maxDist);
     } else {
-        if (path.isEmpty() && sharedRandom.nextInt(180) == 0) {
+        if (!isPathFinding() && sharedRandom.nextInt(180) == 0) {
             doStroll = true;
         } else {
             if (sharedRandom.nextInt(120) == 0) doStroll = true;
@@ -85,18 +132,21 @@ void PathfinderMob::updateAi() {
 
     int yFloor = Mth::floor(bb.y0 + 0.5f);
     xRot = 0;
-    if (path.isEmpty() || sharedRandom.nextInt(100) == 0) {
+    if (!isPathFinding() || sharedRandom.nextInt(100) == 0) {
         Mob::updateAi();
         return;
     }
 
-    Vec3 target = path.currentPos(this);
+    Vec3 target = path->currentPos(this);
     float r = bbWidth * 2.0f;
     bool looping = true;
     while (looping && target.distanceToSqr(x, target.y, z) < r * r) {
-        path.next();
-        if (path.isDone()) { looping = false; path.destroy(); }
-        else target = path.currentPos(this);
+        path->next();
+        // Reaching the end of a route returns the slot immediately. This
+        // is the common way a path ends, so it is the main thing keeping
+        // the pool from silting up.
+        if (path->isDone()) { looping = false; releasePath(); }
+        else target = path->currentPos(this);
     }
 
     jumping = false;
@@ -133,5 +183,5 @@ void PathfinderMob::findRandomStrollLocation() {
         float value = getWalkTargetValue(xt, yt, zt);
         if (value > best) { best = value; xBest = xt; yBest = yt; zBest = zt; hasBest = true; }
     }
-    if (hasBest) level->findPath(&path, this, xBest, yBest, zBest, 10.0f, false, false);
+    if (hasBest) tryFindPath(xBest, yBest, zBest, 10.0f);
 }

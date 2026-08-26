@@ -129,10 +129,40 @@ static PerlinNoise* s_riverNoise = 0;   // ridged field tracing lava river chann
 //
 // The knobs below are now stated as fractions of columns, which is both
 // what we actually care about and directly checkable by measurement.
-#define NETHER_SEA_FRACTION        0.32f  // columns that are open lava sea
+// Lava coverage. These are fractions of columns, and because the
+// thresholds are quantile-calibrated per seed (see above) they mean what
+// they say rather than approximately what they say.
+//
+// The sea was 0.32 and the river shore 0.055, which put open lava under
+// something like 38% of the strip once the two are unioned -- the whole
+// place read as an archipelago in a lava ocean rather than as caverns with
+// lava in them. At 0.18 and 0.035 the union is about 1 - 0.82*0.935, so
+// roughly 23%: still the dominant terrain feature, no longer the terrain.
+//
+// Both are independent fields, so the union really is multiplicative --
+// river channels cross seas as often as chance dictates, and a river that
+// happens to run through a sea costs nothing extra because netherRockTop
+// takes a min() rather than deepening it.
+#define NETHER_SEA_FRACTION        0.18f  // columns that are open lava sea
 #define NETHER_HILL_FULL_QUANTILE  0.92f  // land value at which hills reach full height
 #define NETHER_RIVER_FRACTION      0.030f // columns in a river channel proper
-#define NETHER_RIVER_SHORE_EXTRA   0.055f // further columns forming the sloped banks
+#define NETHER_RIVER_SHORE_EXTRA   0.035f // further columns forming the submerged shelf
+
+// Columns beyond the shelf that form the DRY eroded bank.
+//
+// The shelf above is entirely below the lava level -- every column in it
+// is lava, and the "slope" it makes is underneath the surface where you
+// cannot see it. So the outer edge of the shelf used to butt straight up
+// against whatever the hill field wanted, which across a hill meant a
+// vertical netherrack wall dropping ten-odd blocks into the lava. Rivers
+// looked like they had been stamped through the landscape with a cutter.
+//
+// This band sits outside the lava entirely and clamps the rock top down
+// toward NETHER_LAND_BASE_Y at its inner edge, releasing back to the hill
+// field's own height at its outer edge. It only ever lowers terrain
+// (min()), so it cannot raise a bank out of a sea or fill a basin.
+#define NETHER_RIVER_BANK_EXTRA    0.075f
+
 #define NETHER_TOUCH_FRACTION      0.015f // columns allowed to become floor-to-ceiling pillars
 
 #define NETHER_HILL_NOISE_SCALE  0.02f
@@ -148,6 +178,7 @@ static float s_ceilFullAt      = 1.0f;
 static float s_riverMedian     = 0.0f;
 static float s_riverHalfWidth  = 0.0f;
 static float s_riverShoreOuter = 0.0f;
+static float s_riverBankOuter  = 0.0f;
 static float s_touchThreshold  = 0.0f;
 
 // 40x40 samples across the strip. 1600 noise evaluations per field, four
@@ -235,6 +266,11 @@ static void ensureNetherNoise(long worldSeed, const World* w) {
     qsort(s_calBuf, n, sizeof(float), netherCalCompare);
     s_riverHalfWidth  = netherCalAt(n, NETHER_RIVER_FRACTION);
     s_riverShoreOuter = netherCalAt(n, NETHER_RIVER_FRACTION + NETHER_RIVER_SHORE_EXTRA);
+    // Outer limit of the dry eroded bank. Cumulative with the two above --
+    // these are nested quantiles of the same sorted deviation buffer, so
+    // each band's fraction is the EXTRA columns it adds, not its own total.
+    s_riverBankOuter  = netherCalAt(n, NETHER_RIVER_FRACTION + NETHER_RIVER_SHORE_EXTRA
+                                       + NETHER_RIVER_BANK_EXTRA);
 
     n = netherCalSample(s_touchNoise, NETHER_TOUCH_NOISE_SCALE, ox, oz);
     s_touchThreshold = netherCalAt(n, 1.0f - NETHER_TOUCH_FRACTION);
@@ -307,6 +343,23 @@ static int netherRockTop(int gx, int gz) {
         int riverTop = (NETHER_LAVA_LEVEL_Y - 1)
                      - (int)(strength * (float)((NETHER_LAVA_LEVEL_Y - 1) - NETHER_RIVER_FLOOR_Y) + 0.5f);
         if (riverTop < top) top = riverTop;
+    } else if (r < s_riverBankOuter) {
+        // The dry eroded bank. t runs 0 at the lava's edge to 1 where the
+        // band ends, and the cap climbs from NETHER_LAND_BASE_Y (one block
+        // proud of the lava) back up to a full-height hill.
+        //
+        // t*t rather than t on purpose: an ease-in keeps the cap low for
+        // the first half of the band and does most of its climbing at the
+        // outer edge, which is the shape water-cut banks actually have --
+        // a wide flat terrace by the shore steepening as it leaves. Plain
+        // linear gives a uniform ramp that reads as a man-made embankment.
+        //
+        // min() again, so this only ever cuts material away. A bank that
+        // crosses a sea or another river channel leaves it alone.
+        float t = netherSpanT(r, s_riverShoreOuter, s_riverBankOuter);
+        int bankCap = NETHER_LAND_BASE_Y
+                    + (int)(t * t * (float)NETHER_HILL_MAX_HEIGHT + 0.5f);
+        if (bankCap < top) top = bankCap;
     }
 
     if (top < NETHER_BASIN_FLOOR_Y) top = NETHER_BASIN_FLOOR_Y;

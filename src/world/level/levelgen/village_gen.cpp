@@ -10,6 +10,10 @@
 // The village is made from three houses, a well, paths, and a small farm.
 // It is intentionally lightweight: no new entity AI is required.
 
+// Lowest village floor that is still dry land. Sea level is 64 in this
+// generator and the highest water block is 63.
+#define VILLAGE_MIN_BASE_Y 64
+
 static unsigned int villageHash(long seed, int cx, int cz) {
     unsigned int h = (unsigned int)seed;
     h ^= (unsigned int)cx * 0x9E3779B9u;
@@ -49,8 +53,25 @@ static bool villageFlatEnough(World* w, int cx, int cz, int& baseY) {
     int minY = WORLD_H, maxY = 0, sum = 0, n = 0;
     for (int z = 1; z <= 14; ++z) {
         for (int x = 1; x <= 14; ++x) {
-            int y = villageHeight(w, cx * 16 + x, cz * 16 + z);
+            int gx = cx * 16 + x, gz = cz * 16 + z;
+            int y = villageHeight(w, gx, gz);
             if (y <= 0 || y >= 120) return false;
+
+            // Reject anything underwater. villageHeight deliberately skips
+            // water and liquid when it scans down, so a flat sea floor or
+            // river bed reads back as beautifully flat village terrain --
+            // which is exactly how villages ended up generating inside
+            // lakes and out in the ocean, with flatten() then filling the
+            // water column with dirt and the surrounding sea pouring back
+            // in over the roofs.
+            //
+            // The test is cheap because of that same skipping: the block
+            // AT the returned height is the first thing above the ground,
+            // so if the column is submerged it is water by definition.
+            unsigned char above = worldBlock(w, gx, y, gz);
+            if (above == BLOCK_WATER || above == BLOCK_CALM_WATER ||
+                above == BLOCK_LAVA  || above == BLOCK_CALM_LAVA) return false;
+
             if (y < minY) minY = y;
             if (y > maxY) maxY = y;
             sum += y; ++n;
@@ -63,7 +84,12 @@ static bool villageFlatEnough(World* w, int cx, int cz, int& baseY) {
     // on gently rolling plains instead of only on near-perfect flats.
     if (maxY - minY > 4) return false;
     baseY = sum / n;
-    if (baseY < 3 || baseY > 110) return false;
+    // Floor of 64 as a second line of defence behind the submerged test
+    // above: sea level is 64 and the topmost water block is 63, so a
+    // village floor at 64 is the lowest that is still dry. Anything under
+    // that is a lake bed or a river bed that somehow passed the liquid
+    // test, and is not somewhere to put houses.
+    if (baseY < VILLAGE_MIN_BASE_Y || baseY > 110) return false;
     return true;
 }
 
@@ -253,7 +279,20 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
         put(w, ox + 8, baseY, oz + z, path);
     }
 
-    buildWell(w, ox + 7, oz + 7, baseY);
+    // Well at ox+6/oz+6, NOT ox+7/oz+7.
+    //
+    // At ox+7 the well spans x ox+7..ox+9 and z oz+7..oz+9, and house 3's
+    // door is at (ox+7, oz+10) facing north -- so the square you step into
+    // on leaving the house, (ox+7, oz+9), was the well's south-west rim,
+    // with a fence post on it at baseY+1. The door was walled shut by a
+    // fence. Shifting the well one block north-west leaves that square as
+    // open path and still keeps the well centred on the junction, since it
+    // covers x ox+7..ox+8 and z oz+7..oz+8 either way.
+    //
+    // If you move any house or change a door side, re-check this: the
+    // three doors exit onto (ox+3, oz+7), (ox+12, oz+7) and (ox+7, oz+9),
+    // and all three need to be path or grass rather than well.
+    buildWell(w, ox + 6, oz + 6, baseY);
 
     // Small shared crop plot beside the southern house. The water strip is
     // central so every crop row is adjacent to irrigation.

@@ -32,6 +32,15 @@ static int   s_mushroomIdx = -1;
 static float s_islandRadius = 0.0f;
 static PerlinNoise* s_borderNoise = 0;
 
+// One noise field serves both river jobs -- the sideways meander and the
+// width variation -- sampled at two different scales and two far-apart
+// offsets. Perlin values at positions that distant are uncorrelated in
+// practice, which is the same trick the border wobble above already uses
+// with its `+ i * 37.0f` per-seed offset. Two separate PerlinNoise objects
+// would have been clearer but cost another permutation table per octave
+// for no behavioural gain, and this runs on a PSP.
+static PerlinNoise* s_riverNoise = 0;
+
 // Chunk extent of the OVERWORLD only, which is not the same thing as
 // w->sizeX on the 1024 preset.
 //
@@ -138,8 +147,41 @@ static void ensureBiomeSeeds(long worldSeed, const World* w) {
     delete s_borderNoise;
     s_borderNoise = new PerlinNoise(&seedRandom, 2);
 
+    // Drawn from the same seedRandom stream, after the border noise, so it
+    // is deterministic per world seed like everything else here. Anything
+    // added to this function in future must go AFTER this line or every
+    // existing world's rivers move.
+    delete s_riverNoise;
+    s_riverNoise = new PerlinNoise(&seedRandom, 2);
+
     s_seedsForWorldSeed = worldSeed;
     s_seedsReady = true;
+}
+
+// Does the seam between these two biomes carry a river? Hashed from the
+// unordered pair plus the world seed, so the answer is the same whichever
+// side of the seam the column being classified sits on -- which matters,
+// because a column just west of the border finds (A,B) and its neighbour
+// just east finds (B,A), and a river that existed on only one bank would
+// be a waterfall down a cliff instead of a river.
+static bool pairHasRiver(long worldSeed, int a, int b) {
+    int lo = (a < b) ? a : b;
+    int hi = (a < b) ? b : a;
+    unsigned int h = (unsigned int)worldSeed;
+    h ^= (unsigned int)lo * 0x9E3779B9u;
+    h ^= (unsigned int)hi * 0x85EBCA6Bu;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    h *= 0x297A2D39u;
+    h ^= h >> 15;
+    return (h % 100u) < RIVER_PAIR_PERCENT;
+}
+
+static float riverSmoothstep(float t) {
+    if (t <= 0.0f) return 0.0f;
+    if (t >= 1.0f) return 1.0f;
+    return t * t * (3.0f - 2.0f * t);
 }
 
 float mushroomLandLift(float margin) {
@@ -151,7 +193,8 @@ float mushroomLandLift(float margin) {
 }
 
 BiomeId classifyBiomeSpatialEx(long worldSeed, const World* w, int worldX, int worldZ,
-                               float* mushroomMargin) {
+                               float* mushroomMargin,
+                               float* riverChannel, float* riverValley) {
     ensureBiomeSeeds(worldSeed, w);
 
     float bx = (float)worldX, bz = (float)worldZ;
@@ -171,6 +214,61 @@ BiomeId classifyBiomeSpatialEx(long worldSeed, const World* w, int worldX, int w
     }
 
     if (mushroomMargin) *mushroomMargin = 0.0f;
+    if (riverChannel)   *riverChannel   = 0.0f;
+    if (riverValley)    *riverValley    = 0.0f;
+
+    // --- Rivers ----------------------------------------------------------
+    // Computed here, inside the one function that has already paid for the
+    // nearest-seed loop, and before the mushroom branch below returns.
+    if ((riverChannel || riverValley) && second >= 0 &&
+        best != s_mushroomIdx && second != s_mushroomIdx &&
+        pairHasRiver(worldSeed, best, second)) {
+
+        // Distance to the seam. For two seed points, half the difference of
+        // the two distances is the perpendicular distance to their bisector
+        // -- exact on the line joining them and close enough everywhere
+        // else. Same clamp-before-sqrt guard the mushroom code below uses,
+        // for the same reason: the wobble term is signed.
+        float dNear = sqrtf(bestD2   > 0.0f ? bestD2   : 0.0f);
+        float dFar  = sqrtf(secondD2 > 0.0f ? secondD2 : 0.0f);
+        float edge  = (dFar - dNear) * 0.5f;
+
+        // Signed, so the field is continuous across the seam instead of
+        // folding at it. The sign is taken from the seed INDICES rather
+        // than from the geometry, because that is the one thing that
+        // reliably flips when you step across the border: a column on the
+        // far side finds the same two seeds with best and second swapped.
+        // Without this, adding the meander below would widen the river on
+        // one bank and narrow it on the other rather than moving it.
+        float signedEdge = (best < second) ? edge : -edge;
+
+        // Wander the channel sideways off the true bisector. Low frequency
+        // (0.015 -> features about 65 blocks long) so it reads as a river
+        // bending through the landscape, not as jitter.
+        signedEdge += s_riverNoise->getValue(worldX * 0.015f, worldZ * 0.015f) * RIVER_MEANDER_AMP;
+
+        float dist = (signedEdge < 0.0f) ? -signedEdge : signedEdge;
+
+        if (riverChannel) {
+            // Width varies along the run so the river narrows and widens
+            // the way a real one does. Offset far from the meander sample
+            // so the two fields don't move together -- a river that got
+            // wider every time it bent the same way would look mechanical.
+            float wn = s_riverNoise->getValue(worldX * 0.03f + 811.0f,
+                                              worldZ * 0.03f + 517.0f);
+            float halfW = RIVER_HALF_WIDTH * (1.0f + 0.35f * wn);
+            if (halfW < 1.5f) halfW = 1.5f;
+            if (dist < halfW) *riverChannel = 1.0f - dist / halfW;
+        }
+
+        if (riverValley) {
+            // Smoothstepped rather than linear: a linear valley has a
+            // visible crease where it meets undisturbed terrain, which is
+            // exactly the artefact the mushroom shore fade exists to avoid.
+            if (dist < RIVER_VALLEY_HALF_WIDTH)
+                *riverValley = riverSmoothstep(1.0f - dist / RIVER_VALLEY_HALF_WIDTH);
+        }
+    }
 
     if (best != s_mushroomIdx) return kBiomeOrder[best];
 
