@@ -18,6 +18,7 @@ extern World g_world;
 #include "world/item/item.h"
 #include "client/renderer/entity/creeper_renderer.h"
 #include "client/renderer/entity/spider_renderer.h"
+#include "client/renderer/entity/strider_renderer.h"
 #include "client/renderer/entity/tripod_camera_renderer.h"
 #include "world/entity/entity.h"
 #include "world/entity/local_player.h"
@@ -46,6 +47,7 @@ EntityRenderDispatcher::EntityRenderDispatcher() {
     assign(ER_SKELETON_RENDERER,  new HumanoidRenderer("data/images/mob/skeleton.png", true, true));
     assign(ER_PIGZOMBIE_RENDERER, new HumanoidRenderer("data/images/mob/pigzombie.png",
                                                        false, false, ITEM_SWORD_GOLD));
+    assign(ER_STRIDER_RENDERER, new StriderRenderer());
     assign(ER_CREEPER_RENDERER,   new CreeperRenderer());
     assign(ER_SPIDER_RENDERER,    new SpiderRenderer());
     for (int i = 0; i < MAX_RENDERERS; i++)

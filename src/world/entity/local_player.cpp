@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <pspctrl.h>
 #include "world/level/tile/nether_portal.h"
+#include "world/entity/animal/strider.h"
 
 extern World g_world;
 
@@ -86,6 +87,29 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
     const float dz = g_analogDeadzone;
     if (xs > -dz && xs < dz) xs = 0.0f;
     if (yf > -dz && yf < dz) yf = 0.0f;
+
+    // Mounted striders consume the analog movement input themselves. The
+    // player still owns camera look (face buttons), but normal player travel
+    // is skipped so the player cannot walk independently of the mount.
+    if (isRiding()) {
+        Entity* v = getVehicle();
+        if (!v || v->removed || !v->isEntityType(EntityTypes::IdStrider)) {
+            dismountVehicle();
+        } else {
+            Strider* s = (Strider*)v;
+            s->setRiderInput(xs, yf);
+            s->yRot = yRot;
+            s->xRot = 0.0f;
+            setPos(s->x, s->y + 1.15f, s->z);
+            xd = s->xd; yd = s->yd; zd = s->zd;
+            walkDistO = walkDist;
+            yBodyRotO = yBodyRot;
+            walkAnimSpeedO = walkAnimSpeed;
+            walkAnimPosO = walkAnimPos;
+            netherPortalPlayerTick(&g_world, this);
+            return;
+        }
+    }
 
     bool jumping = (btn & PSP_CTRL_START) != 0;
 

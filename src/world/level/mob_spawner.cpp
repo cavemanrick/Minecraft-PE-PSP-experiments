@@ -9,6 +9,7 @@
 #include "world/inventory/inventory.h"
 #include "world/entity/entity_types.h"
 #include "world/entity/animal/animal.h"
+#include "world/entity/animal/strider.h"
 #include "world/entity/monster/monster.h"
 #include "world/difficulty.h"
 #include "world/level/levelgen/Random.h"
@@ -263,6 +264,85 @@ static void spawnMonsters(Level* level) {
     }
 }
 
+
+// Striders are passive Nether mobs, but they deliberately have their own
+// small population budget rather than consuming the Overworld creature cap.
+// They are also spawned on a much slower cadence than hostile mobs: there is
+// no reason to spend spawn-probe CPU 10 times per second for a four-mob cap.
+static const int STRIDER_MAX_PER_LEVEL = 4;
+static const int STRIDER_SPAWN_ATTEMPTS = 4;
+static const int STRIDER_MIN_SPAWN_DISTANCE = 24;
+
+static int findStriderLavaY(Level* L, int x, int z) {
+    // The generated Nether's lava sea is below the land base. Scan only the
+    // useful part of the shell rather than the full 128-block world height.
+    for (int y = netherShellFloorBaseY() - 1; y >= 1; --y) {
+        unsigned char id = (unsigned char)L->getTile(x, y, z);
+        if (!isLavaId(id)) continue;
+        unsigned char above = (unsigned char)L->getTile(x, y + 1, z);
+        if (!L->isSolidBlockingTile(x, y + 1, z) && !isLavaId(above)) return y;
+    }
+    return -1;
+}
+
+static void spawnStriders(Level* level) {
+    LocalPlayer* p = level->player;
+    if (!p) return;
+    // Striders are passive and therefore spawn even on Peaceful.
+    int count = level->countInstanceOfType(EntityTypes::IdStrider);
+    if (count >= STRIDER_MAX_PER_LEVEL) return;
+
+    int pcx = (int)floorf(p->x / 16.0f);
+    int pcz = (int)floorf(p->z / 16.0f);
+    const int R = 128 / 16;
+
+    for (int attempt = 0; attempt < STRIDER_SPAWN_ATTEMPTS; ++attempt) {
+        if (count >= STRIDER_MAX_PER_LEVEL) return;
+
+        int cx = pcx + s_rng.nextInt(2 * R + 1) - R;
+        int cz = pcz + s_rng.nextInt(2 * R + 1) - R;
+        if (!worldChunkIsReserved(level->w, cx, cz) ||
+            !worldChunkIsNether(level->w, cx, cz)) continue;
+        if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
+
+        int x = cx * 16 + s_rng.nextInt(16);
+        int z = cz * 16 + s_rng.nextInt(16);
+        if (classifyNetherBiome(worldGenSeed(), level->w, x, z) != NB_WARPED_FOREST) continue;
+
+        int y = findStriderLavaY(level, x, z);
+        if (y < 0) continue;
+
+        float dx = x + 0.5f - p->x;
+        float dy = y - p->y;
+        float dz = z + 0.5f - p->z;
+        if (dx * dx + dy * dy + dz * dz <
+            (float)(STRIDER_MIN_SPAWN_DISTANCE * STRIDER_MIN_SPAWN_DISTANCE)) continue;
+
+        // Small clusters, but never enough to exceed the dedicated cap.
+        int cluster = 1 + s_rng.nextInt(2);
+        if (cluster > STRIDER_MAX_PER_LEVEL - count)
+            cluster = STRIDER_MAX_PER_LEVEL - count;
+
+        for (int i = 0; i < cluster; ++i) {
+            int sx = x + s_rng.nextInt(5) - s_rng.nextInt(5);
+            int sz = z + s_rng.nextInt(5) - s_rng.nextInt(5);
+            int sy = findStriderLavaY(level, sx, sz);
+            if (sy < 0) continue;
+
+            Strider* strider = (Strider*)MobFactory::createMob(EntityTypes::IdStrider, level);
+            if (!strider) return;
+            strider->moveTo(sx + 0.5f, (float)sy, sz + 0.5f,
+                            s_rng.nextFloat() * 360.0f, 0.0f);
+            if (!strider->canSpawn()) {
+                delete strider;
+                continue;
+            }
+            level->addEntity(strider);
+            ++count;
+        }
+    }
+}
+
 static const int GEN_CREATURE_CAP = 40;
 
 void populateInitial(Level* level) {
@@ -326,7 +406,10 @@ void tick(Level* level, bool spawnEnemies, bool spawnFriendlies) {
     if (!activeLevelSource().spawnsMobs()) return;
 
     if (spawnFriendlies) spawnCreatures(level);
-    if (spawnEnemies)    spawnMonsters(level);
+    if (spawnEnemies)    {
+        spawnMonsters(level);
+        if ((level->w->time % 40) == 0) spawnStriders(level);
+    }
 }
 
 }

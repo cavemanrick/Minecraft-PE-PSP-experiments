@@ -18,11 +18,32 @@ Player::Player(Level* level)
       inPortalThisTick(false), portalLatched(false), portalForced(false),
       portalCharge(0), portalArrive(0),
       havePortalBlock(false), portalBlockX(0), portalBlockY(0), portalBlockZ(0),
-      score(0) {}
+      score(0), vehicle(0) {}
 
 Player::~Player() { delete inventory; }
 
 int  Player::getEntityTypeId() const { return EntityTypes::IdLocalPlayer; }
+
+void Player::dismountVehicle() {
+    Entity* v = vehicle;
+    if (!v) return;
+    vehicle = 0;
+
+    // Put the player just to the side of the vehicle.  This deliberately
+    // uses only the base Entity geometry so the player class does not need
+    // to know which mob is being ridden.
+    float sideX = x + cosf((v->yRot + 90.0f) * Mth::PI / 180.0f) * (v->bbWidth + 0.35f);
+    float sideZ = z + sinf((v->yRot + 90.0f) * Mth::PI / 180.0f) * (v->bbWidth + 0.35f);
+    float sideY = v->y + 0.05f;
+    if (level->isUnobstructed(AABB(sideX - bbWidth * 0.5f, sideY - heightOffset,
+                                   sideZ - bbWidth * 0.5f,
+                                   sideX + bbWidth * 0.5f, sideY - heightOffset + bbHeight,
+                                   sideZ + bbWidth * 0.5f)))
+        setPos(sideX, sideY, sideZ);
+    else
+        setPos(v->x, v->y + 0.05f, v->z);
+    xd = yd = zd = 0.0f;
+}
 
 bool Player::hurt(Entity* source, int dmg) {
     if (g_gameMode && g_gameMode->isCreative()) return false;

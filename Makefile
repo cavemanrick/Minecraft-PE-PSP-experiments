@@ -109,6 +109,7 @@ OBJS = \
 	src/world/entity/animal/cow.o \
 	src/world/entity/animal/chicken.o \
 	src/world/entity/animal/sheep.o \
+	src/world/entity/animal/strider.o \
 	src/world/entity/monster/monster.o \
 	src/world/entity/monster/zombie.o \
 	src/world/entity/monster/skeleton.o \
@@ -131,6 +132,7 @@ OBJS = \
 	src/client/renderer/entity/cow_renderer.o \
 	src/client/renderer/entity/chicken_renderer.o \
 	src/client/renderer/entity/sheep_renderer.o \
+	src/client/renderer/entity/strider_renderer.o \
 	src/client/renderer/entity/humanoid_renderer.o \
 	src/client/renderer/entity/creeper_renderer.o \
 	src/client/renderer/entity/spider_renderer.o \

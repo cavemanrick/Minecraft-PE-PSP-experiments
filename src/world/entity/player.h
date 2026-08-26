@@ -6,6 +6,7 @@
 #include "world/item/item_instance.h"
 
 class Inventory;
+class Entity;
 
 class Player : public Mob {
 public:
@@ -32,10 +33,23 @@ public:
     float eatAnim;
 
     virtual bool isPlayer() { return true; }
+
+    // Mounting is intentionally a single lightweight vehicle pointer. The
+    // first rideable mob is the Nether strider, but keeping this on Player
+    // avoids making the player know about a concrete mob class.
+    Entity* getVehicle() const { return vehicle; }
+    bool isRiding() const { return vehicle != 0; }
+    void startRiding(Entity* v) { vehicle = v; }
+    void dismountVehicle();
     virtual int  getEntityTypeId() const;
     virtual int  getMaxHealth() { return 20; }
 
     int score;
+
+private:
+    Entity* vehicle;
+
+public:
     int getScore() const { return score; }
     virtual void awardKillScore(Entity* victim, int amount) { score += amount; }
 

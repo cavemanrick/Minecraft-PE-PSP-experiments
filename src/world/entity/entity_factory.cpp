@@ -16,6 +16,7 @@
 #include "world/entity/monster/creeper.h"
 #include "world/entity/monster/spider.h"
 #include "world/entity/monster/pig_zombie.h"
+#include "world/entity/animal/strider.h"
 #include "nbt/compound_tag.h"
 
 namespace EntityFactory {
@@ -31,6 +32,7 @@ Entity* createEntity(int typeId, Level* level) {
         case EntityTypes::IdCreeper:  return new Creeper(level);
         case EntityTypes::IdSpider:   return new Spider(level);
         case EntityTypes::IdPigZombie:return new PigZombie(level);
+        case EntityTypes::IdStrider:   return new Strider(level);
         case EntityTypes::IdPainting: return new Painting(level);
         case EntityTypes::IdArrow:    return new Arrow(level);
         case EntityTypes::IdFallingTile: return new FallingTile(level);

@@ -17,6 +17,7 @@ namespace EntityTypes {
     const int IdSkeleton  = 34;
     const int IdSpider    = 35;
     const int IdPigZombie = 36;
+    const int IdStrider   = 37;
 
     const int IdLocalPlayer = 63;
     const int IdItemEntity  = 64;

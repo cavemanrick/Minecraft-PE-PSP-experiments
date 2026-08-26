@@ -6,6 +6,7 @@
 #include "world/entity/animal/cow.h"
 #include "world/entity/animal/chicken.h"
 #include "world/entity/animal/sheep.h"
+#include "world/entity/animal/strider.h"
 #include "world/entity/monster/zombie.h"
 #include "world/entity/monster/skeleton.h"
 #include "world/entity/monster/creeper.h"
@@ -35,7 +36,8 @@ typedef char assert_mob_fits_slot[
      sizeof(Pig)       <= Entity::ENTITY_SLOT &&
      sizeof(Cow)       <= Entity::ENTITY_SLOT &&
      sizeof(Chicken)   <= Entity::ENTITY_SLOT &&
-     sizeof(Sheep)     <= Entity::ENTITY_SLOT) ? 1 : -1];
+     sizeof(Sheep)     <= Entity::ENTITY_SLOT &&
+     sizeof(Strider)   <= Entity::ENTITY_SLOT) ? 1 : -1];
 
 static const int MOB_SLOT_RESERVE = 24;
 
@@ -52,6 +54,7 @@ Mob* createMob(int mobType, Level* level) {
         case EntityTypes::IdCreeper:  r = new Creeper(level); break;
         case EntityTypes::IdSpider:   r = new Spider(level); break;
         case EntityTypes::IdPigZombie:r = new PigZombie(level); break;
+        case EntityTypes::IdStrider:   r = new Strider(level); break;
     }
     return r;
 }

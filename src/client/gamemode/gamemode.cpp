@@ -591,6 +591,16 @@ void GameMode::handleInput(unsigned int pressed, unsigned int held) {
 
     if (g_worldBuilt && (pressed & (PSP_CTRL_RTRIGGER | PSP_CTRL_LTRIGGER))) {
 
+        // L-trigger dismounts a ridden strider without requiring the player
+        // to look back at it. This also prevents a mounted player from
+        // accidentally using/placing the held item through the normal
+        // interaction path.
+        if ((pressed & PSP_CTRL_LTRIGGER) && g_level.player && g_level.player->isRiding()) {
+            g_level.player->dismountVehicle();
+            playerSwing();
+            return;
+        }
+
         if ((pressed & PSP_CTRL_RTRIGGER) && breakHangingEntityUnderCrosshair()) {
             return;
         }
