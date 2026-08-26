@@ -1,5 +1,6 @@
 #include "world/entity/animal/strider.h"
 #include "world/entity/player.h"
+#include "world/entity/local_player.h"
 #include "world/entity/entity_types.h"
 #include "world/level/level.h"
 #include "world/level/chunk/chunk.h"
