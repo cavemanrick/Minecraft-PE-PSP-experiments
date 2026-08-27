@@ -3,6 +3,7 @@
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 #include "world/entity/mob.h"
+#include "world/entity/local_player.h"
 #include "world/entity/mob_factory.h"
 #include "world/entity/entity_types.h"
 #include "world/difficulty.h"
