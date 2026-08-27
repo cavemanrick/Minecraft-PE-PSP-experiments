@@ -18,6 +18,7 @@
 #include "world/entity/item_entity.h"
 #include "world/entity/local_player.h"
 #include "gpu/gui_atlas.h"
+#include "world/achievement/achievement.h"
 
 extern Level g_level;
 
@@ -136,6 +137,7 @@ static void craftSelectedItem() {
 
     ItemInstance* res = new ItemInstance(result.id, result.count, result.data);
     if (!g_level.player->inventory->add(res)) g_level.player->drop(res);
+    achvOnItemCrafted(result.id);
     soundPlay("random.click", 1.0f, 1.0f);
     s_pressAnim = 8;
     recheckRecipes();

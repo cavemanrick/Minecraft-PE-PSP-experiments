@@ -4,6 +4,7 @@
 #include "world/entity/item_entity.h"
 #include "world/level/level.h"
 #include "world/difficulty.h"
+#include "world/achievement/achievement.h"
 #include "client/gamemode/gamemode.h"
 #include "util/mth.h"
 #include <cmath>
@@ -93,6 +94,14 @@ void Player::drop(ItemInstance* item, bool randomly) {
 void Player::addAdditonalSaveData(CompoundTag* ) {}
 void Player::readAdditionalSaveData(CompoundTag* ) {}
 
+void Player::awardKillScore(Entity* victim, int amount) {
+    score += amount;
+    if (!victim) return;
+    float dx = victim->x - x, dy = victim->y - y, dz = victim->z - z;
+    float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    achvOnMobKilled(victim->getEntityTypeId(), dist);
+}
+
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 
@@ -148,6 +157,7 @@ int Player::startSleepInBed(int bx, int by, int bz) {
     sleepCounter = 0;
     bedX = bx; bedY = by; bedZ = bz;
     xd = yd = zd = 0.0f;
+    achvOnSlept();
     return BED_OK;
 }
 

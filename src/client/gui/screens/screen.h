@@ -41,6 +41,7 @@ Screen& armorScreen();
 Screen& inBedScreen();
 Screen& deadScreen();
 Screen& signScreen();
+Screen& achievementsScreen();
 
 Screen* menuScreen(AppScreen which);
 Screen* overlayScreen();

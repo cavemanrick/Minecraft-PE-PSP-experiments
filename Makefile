@@ -30,6 +30,7 @@ OBJS = \
 	src/client/gui/screens/screen_addserver.o \
 	src/client/gui/screens/screen_options.o \
 	src/client/gui/screens/screen_pause.o \
+	src/client/gui/screens/screen_achievements.o \
 	src/client/gui/screens/screen_dead.o \
 	src/client/gui/screens/screen_inbed.o \
 	src/world/entity/tripod_camera.o \
@@ -190,7 +191,9 @@ OBJS = \
 	src/world/level/levelgen/caves.o \
 	src/world/level/levelgen/nether_biome.o \
 	src/world/level/levelgen/nether_gen.o \
-	src/world/level/levelgen/village_gen.o
+	src/world/level/levelgen/village_gen.o \
+	src/world/level/levelgen/loot_table.o \
+	src/world/achievement/achievement.o
 
 INCDIR = src
 # -MMD -MP: gcc writes a .d file next to every .o listing the headers that

@@ -36,6 +36,7 @@
 #include "world/entity/entity_types.h"
 #include "client/renderer/item_hand.h"
 #include "client/gui/hud.h" // guiFill -- portal crossing fade overlay
+#include "world/achievement/achievement.h"
 
 #include <pspgu.h>
 #include <pspgum.h>
@@ -138,6 +139,7 @@ int main(int argc, char* argv[]) {
     soundInit();
     musicInit();
     optionsLoad();
+    achievementsInit();
 
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
@@ -512,6 +514,7 @@ int main(int argc, char* argv[]) {
     if (s.haveTouch) textureFree(&s.touchGui);
     panoramaSetLoaded(false);
 
+    achievementsShutdown();
     guTerm();
     sceKernelExitGame();
     return 0;

@@ -48,6 +48,7 @@ Screen* overlayScreen() {
     if (g_deadScreen)   return &deadScreen();
     if (g_paused)       return &pauseScreen();
     if (g_optionsOpen)  return &optionsScreen();
+    if (g_achievementsOpen) return &achievementsScreen();
     if (g_worldBuilt && g_level.player && g_level.player->isSleeping())
         return &inBedScreen();
     if (g_craftOpen)    return &craftScreen();

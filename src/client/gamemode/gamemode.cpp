@@ -23,6 +23,11 @@
 #include "world/level/tile/entity/chest_tile_entity.h"
 #include "world/item/crafting/recipe.h"
 #include "world/level/tile/entity/furnace_tile_entity.h"
+#include "world/achievement/achievement.h"
+#include "world/level/levelgen/biome.h"
+#include "world/level/levelgen/nether_biome.h"
+#include "world/level/levelgen/village_gen.h"
+#include "world/level/storage/level_storage.h"
 #include "world/level/tile/entity/reactor_tile_entity.h"
 #include "world/level/tile/fire.h"
 #include "world/entity/item_entity.h"
@@ -209,6 +214,15 @@ static void breakTargetedBlock(const BlockHit& hit) {
         return;
     }
 
+    // Fired here rather than after the block is actually cleared: brokenId
+    // is already resolved, the early-outs above (bedrock, unloaded chunk,
+    // out-of-range) have already ruled out non-breaks, and every remaining
+    // path through this function does complete the break. One call site,
+    // no risk of double-firing on a retried/aborted mine (retries live in
+    // continueMining/g_mining, not in here).
+    achvOnBlockMined(brokenId, hit.y);
+    if (brokenId == BLOCK_WHEAT && (brokenData & 7) == 7) achvOnCropHarvested();
+
     if (brokenId == BLOCK_CHEST || brokenId == BLOCK_FURNACE || brokenId == BLOCK_FURNACE_LIT) {
         TileEntity* te = g_level.getTileEntity(hit.x, hit.y, hit.z);
         if (te && te->type == TE_CHEST)
@@ -388,6 +402,36 @@ static unsigned int autoRepeatClicks(unsigned int pressed, unsigned int held) {
 void GameMode::handleInput(unsigned int pressed, unsigned int held) {
 
     if (g_worldBuilt) pressed |= autoRepeatClicks(pressed, held);
+
+    // Periodic (not per-frame) achievement checks for state that has no
+    // natural event of its own: which biome the player is standing in,
+    // and whether their current chunk happens to be a generated village.
+    // classifyBiomeSpatial is documented as cheap enough to run per
+    // surface column during world gen (see biome.h), so once every dozen
+    // or so frames for a single column is negligible, but there is still
+    // no reason to pay even that cost every single frame when a village
+    // or biome boundary is not something the player crosses every tick.
+    if (g_worldBuilt && g_level.player) {
+        static unsigned int s_lastAchvTickUs = 0;
+        unsigned int nowUs = sceKernelGetSystemTimeLow();
+        if (!s_lastAchvTickUs || nowUs - s_lastAchvTickUs > 500000u) {
+            s_lastAchvTickUs = nowUs;
+
+            int px = (int)floorf(g_level.player->x);
+            int pz = (int)floorf(g_level.player->z);
+            int pcx = px >> 4, pcz = pz >> 4;
+
+            if (worldChunkIsReserved(&g_world, pcx, pcz) && worldChunkIsNether(&g_world, pcx, pcz)) {
+                NetherBiomeId nb = classifyNetherBiome(LevelStorage::getActiveSeed(), &g_world, px, pz);
+                achvOnNetherBiomeEntered((int)nb);
+            } else {
+                BiomeId b = classifyBiomeSpatial(LevelStorage::getActiveSeed(), &g_world, px, pz);
+                achvOnBiomeEntered((int)b);
+            }
+
+            if (villageChunkHasVillage(pcx, pcz)) achvOnVillageDiscovered();
+        }
+    }
 
     if (g_worldBuilt) {
         static unsigned int s_startUs = 0;

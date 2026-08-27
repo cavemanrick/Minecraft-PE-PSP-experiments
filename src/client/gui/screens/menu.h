@@ -64,6 +64,9 @@ struct MenuState {
     float optScroll;
     float createScroll;
 
+    int   achvSelected;
+    float achvScroll;
+
     char statusMsg[128];
 };
 
@@ -198,5 +201,8 @@ class SignTileEntity;
 extern SignTileEntity* g_signEditing;
 void signStartEdit(SignTileEntity* ste);
 void signEditLine(int line);
+
+extern bool g_achievementsOpen;
+void achievementsOpen();
 
 #endif

@@ -103,6 +103,15 @@ static void spawnCreatures(Level* level) {
 
         int cx = s_rng.nextInt(WORLD_W / 16);
         int cz = s_rng.nextInt(WORLD_D / 16);
+
+        // Overworld animals (sheep/pig/chicken/cow) have no business in the
+        // Nether. Without this check getTopSolidBlock reads the sealed
+        // bedrock roof in Nether chunks (same issue netherProbeStandableY's
+        // comment documents for the monster spawner) and happily reports it
+        // as standable, letting cows spawn on top of the world.
+        if (worldChunkIsReserved(level->w, cx, cz) &&
+            worldChunkIsNether(level->w, cx, cz)) continue;
+
         int bx = cx * 16 + s_rng.nextInt(16);
         int bz = cz * 16 + s_rng.nextInt(16);
         int by = level->getTopSolidBlock(bx, bz);
@@ -213,10 +222,18 @@ static void spawnMonsters(Level* level) {
         // from the origin while placing, and re-rolling the table midway
         // through would let a single pack come out half piglin and half
         // zombie on a biome border.
+        //
+        // MONSTER_TABLE is Overworld-only (zombies, spiders, skeletons,
+        // creepers) and must never be reached inside the Nether. Nether
+        // Wastes gets its own table below; Soul Sand Valley and Warped
+        // Forest don't have one yet, so those attempts are skipped rather
+        // than silently falling through to Overworld mobs.
         const SpawnEntry* table = MONSTER_TABLE;
         int tableCount = MONSTER_COUNT;
         int tableWeight = MONSTER_TOTAL_WEIGHT;
-        if (nether && classifyNetherBiome(worldGenSeed(), level->w, xStart, zStart) == NB_WASTES) {
+        if (nether) {
+            if (classifyNetherBiome(worldGenSeed(), level->w, xStart, zStart) != NB_WASTES)
+                continue;
             table = NETHER_WASTES_TABLE;
             tableCount = NETHER_WASTES_COUNT;
             tableWeight = NETHER_WASTES_TOTAL_WEIGHT;
@@ -307,7 +324,6 @@ static void spawnStriders(Level* level) {
 
         int x = cx * 16 + s_rng.nextInt(16);
         int z = cz * 16 + s_rng.nextInt(16);
-        if (classifyNetherBiome(worldGenSeed(), level->w, x, z) != NB_WARPED_FOREST) continue;
 
         int y = findStriderLavaY(level, x, z);
         if (y < 0) continue;
@@ -362,6 +378,13 @@ void populateInitial(Level* level) {
 
     for (int oi = 0; oi < NCHUNKS; oi++) {
         int cx = order[oi] % (WORLD_W / 16), cz = order[oi] / (WORLD_W / 16);
+
+        // Same reserved-Nether exclusion as spawnCreatures: this loop's
+        // getTopSolidBlock would otherwise read the sealed bedrock roof and
+        // seed the initial world with cows standing on top of the Nether.
+        if (worldChunkIsReserved(level->w, cx, cz) &&
+            worldChunkIsNether(level->w, cx, cz)) continue;
+
         int xo = cx * 16, zo = cz * 16;
         while (s_rng.nextFloat() < CREATURE_PROBABILITY) {
             if (level->countInstanceOfBaseType(MobCategory::creature.baseType)

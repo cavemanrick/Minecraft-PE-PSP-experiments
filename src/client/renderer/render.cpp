@@ -24,6 +24,7 @@
 #include "world/entity/tripod_camera.h"
 #include "util/prof.h"
 #include "platform/time.h"
+#include "world/achievement/achievement.h"
 #include <cstring>
 
 #include <stdio.h>
@@ -1526,7 +1527,10 @@ void gameRender(MenuState& s) {
     // atmosphere switches on the same frame the camera actually crosses --
     // and so third-person / camera-pullback cases follow the camera rather
     // than the body. Must be set before updateDayColors, which branches on it.
+    bool wasInNether = g_inNether;
     g_inNether = eyeInNether(&g_world, ix, iz);
+    if (g_inNether && !wasInNether) achvOnNetherEntered();
+    else if (!g_inNether && wasInNether) achvOnOverworldReturned();
 
     updateDayColors(a);
 

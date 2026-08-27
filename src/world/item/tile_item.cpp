@@ -11,6 +11,7 @@
 #include "world/entity/player.h"
 #include "world/entity/local_player.h"
 #include "client/player/player_state.h"
+#include "world/achievement/achievement.h"
 #include <math.h>
 
 bool placeTileResolved(World* w, int nx, int ny, int nz, int tileId, int data, Player* placer) {
@@ -24,6 +25,12 @@ bool placeTileResolved(World* w, int nx, int ny, int nz, int tileId, int data, P
     worldNotifyNeighborsChanged(w, nx, ny, nz);
     worldUpdateLights(w);
     worldRebuildAroundNow(w, nx, ny, nz);
+    // placer is only non-null for an actual gameplay placement (every
+    // world-gen caller sets blocks directly via worldSetBlockAndData, not
+    // through this wrapper), so this is a safe single hook for "player
+    // placed a block" covering every TileItem-family item (plain blocks,
+    // slabs, doors, beds) without needing a hook in each subclass.
+    if (placer) achvOnBlockPlaced((unsigned char)tileId);
     return true;
 }
 
@@ -75,7 +82,7 @@ bool SlabItem::useOn(ItemInstance* item, Player* player, World* w, int x, int y,
             worldNotifyNeighborsChanged(w, x, y, z);
             worldUpdateLights(w);
             worldRebuildAroundNow(w, x, y, z);
-            if (player) player->inventory->consumeSelected();
+            if (player) { player->inventory->consumeSelected(); achvOnBlockPlaced((unsigned char)doubleId); }
         }
         return true;
     }
@@ -135,7 +142,7 @@ bool DoorItem::useOn(ItemInstance* item, Player* player, World* w, int x, int y,
 
     int dir = (placementQuadrant(player) + 1) & 3;
     doorPlace(w, x, y, z, dir, tileId);
-    if (player) player->inventory->consumeSelected();
+    if (player) { player->inventory->consumeSelected(); achvOnBlockPlaced((unsigned char)tileId); }
     return true;
 }
 
@@ -166,7 +173,7 @@ bool BedItem::useOn(ItemInstance* item, Player* player, World* w, int x, int y, 
     worldUpdateLights(w);
     worldRebuildAroundNow(w, x, y, z);
     worldRebuildAroundNow(w, x + xra, y, z + zra);
-    if (player) player->inventory->consumeSelected();
+    if (player) { player->inventory->consumeSelected(); achvOnBlockPlaced((unsigned char)tileId); }
     return true;
 }
 

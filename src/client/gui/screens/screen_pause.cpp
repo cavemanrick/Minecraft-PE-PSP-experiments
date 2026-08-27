@@ -40,9 +40,9 @@ static bool debugNetherEntryAvailable() {
 }
 
 static const char* const kPauseButtons[] = {
-    "Back to game", "Options", "Save", "Quit to title", "Enter Nether (test)",
+    "Back to game", "Achievements", "Options", "Save", "Quit to title", "Enter Nether (test)",
 };
-static const int PAUSE_BUTTONS_BASE = 4; // everything except the debug entry
+static const int PAUSE_BUTTONS_BASE = 5; // everything except the debug entry
 static const int PAUSE_BUTTONS_MAX  = (int)(sizeof(kPauseButtons) / sizeof(kPauseButtons[0]));
 
 static int pauseButtonCount() {
@@ -119,13 +119,17 @@ void PauseScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int )
         switch (g_pauseSel) {
             case 0: g_paused = false; break;
             case 1:
+                achievementsOpen();
+                g_paused = false;
+                break;
+            case 2:
 
                 g_optionsOpen = true;
                 g_paused = false;
                 break;
-            case 2: g_saveRequested = true; g_paused = false; break;
-            case 3: g_quitConfirm = true; g_quitConfirmSel = 1; break;
-            case 4:
+            case 3: g_saveRequested = true; g_paused = false; break;
+            case 4: g_quitConfirm = true; g_quitConfirmSel = 1; break;
+            case 5:
                 if (debugNetherEntryAvailable()) {
                     debugToggleNetherTeleport(&g_world, g_level.player);
                     g_paused = false;

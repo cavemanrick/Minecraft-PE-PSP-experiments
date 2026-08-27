@@ -18,6 +18,7 @@
 #include <cstring>
 #include "gpu/item_icons.h"
 #include "gpu/spawn_egg_colors.h"
+#include "world/achievement/achievement.h"
 
 #define CHAT_LINES 4
 #define CHAT_SHOW_S 10.0f
@@ -54,6 +55,65 @@ extern bool    g_haveGuiBlocks;
 #define HUD_ST_S    2.0f
 #define HUD_HINTS_Y UI_HINTS_Y
 
+// Achievement toast: a single-slot banner, distinct from the chat log
+// below. Real achievement pop-ups are meant to read as a deliberate,
+// separate event rather than one more scrolling line, so this gets its
+// own fixed screen position (top-centre) and its own timer rather than
+// reusing s_chat's rotation. Only one shown at a time -- if a second
+// unlock arrives while one is still fading, achievementsPollNotification
+// is simply polled again once the current one's timer expires, so a
+// same-tick double unlock (e.g. mining a diamond triggers both Diamonds!
+// and Diamond Miner) is queued and shown in turn rather than lost.
+#define ACHV_TOAST_SHOW_S 3.0f
+static char  s_achvToastName[40] = "";
+static float s_achvToastStart = -1000.0f;
+
+static void achvToastTick() {
+    float now = gameSeconds();
+    if (s_achvToastStart < 0.0f || now - s_achvToastStart > ACHV_TOAST_SHOW_S) {
+        char name[40];
+        if (achievementsPollNotification(name, sizeof(name))) {
+            strncpy(s_achvToastName, name, sizeof(s_achvToastName) - 1);
+            s_achvToastName[sizeof(s_achvToastName) - 1] = '\0';
+            s_achvToastStart = now;
+        }
+    }
+}
+
+// Ticking and drawing are separate calls (see the two calls near the
+// chat-log block further down in hotbarDraw): tick always runs so a
+// queued unlock's timer keeps advancing even while an overlay is up,
+// but draw is skipped whenever the overlay gate hides the rest of the
+// HUD, so a banner never renders on top of the pause menu or a chest
+// screen.
+static void achvToastDraw(MenuState& s) {
+    if (s_achvToastStart < 0.0f || !s.haveFont) return;
+    float age = gameSeconds() - s_achvToastStart;
+    if (age > ACHV_TOAST_SHOW_S) return;
+
+    // Quick fade in, hold, quick fade out -- 0.3s each tail, matching the
+    // chat log's own one-second fade-out feel without a separate curve.
+    float alphaF = 1.0f;
+    if (age < 0.3f) alphaF = age / 0.3f;
+    else if (age > ACHV_TOAST_SHOW_S - 0.3f) alphaF = (ACHV_TOAST_SHOW_S - age) / 0.3f;
+    if (alphaF < 0.0f) alphaF = 0.0f; if (alphaF > 1.0f) alphaF = 1.0f;
+    int alpha = (int)(255.0f * alphaF);
+
+    char line1[] = "Achievement Unlocked!";
+    float tw1 = fontTextWidth(&s.font, line1) * HUD_S;
+    float tw2 = fontTextWidth(&s.font, s_achvToastName) * HUD_S;
+    float boxW = (tw1 > tw2 ? tw1 : tw2) + 16.0f * HUD_S;
+    float boxH = 22.0f * HUD_S;
+    float boxX = 240.0f - boxW / 2.0f;
+    float boxY = 14.0f * HUD_S;
+
+    guiFill(boxX, boxY, boxW, boxH, (unsigned int)((alpha / 2) << 24));
+    fontDrawTextShadow(&s.font, boxX + (boxW - tw1) / 2.0f, boxY + 2.0f * HUD_S,
+                       line1, 0x00FFD700u | ((unsigned int)alpha << 24), HUD_S);
+    fontDrawTextShadow(&s.font, boxX + (boxW - tw2) / 2.0f, boxY + 12.0f * HUD_S,
+                       s_achvToastName, 0x00FFFFFFu | ((unsigned int)alpha << 24), HUD_S);
+}
+
 int g_barOnTop = 0;
 static const unsigned int HUD_WHITE = 0xFFFFFFFFu;
 
@@ -73,7 +133,7 @@ static short guiBlockIcon(short id) {
         case BLOCK_ORE_LAPIS: return 42;
         case BLOCK_LAPIS_BLOCK: return 47;
         case BLOCK_ORE_REDSTONE: case BLOCK_ORE_REDSTONE_LIT: return 43;
-        case BLOCK_ORE_EMERALD: return 41;
+        case BLOCK_ORE_DIAMOND: return 41;
         case BLOCK_DIAMOND_BLOCK: return 46;
         case BLOCK_GOLD_BLOCK: return 44;
         case BLOCK_IRON_BLOCK: return 45;
@@ -484,7 +544,7 @@ const char* getBlockName(short id, unsigned char data) {
         case BLOCK_ORE_IRON: return "Iron Ore";
         case BLOCK_ORE_GOLD: return "Gold Ore";
 
-        case BLOCK_ORE_EMERALD: return "Diamond Ore";
+        case BLOCK_ORE_DIAMOND: return "Diamond Ore";
         case BLOCK_ORE_LAPIS: return "Lapis Lazuli Ore";
         case BLOCK_ORE_REDSTONE: return "Redstone Ore";
         case BLOCK_GOLD_BLOCK: return "Block of Gold";
@@ -707,7 +767,7 @@ const char* getBlockDescription(short id, unsigned char data) {
         case BLOCK_ORE_COAL: return "Can be mined with a pickaxe to collect coal.";
         case BLOCK_ORE_IRON: return "Can be mined with a stone pickaxe or better, then smelted in a furnace to produce iron ingots.";
         case BLOCK_ORE_GOLD: return "Can be mined with an iron pickaxe or better, then smelted in a furnace to produce gold ingots.";
-        case BLOCK_ORE_EMERALD: return "Can be mined with an iron pickaxe or better to collect diamonds.";
+        case BLOCK_ORE_DIAMOND: return "Can be mined with an iron pickaxe or better to collect diamonds.";
         case BLOCK_ORE_LAPIS: return "Can be mined with a stone pickaxe or better to collect lapis lazuli.";
         case BLOCK_ORE_REDSTONE: return "Can be mined with an iron pickaxe or better to collect redstone dust.";
         case BLOCK_GOLD_BLOCK: case BLOCK_IRON_BLOCK: case BLOCK_DIAMOND_BLOCK: case BLOCK_LAPIS_BLOCK:
@@ -947,6 +1007,14 @@ void hotbarDraw(MenuState& s) {
             ly -= 10.0f * HUD_S;
         }
     }
+
+    // Achievement toast is always ticked (so a queued unlock's timer keeps
+    // advancing even while an overlay is up) but only drawn when nothing
+    // is covering the HUD, matching the chat log's own overlayUp gate just
+    // above -- an achievement banner popping up over the pause menu or a
+    // chest screen would look like a rendering bug, not a celebration.
+    achvToastTick();
+    if (!overlayUp) achvToastDraw(s);
 
     if (!g_invOpen && s.haveGui) {
         sceGuBlendFunc(GU_ADD, GU_ONE_MINUS_OTHER_COLOR, GU_ONE_MINUS_OTHER_COLOR, 0, 0);

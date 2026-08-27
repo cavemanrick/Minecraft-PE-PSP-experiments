@@ -10,6 +10,7 @@
 #include "util/mth.h"
 #include "client/player/player_state.h"
 #include "world/inventory/inventory.h"
+#include "world/achievement/achievement.h"
 
 static const int LIFETIME = 5 * 60 * 20;
 
@@ -153,6 +154,7 @@ void ItemEntity::tryPlayerPickup() {
             ItemInstance* stack = new ItemInstance(item);
             if (!g_level.player->inventory->add(stack)) { delete stack; return; }
             g_level.player->inventory->ensureHotbar(item.id, item.data);
+            achvOnItemObtained(item.id);
         }
 
         level->playSound(this, "random.pop", 0.3f,

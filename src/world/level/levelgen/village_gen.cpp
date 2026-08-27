@@ -2,6 +2,7 @@
 #include "world/level/levelgen/features.h"
 #include "world/level/levelgen/biome.h"
 #include "world/level/levelgen/Random.h"
+#include "world/level/levelgen/loot_table.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 
@@ -13,6 +14,34 @@
 // Lowest village floor that is still dry land. Sea level is 64 in this
 // generator and the highest water block is 63.
 #define VILLAGE_MIN_BASE_Y 64
+
+// Small fixed registry of chunks that actually placed a village, checked
+// by villageChunkHasVillage() so the achievement tick can detect "player
+// is standing in a village" without scanning blocks. Sized generously
+// against the density comment below (roughly 2-3 villages per 512 world,
+// ~10 per 1024) -- 64 entries covers even a large/lucky-seed 1024 world
+// with room to spare. If it ever does fill, new villages simply stop
+// being tracked for this achievement (they still generate normally); this
+// is a discovery-credit list, not gameplay state, so silently dropping
+// the least important thing (one more entry in an already-large list of
+// discovered villages) is an acceptable and safe degradation.
+#define MAX_TRACKED_VILLAGES 64
+static int s_villageChunkX[MAX_TRACKED_VILLAGES];
+static int s_villageChunkZ[MAX_TRACKED_VILLAGES];
+static int s_villageCount = 0;
+
+static void registerVillageChunk(int chunkX, int chunkZ) {
+    if (s_villageCount >= MAX_TRACKED_VILLAGES) return;
+    s_villageChunkX[s_villageCount] = chunkX;
+    s_villageChunkZ[s_villageCount] = chunkZ;
+    s_villageCount++;
+}
+
+bool villageChunkHasVillage(int chunkX, int chunkZ) {
+    for (int i = 0; i < s_villageCount; ++i)
+        if (s_villageChunkX[i] == chunkX && s_villageChunkZ[i] == chunkZ) return true;
+    return false;
+}
 
 static unsigned int villageHash(long seed, int cx, int cz) {
     unsigned int h = (unsigned int)seed;
@@ -120,7 +149,7 @@ static void clearBox(World* w, int x0, int z0, int x1, int z1, int y0, int y1) {
 }
 
 static void buildHouse(World* w, int x0, int z0, int width, int depth,
-                       int y, bool desert, bool doorSouth) {
+                       int y, bool desert, bool doorSouth, Random& lootRng) {
     const unsigned char wall = desert ? BLOCK_SANDSTONE : BLOCK_COBBLESTONE;
     const unsigned char roof = desert ? BLOCK_SANDSTONE : BLOCK_PLANKS;
     const unsigned char floor = BLOCK_PLANKS;
@@ -176,6 +205,14 @@ static void buildHouse(World* w, int x0, int z0, int width, int depth,
     // village that is lit when you generate it and dark by the time you
     // walk back to it.
     put(w, x0 + 1, y + 3, z0 + depth / 2, BLOCK_TORCH, 1);
+
+    // Chest in the corner opposite the torch (x0+1), so the two interior
+    // fixtures don't compete for the same floor tile. width/depth are at
+    // least 5, so x0+width-2 is always a genuine interior column, not the
+    // wall itself.
+    int cx = x0 + width - 2, cz = z0 + depth - 2;
+    put(w, cx, y + 1, cz, BLOCK_CHEST, 4); // data 4: no neighbour, unpaired
+    lootFillChest(cx, y + 1, cz, LOOT_TABLE_VILLAGE, lootRng);
 }
 
 static void buildWell(World* w, int x0, int z0, int y) {
@@ -238,13 +275,22 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
     int baseY = 0;
     if (!villageFlatEnough(w, chunkX, chunkZ, baseY)) return;
     flatten(w, chunkX, chunkZ, baseY, desert);
+    registerVillageChunk(chunkX, chunkZ);
 
     int ox = chunkX * 16, oz = chunkZ * 16;
 
+    // Loot rolls are seeded once per village from the same hash used for
+    // placement, not from a shared/global RNG. That keeps chest contents
+    // deterministic per world+chunk like everything else in this
+    // generator, and keeps them independent of unrelated generation order
+    // elsewhere (chunk load order, other structures) so the same village
+    // always has the same loot on replay.
+    Random lootRng((long)(h ^ 0xC5EF1A3Du));
+
     // Three houses form a compact U around a central well/path junction.
-    buildHouse(w, ox + 1,  oz + 1, 5, 6, baseY, desert, true);
-    buildHouse(w, ox + 10, oz + 1, 5, 6, baseY, desert, true);
-    buildHouse(w, ox + 5,  oz + 10, 5, 5, baseY, desert, false);
+    buildHouse(w, ox + 1,  oz + 1, 5, 6, baseY, desert, true,  lootRng);
+    buildHouse(w, ox + 10, oz + 1, 5, 6, baseY, desert, true,  lootRng);
+    buildHouse(w, ox + 5,  oz + 10, 5, 5, baseY, desert, false, lootRng);
 
     // Two-block-wide paths, laid BEFORE the well.
     //
