@@ -145,6 +145,7 @@ Drop Tile::getResource(int data) {
         case BLOCK_ICE:
         case BLOCK_ORE_REDSTONE: case BLOCK_ORE_REDSTONE_LIT:
         case BLOCK_MELON_STEM:
+        case BLOCK_MOB_SPAWNER:
         case BLOCK_BEDROCK:
         case BLOCK_WATER: case BLOCK_CALM_WATER: case BLOCK_LAVA: case BLOCK_CALM_LAVA:
             return { 0, 0, 0 };
@@ -508,6 +509,7 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
         case BLOCK_CRAFTING_TABLE: tileCraftingTable(data, f, col, row); break;
         case BLOCK_FURNACE: case BLOCK_FURNACE_LIT:
             tileFurnace(data, f, id == BLOCK_FURNACE_LIT, col, row); break;
+        case BLOCK_MOB_SPAWNER: *col = 4; *row = 2; break;
         case BLOCK_CHEST: tileChest(data, f, col, row); break;
         case BLOCK_STAIRS_QUARTZ: tileQuartzBlock(data, f, col, row); break;
         case BLOCK_QUARTZ_BLOCK:

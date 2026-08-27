@@ -1,9 +1,11 @@
 #include "world/level/levelgen/nether_gen.h"
+#include "world/level/levelgen/nether_fortress_gen.h"
 #include "world/level/levelgen/nether_biome.h"
 #include "world/level/levelgen/features.h"
 #include "world/level/levelgen/Random.h"
 #include "world/level/levelgen/PerlinNoise.h"
 #include "world/level/levelgen/mcpegen.h"
+#include "world/level/levelgen/gen_features.h"
 #include "world/level/tile/fire.h"
 #include "world/level/world.h"
 
@@ -1315,4 +1317,10 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
             netherOreFeature(w, random, x, y, z, BLOCK_NETHER_QUARTZ_ORE, 12);
         }
     }
+
+    // Structures are generated last so terrain/decorations are already in
+    // place and the fortress can deliberately replace the blocks in its
+    // footprint. The generator is chunk-local for PSP streaming safety.
+    if (genFeatureEnabled(worldGenMask(), GEN_FEATURE_NETHER_FORTRESS))
+        netherFortressGenerateChunk(w, worldSeed, cx, cz);
 }

@@ -15,7 +15,8 @@ enum TileEntityType {
     TE_CHEST   = 1,
     TE_FURNACE = 2,
     TE_REACTOR = 3,
-    TE_SIGN    = 4
+    TE_SIGN    = 4,
+    TE_MOB_SPAWNER = 5
 };
 
 class TileEntity {
@@ -42,6 +43,25 @@ public:
     Level* level;
     int rendererId;
     bool removed;
+};
+
+
+class MobSpawnerTileEntity : public TileEntity {
+public:
+    MobSpawnerTileEntity();
+
+    virtual void tick();
+    virtual bool save(CompoundTag* tag);
+    virtual void load(CompoundTag* tag);
+
+    int mobType;
+    int spawnDelay;
+    int minSpawnDelay;
+    int maxSpawnDelay;
+    int spawnCount;
+    int maxNearbyEntities;
+    int spawnRange;
+    bool initialized;
 };
 
 #endif

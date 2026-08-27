@@ -21,6 +21,7 @@ class Random;
 enum LootTableId {
     LOOT_TABLE_VILLAGE = 0,
     LOOT_TABLE_DUNGEON,
+    LOOT_TABLE_NETHER_FORTRESS,
     LOOT_TABLE_COUNT
 };
 

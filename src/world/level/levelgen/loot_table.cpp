@@ -57,6 +57,21 @@ static const LootEntry kDungeonLoot[] = {
     { ITEM_DIAMOND,       0, 1, 2,  3, true  },
 };
 
+// Nether fortress chest: Nether materials, gold and combat supplies,
+// with a small chance of a high-value treasure.
+static const LootEntry kNetherFortressLoot[] = {
+    { ITEM_GOLD_INGOT,       0, 1, 4, 24, false },
+    { ITEM_NETHER_BRICK,     0, 2, 8, 22, false },
+    { ITEM_NETHER_QUARTZ,    0, 1, 4, 14, false },
+    { ITEM_GLOWSTONE_DUST,   0, 1, 5, 12, false },
+    { ITEM_IRON_INGOT,       0, 1, 3, 10, false },
+    { ITEM_ARROW,            0, 2, 7, 10, false },
+    { ITEM_BONE,             0, 2, 5, 10, false },
+    { ITEM_FLINT_AND_STEEL,  0, 1, 1,  5, true  },
+    { ITEM_SADDLE,           0, 1, 1,  3, true  },
+    { ITEM_DIAMOND,          0, 1, 2,  2, true  },
+};
+
 struct LootTable {
     const LootEntry* entries;
     int count;
@@ -66,6 +81,7 @@ struct LootTable {
 static const LootTable kTables[LOOT_TABLE_COUNT] = {
     { kVillageLoot, sizeof(kVillageLoot) / sizeof(kVillageLoot[0]), 2, 4 },
     { kDungeonLoot, sizeof(kDungeonLoot) / sizeof(kDungeonLoot[0]), 3, 5 },
+    { kNetherFortressLoot, sizeof(kNetherFortressLoot) / sizeof(kNetherFortressLoot[0]), 4, 6 },
 };
 
 // --- Rolling ------------------------------------------------------------

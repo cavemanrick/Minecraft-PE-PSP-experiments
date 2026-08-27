@@ -231,7 +231,8 @@ static void breakTargetedBlock(const BlockHit& hit) {
             spillContainer((FurnaceTileEntity*)te, hit.x, hit.y, hit.z);
     }
     if (isSign(brokenId) || brokenId == BLOCK_CHEST ||
-        brokenId == BLOCK_FURNACE || brokenId == BLOCK_FURNACE_LIT)
+        brokenId == BLOCK_FURNACE || brokenId == BLOCK_FURNACE_LIT ||
+        brokenId == BLOCK_MOB_SPAWNER)
         g_level.removeTileEntity(hit.x, hit.y, hit.z);
     {
 

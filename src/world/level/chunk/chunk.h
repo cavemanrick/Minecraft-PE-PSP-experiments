@@ -132,6 +132,10 @@ enum { BLOCK_AIR = 0,
        // excluded by omission -- see the note there).
        BLOCK_MYCELIUM = 176,
 
+       // Dungeon mob spawner. It is a normal solid block backed by a
+       // MobSpawnerTileEntity; generated dungeons are the primary source.
+       BLOCK_MOB_SPAWNER = 177,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };

@@ -4,6 +4,7 @@
 #include "world/level/levelgen/caves.h"
 #include "world/level/levelgen/gen_features.h"
 #include "world/level/levelgen/village_gen.h"
+#include "world/level/levelgen/dungeon_gen.h"
 #include "world/level/levelgen/PerlinNoise.h"
 #include "world/level/world.h"
 
@@ -582,6 +583,13 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     if (genFeatureEnabled(g_genMask, GEN_FEATURE_VILLAGES))
         villageGenerateChunk(w, worldSeed, chunkX, chunkZ);
 
+    // Dungeons are generated after vegetation and villages, and entirely
+    // inside one chunk. That keeps the structure deterministic and safe for
+    // the streaming generator while allowing its spawner/chests to become
+    // ordinary world tile entities.
+    if (genFeatureEnabled(g_genMask, GEN_FEATURE_DUNGEONS))
+        dungeonGenerateChunk(w, worldSeed, chunkX, chunkZ);
+
     #define SPRING_WATER_TRIES 50
     #define SPRING_LAVA_TRIES  20
     for (int i = 0; i < SPRING_WATER_TRIES; i++) {
@@ -618,6 +626,10 @@ void worldGenFree() {
 
 long worldGenSeed() {
     return g_genSeed;
+}
+
+int worldGenMask() {
+    return g_genMask;
 }
 
 void chunkGenerateTerrain(World* w, int cx, int cz) {

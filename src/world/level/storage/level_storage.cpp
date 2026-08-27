@@ -427,6 +427,7 @@ static const char* tileEntityName(int type) {
     if (type == TE_CHEST)   return "Chest";
     if (type == TE_FURNACE) return "Furnace";
     if (type == TE_REACTOR) return "NetherReactor";
+    if (type == TE_MOB_SPAWNER) return "MobSpawner";
     return "";
 }
 
@@ -478,6 +479,7 @@ static TileEntity* createTileEntityByName(const std::string& id) {
     if (id == "Chest")   return new ChestTileEntity();
     if (id == "Furnace") return new FurnaceTileEntity();
     if (id == "NetherReactor") return new ReactorTileEntity();
+    if (id == "MobSpawner") return new MobSpawnerTileEntity();
     return NULL;
 }
 

@@ -185,6 +185,7 @@ OBJS = \
 	src/world/level/levelgen/caves.o \
 	src/world/level/levelgen/nether_biome.o \
 	src/world/level/levelgen/nether_gen.o \
+	src/world/level/levelgen/nether_fortress_gen.o \
 	src/world/level/levelgen/village_gen.o
 
 INCDIR = src

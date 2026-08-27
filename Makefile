@@ -43,6 +43,7 @@ OBJS = \
 	src/client/gui/screens/screen_chest.o \
 	src/world/level/tile/entity/furnace_tile_entity.o \
 	src/world/level/tile/entity/reactor_tile_entity.o \
+	 src/world/level/tile/entity/mob_spawner_tile_entity.o \
 	src/world/level/tile/nether_reactor_pattern.o \
 	src/world/level/tile/nether_portal.o \
 	src/client/gui/screens/screen_sign.o \
@@ -191,7 +192,9 @@ OBJS = \
 	src/world/level/levelgen/caves.o \
 	src/world/level/levelgen/nether_biome.o \
 	src/world/level/levelgen/nether_gen.o \
+	src/world/level/levelgen/nether_fortress_gen.o \
 	src/world/level/levelgen/village_gen.o \
+	 src/world/level/levelgen/dungeon_gen.o \
 	src/world/level/levelgen/loot_table.o \
 	src/world/achievement/achievement.o
 

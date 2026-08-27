@@ -18,6 +18,12 @@ void worldGenFree();
 // outside the file too.
 long worldGenSeed();
 
+// Same rationale as worldGenSeed() above, for the feature toggle mask:
+// the Nether generator needs to see GEN_FEATURE_NETHER_FORTRESS without
+// chunk_cache.cpp threading a mask parameter through every reserved-
+// region call site by hand. Mirrors g_genMask in mcpegen.cpp.
+int worldGenMask();
+
 void chunkGenerateTerrain(World* w, int cx, int cz);
 
 bool chunkPostProcessPhase(World* w, int cx, int cz, int phase);
