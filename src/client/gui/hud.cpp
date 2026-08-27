@@ -612,6 +612,7 @@ const char* getBlockName(short id, unsigned char data) {
         }
         case BLOCK_LEAVES_DARK_OAK: return "Dark Oak Leaves";
         case BLOCK_MYCELIUM: return "Mycelium";
+        case BLOCK_BONE_BLOCK: return "Bone Block";
         case BLOCK_HUGE_MUSHROOM_CAP:
             return (data & HUGE_MUSHROOM_RED_BIT) ? "Red Mushroom Block" : "Brown Mushroom Block";
         case BLOCK_HUGE_MUSHROOM_STEM: return "Mushroom Stem";
@@ -798,6 +799,7 @@ const char* getBlockDescription(short id, unsigned char data) {
         case BLOCK_LEAVES: case BLOCK_LEAVES_DARK_OAK: return "When broken sometimes drops a sapling which can then be replanted to grow into a tree.";
         case BLOCK_HUGE_MUSHROOM_CAP: case BLOCK_HUGE_MUSHROOM_STEM: return "Part of a huge mushroom. Grows naturally in mushroom and dark forest biomes.";
         case BLOCK_MYCELIUM: return "The ground of mushroom biomes. Drops dirt when mined, and cannot be tilled into farmland.";
+        case BLOCK_BONE_BLOCK: return "A dense block of fused bone, found in fossil formations in the Soul Sand Valley.";
         case BLOCK_FLOWER: case BLOCK_ROSE: return "Can be crafted into a dye.";
         case BLOCK_MUSHROOM_BROWN: case BLOCK_MUSHROOM_RED: return "Can be crafted with a bowl to make stew.";
         case BLOCK_SAPLING: return "Can be planted and it will eventually grow into a tree.";
@@ -1113,8 +1115,8 @@ void gameHintsDraw(MenuState& s) {
 
     extern bool g_photoPending;
     if (g_photoPending) return;
-    extern bool g_paused, g_deadScreen, g_optionsOpen;
-    if (g_paused || g_deadScreen || g_signEditing) return;
+    extern bool g_paused, g_deadScreen, g_optionsOpen, g_achievementsOpen;
+    if (g_paused || g_deadScreen || g_signEditing || g_achievementsOpen) return;
 
     if (g_optionsOpen) { menuHintsDraw(s); return; }
 

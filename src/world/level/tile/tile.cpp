@@ -325,6 +325,17 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             }
             break;
         }
+        case BLOCK_BONE_BLOCK: {
+            // Simple top/bottom-vs-side split, no axis rotation -- this
+            // block is placed as a static fossil-pile decoration (see
+            // fossilFeature in nether_gen.cpp), never rotated by the
+            // player the way a log can be, so there's no need for
+            // BLOCK_LOG's per-axis cap logic.
+            bool capFace = (f == F_TOP || f == F_DOWN);
+            if (capFace) { *col = 9;  *row = 1; }
+            else         { *col = 10; *row = 1; }
+            break;
+        }
         case BLOCK_LEAVES:
             switch (data & LEAF_TYPE_MASK) {
                 case LEAF_SPRUCE: *col = 4; *row = 8; *tint = 0xFF2BAE3Du; break;
@@ -1225,7 +1236,7 @@ static int rawSoundType(unsigned char id) {
 static float rawDestroySpeed(int id) {
     switch (id) {
         case BLOCK_STONE: case BLOCK_STONE_BRICKS: case BLOCK_BOOKSHELF:
-        case BLOCK_STAIRS_STONE_BRICK:
+        case BLOCK_STAIRS_STONE_BRICK: case BLOCK_BONE_BLOCK:
             return 1.5f;
         case BLOCK_DIRT: case BLOCK_SAND:
             return 0.5f;

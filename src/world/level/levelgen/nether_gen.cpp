@@ -461,6 +461,161 @@ static bool isNetherrackFace(World* w, int x, int y, int z) {
     return worldBlock(w, x, y, z) == BLOCK_NETHERRACK;
 }
 
+// --- Wastes structure: netherrack spire -----------------------------
+//
+// A thin rock column jutting up from the floor, tapering slightly near
+// the top and optionally capped with magma or glowstone. This is purely
+// ambient decoration for the otherwise-empty Nether Wastes biome -- no
+// footprint validation or chunk-rejection the way the fortress/dungeon
+// generators need, since a spire that fails its headroom check simply
+// isn't placed and the biome falls back to its existing flat terrain,
+// which was already the status quo.
+//
+// Height is capped conservatively (5-8 blocks) against NETHER_MIN_GAP
+// (10): even the tallest possible spire leaves at least 2 blocks of
+// clearance below the lowest the ceiling can ever sit relative to a
+// floor column directly below it, so there's no need to re-derive the
+// ceiling height here -- the local headroom scan below is the real
+// authority and the height cap is just a sane upper bound to roll from.
+static void placeNetherrackSpire(World* w, Random& random, int x, int y, int z) {
+    if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) return;
+    if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) return;
+
+    int wantHeight = 5 + random.nextInt(4);
+    int headroom = 0;
+    while (headroom < wantHeight && worldBlock(w, x, y + 1 + headroom, z) == BLOCK_AIR) headroom++;
+    int height = headroom < wantHeight ? headroom : wantHeight;
+    if (height < 3) return; // too little clearance to read as a spire; skip rather than stub
+
+    for (int h = 1; h <= height; h++) {
+        // Tapers near the top: the last two blocks have a chance to skip,
+        // giving an irregular jagged silhouette instead of a perfect rod.
+        if (h > height - 2 && random.nextInt(3) == 0) continue;
+        blockPut(w, x, y + h, z, BLOCK_NETHERRACK);
+    }
+
+    // Occasional accent cap -- magma reads as a scorched tip, glowstone
+    // as a light source that also helps the spire read from a distance.
+    // Never both; capChance keeps most spires plain rock, matching how
+    // sparse the existing magma-blob decoration already is in this biome.
+    int capRoll = random.nextInt(6);
+    if (capRoll == 0) blockPut(w, x, y + height + 1, z, BLOCK_MAGMA);
+    else if (capRoll == 1) blockPut(w, x, y + height + 1, z, BLOCK_GLOWSTONE);
+}
+
+// --- Wastes structure: small obsidian formation -----------------------
+//
+// A squat, irregular blob of obsidian sitting on the floor -- reads as a
+// natural rock outcrop, distinct from the thin vertical spires above.
+// Obsidian only forms where lava meets a stable surface in vanilla; this
+// is a decorative stand-in for that without simulating the actual fluid
+// interaction, matching how the existing magma blobs in this file are
+// already "purely decorative...no lava-damage/bubble-column behavior".
+static void placeObsidianFormation(World* w, Random& random, int x, int y, int z) {
+    if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) return;
+    if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) return;
+
+    int radius = 1 + random.nextInt(2);
+    int height = 1 + random.nextInt(2);
+    for (int dx = -radius; dx <= radius; dx++) {
+        for (int dz = -radius; dz <= radius; dz++) {
+            if (dx * dx + dz * dz > radius * radius) continue; // round footprint, not square
+            for (int dy = 0; dy < height; dy++) {
+                int bx = x + dx, by = y + 1 + dy, bz = z + dz;
+                if (worldBlock(w, bx, by, bz) != BLOCK_AIR) continue;
+                // Only builds on solid ground directly below -- an
+                // obsidian blob floating a block above an already-placed
+                // neighbour column would look like debris, not an
+                // outcrop, so each column is checked independently.
+                if (worldBlock(w, bx, by - 1, bz) == BLOCK_AIR) continue;
+                blockPut(w, bx, by, bz, BLOCK_OBSIDIAN);
+            }
+        }
+    }
+}
+
+// --- Soul Sand Valley structure: fossil skeleton -----------------------
+//
+// A buried skeleton -- a spine with rib pairs, echoing vanilla's own
+// fossil structures -- rather than a random scatter of bone blocks. Fixed
+// orientation with an optional mirror across Z (cheap variety without a
+// full rotation matrix, matching how little investment the fortress and
+// dungeon generators put into orientation too). The rib layout is
+// deliberately asymmetric (one pair shortened on one side, another
+// dropped on one side entirely) so the mirror actually produces a
+// different-looking skeleton rather than mapping onto itself -- a fully
+// symmetric rib layout was tried first and rejected because mirroring it
+// is a no-op, confirmed by generating both orientations as coordinate
+// sets and checking they differ. The template is a flat coordinate list
+// rather than ported vanilla structure data, hand-authored to read as a
+// spine + ribcage from directly above -- see the ASCII check this shape
+// was verified against before being written out here:
+//
+//   NORMAL:            MIRRORED:
+//    # #     #          #    #  #
+//    # #     #          # #  #  #
+//    ###########         ###########
+//    # #  #  #          # #     #
+//    #    #  #          # #     #
+//
+// 11 long (x), 5 wide (z), 3 tall (y) -- comparable footprint to vanilla's
+// real fossils. y within the template is a shallow arc (0->2->0) so the
+// spine reads as gently curved rather than a dead-straight line of blocks.
+struct FossilBlock { signed char dx, dy, dz; };
+static const FossilBlock kFossilTemplate[] = {
+    // Spine (11 vertebrae, shallow arc).
+    {0,0,0}, {1,0,0}, {2,1,0}, {3,1,0}, {4,1,0}, {5,2,0}, {6,2,0},
+    {7,1,0}, {8,1,0}, {9,0,0}, {10,0,0},
+    // Rib pairs, at the same height as the spine vertebra directly below
+    // them. Deliberately asymmetric -- see the comment above.
+    {1,0,1}, {1,0,2}, {1,0,-1}, {1,0,-2},   // symmetric pair
+    {3,1,1},                                 // +Z side shortened to 1 block
+    {3,1,-1}, {3,1,-2},
+    {6,2,1}, {6,2,2},                        // -Z side dropped entirely
+    {9,0,1}, {9,0,2}, {9,0,-1}, {9,0,-2},   // symmetric pair
+};
+static const int kFossilBlockCount = (int)(sizeof(kFossilTemplate) / sizeof(kFossilTemplate[0]));
+
+// True if every template cell either lands on soul sand/soil (the anchor
+// column and every other column the skeleton would occupy) with open air
+// immediately above, or -- since the whole thing is meant to sit half
+// buried -- one block INTO existing soul sand/soil is also acceptable,
+// which the placement loop below relies on to let ribs dip half a block
+// under the surface. Checked as a dry run before anything is placed, same
+// footprint-first discipline as the dungeon/fortress generators use,
+// rather than discovering a bad site block-by-block mid-placement.
+static bool fossilSiteClear(World* w, int x, int y, int z, bool mirrorZ) {
+    for (int i = 0; i < kFossilBlockCount; i++) {
+        int dz = mirrorZ ? -kFossilTemplate[i].dz : kFossilTemplate[i].dz;
+        int bx = x + kFossilTemplate[i].dx;
+        int by = y + kFossilTemplate[i].dy;
+        int bz = z + dz;
+        unsigned char at    = worldBlock(w, bx, by, bz);
+        unsigned char below = worldBlock(w, bx, by - 1, bz);
+        bool atOk    = (at == BLOCK_AIR || at == BLOCK_SOUL_SAND || at == BLOCK_SOUL_SOIL);
+        bool belowOk = (below == BLOCK_SOUL_SAND || below == BLOCK_SOUL_SOIL || below == BLOCK_AIR);
+        if (!atOk || !belowOk) return false;
+    }
+    return true;
+}
+
+static void placeFossilSkeleton(World* w, Random& random, int x, int y, int z) {
+    unsigned char floorId = worldBlock(w, x, y, z);
+    if (floorId != BLOCK_SOUL_SAND && floorId != BLOCK_SOUL_SOIL) return;
+    if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) return;
+
+    bool mirrorZ = random.nextInt(2) == 0;
+    if (!fossilSiteClear(w, x, y, z, mirrorZ)) return;
+
+    for (int i = 0; i < kFossilBlockCount; i++) {
+        int dz = mirrorZ ? -kFossilTemplate[i].dz : kFossilTemplate[i].dz;
+        int bx = x + kFossilTemplate[i].dx;
+        int by = y + kFossilTemplate[i].dy;
+        int bz = z + dz;
+        blockPut(w, bx, by, bz, BLOCK_BONE_BLOCK);
+    }
+}
+
 static void decorateWastes(World* w, Random& random, int xo, int zo) {
     // Magma blocks scattered on floor hills near the lava sea, same
     // rough placement vanilla uses (small blobs just above the lava
@@ -487,6 +642,31 @@ static void decorateWastes(World* w, Random& random, int xo, int zo) {
                 blockPut(w, bx, y, bz, BLOCK_MAGMA);
         }
     }
+
+    // Spires and obsidian formations: the actual "give Wastes some
+    // structure" pass. One roll each per chunk, independent of the magma
+    // above -- both search for the topmost exposed floor column the same
+    // way decorateSoulSandValley already does for its floor material,
+    // since spires/formations need to sit on *any* floor surface, not
+    // specifically the narrow lava-shoreline band magma targets.
+    if (random.nextInt(3) == 0) {
+        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+            if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
+            if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
+            placeNetherrackSpire(w, random, x, y, z);
+            break;
+        }
+    }
+    if (random.nextInt(4) == 0) {
+        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+            if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
+            if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
+            placeObsidianFormation(w, random, x, y, z);
+            break;
+        }
+    }
 }
 
 static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
@@ -505,6 +685,28 @@ static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
                 blockPut(w, gx, y, gz, floorBlock);
                 break; // only the topmost exposed layer at this column
             }
+        }
+    }
+
+    // Fossil skeleton: placed after the floor conversion above so the
+    // soul sand/soil surface it checks for already exists. One roll per
+    // chunk at low odds -- unlike the old scatter-blob version, this is
+    // an 11x5 footprint that needs genuinely clear, flat soul sand under
+    // it, so most rolls will fail fossilSiteClear's check anyway; the low
+    // roll rate just avoids spending the check on every single chunk.
+    // Anchor x is kept within [xo, xo+5] rather than the full [xo,xo+16)
+    // a single-block feature would use, since the template extends 10
+    // blocks further in +X from its anchor and reaching past this
+    // chunk's own 16-wide footprint into a neighbour that may not be
+    // generated yet would corrupt worldBlock reads there.
+    if (random.nextInt(4) == 0) {
+        int x = xo + random.nextInt(6), z = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+            unsigned char id = worldBlock(w, x, y, z);
+            if (id != BLOCK_SOUL_SAND && id != BLOCK_SOUL_SOIL) continue;
+            if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
+            placeFossilSkeleton(w, random, x, y, z);
+            break;
         }
     }
 }

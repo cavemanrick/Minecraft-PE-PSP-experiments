@@ -322,6 +322,31 @@ static inline bool worldSlotBusy(const LevelChunk* c) { return c->generating || 
 
 static inline bool worldNeighbourSettled(const World* w, int cx, int cz) {
 
+    // A neighbour that will never be requested by normal overworld
+    // streaming must not permanently block meshing the chunk beside it.
+    // Reserved Nether/End chunks are exactly that case: they only ever
+    // generate on demand (see chunk_cache.cpp's worldChunkIsReserved
+    // branch, which calls chunkGenerateNether only when something
+    // actually asks for that coordinate -- a player stepping through a
+    // portal, a debug teleport), never as part of the overworld's own
+    // pre-gen sweep or lazy streaming radius. Without this check, the
+    // last overworld chunk/row along the reserved strip's edge waits
+    // forever on a +X (or +Z, for the End strip's own edge) neighbour
+    // that nothing in ordinary play will ever cause to become ready,
+    // and the chunk simply never appears in the ambient streaming scan
+    // -- worldRebuildAroundNow's direct, non-gated rebuild path (used
+    // for player block edits) is the only thing that can still force a
+    // mesh there, which is why interacting with a block "fixes" it.
+    // Treating a reserved-but-unready neighbour as settled is safe for
+    // meshing specifically because worldBlock already returns
+    // BLOCK_INVISIBLE_BEDROCK for any coordinate in an unready chunk
+    // (see worldBlock in this same file), and that block is opaque
+    // (rawOpaque in tile.cpp has no exclusion for it) even though it is
+    // non-solid for physics -- so meshing against an unready reserved
+    // neighbour still hides the boundary face correctly, the same as a
+    // real wall would, rather than opening a hole into the void.
+    if (worldChunkIsReserved(w, cx, cz) && !worldChunkReady(w, cx, cz)) return true;
+
     return !worldChunkInBounds(w, cx, cz) || worldChunkReady(w, cx, cz);
 }
 static inline bool worldChunkMeshable(const World* w, int cx, int cz) {

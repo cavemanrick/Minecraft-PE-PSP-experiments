@@ -56,6 +56,7 @@ public:
     PickaxeItem(short id, const Tier& tier, int icon) : DiggerItem(id, 2, tier, icon) {
         addTile(BLOCK_STONE); addTile(BLOCK_COBBLESTONE);
         addTile(BLOCK_STONE_BRICKS); addTile(BLOCK_MOSSY_COBBLE);
+        addTile(BLOCK_BONE_BLOCK);
 
         addTile(BLOCK_DOUBLE_SLAB); addTile(BLOCK_SLAB);
         addTile(BLOCK_SANDSTONE);

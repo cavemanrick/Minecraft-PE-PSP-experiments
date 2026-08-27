@@ -283,9 +283,9 @@ int main(int argc, char* argv[]) {
         AppScreen screenBefore = s.screen;
 
         extern bool g_invOpen, g_chestOpen, g_furnaceOpen, g_craftOpen, g_armorOpen;
-        extern bool g_paused, g_optionsOpen;
+        extern bool g_paused, g_optionsOpen, g_achievementsOpen;
         bool inGameMenu = g_invOpen || g_chestOpen || g_furnaceOpen || g_craftOpen ||
-                          g_armorOpen || g_paused || g_optionsOpen;
+                          g_armorOpen || g_paused || g_optionsOpen || g_achievementsOpen;
 
         unsigned int pMenu = pressed | repeat;
         if (Screen* cur = menuScreen(s.screen)) {
@@ -306,7 +306,7 @@ int main(int argc, char* argv[]) {
         musicUpdate(s.screen != SCREEN_GAME,
                     s.screen == SCREEN_GAME && g_worldBuilt);
 
-        if (pressed && (screenBefore != SCREEN_GAME || g_optionsOpen) &&
+        if (pressed && (screenBefore != SCREEN_GAME || g_optionsOpen || g_achievementsOpen) &&
             (!navOnly || menuSelectionSig(s) != sigBefore))
             soundPlay("random.click", 1.0f, 1.0f);
 

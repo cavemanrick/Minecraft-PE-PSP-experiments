@@ -136,6 +136,12 @@ enum { BLOCK_AIR = 0,
        // MobSpawnerTileEntity; generated dungeons are the primary source.
        BLOCK_MOB_SPAWNER = 177,
 
+       // Plain solid decorative block, currently used for Soul Sand
+       // Valley's fossil-pile structures (see netherOreFeature's sibling
+       // fossilFeature in nether_gen.cpp). No special behavior -- it is
+       // mined and placed like stone, just a different texture/material.
+       BLOCK_BONE_BLOCK = 178,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };

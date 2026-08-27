@@ -212,6 +212,13 @@ void gameUpdate(MenuState& s, unsigned int pressed, const SceCtrlData& pad) {
         return;
     }
 
+    if (g_achievementsOpen) {
+        achievementsScreen().handleInput(s, pressed, pad.Buttons);
+        float now = nowSeconds();
+        g_timerLast = now; g_timerPassed = 0.0f; g_timerAlpha = 0.0f;
+        return;
+    }
+
     if (g_worldBuilt && g_level.player && g_level.player->isSleeping()) {
         inBedScreen().handleInput(s, pressed, pad.Buttons);
         runTicks(s, 0, 128, 128);
