@@ -113,12 +113,6 @@ float rowHeight() {
 
 bool s_advanced = false;
 
-// Flat worlds are disabled for now. Kept as a single named constant
-// (checked from both handleInput and renderContent, hence file scope
-// rather than a local in either function) so re-enabling this later is a
-// one-line change, same shape as toggleRowUsable's per-row gate above.
-const bool kFlatDisabled = true;
-
 int  s_lastHeader = FOCUS_BACK;
 
 char* rowText(MenuState& s, int row) {
@@ -312,7 +306,7 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
     if (pressed & PSP_CTRL_RIGHT) {
         if (sel == FOCUS_BACK)             sel = FOCUS_ADVANCED;
         else if (sel == ROW_NAME && s_advanced) sel = ROW_SEED;
-        else if (sel == FOCUS_TYPE_OLD && !kFlatDisabled) { sel = FOCUS_TYPE_FLAT; s.newWorldType = WORLD_TYPE_FLAT; }
+        else if (sel == FOCUS_TYPE_OLD)    { sel = FOCUS_TYPE_FLAT; s.newWorldType = WORLD_TYPE_FLAT; }
         else if (sel == FOCUS_SIZE_512)      { sel = FOCUS_SIZE_1024; s.newWorldSizePreset = WORLD_SIZE_PRESET_1024; }
         else if (sel == FOCUS_SIZE_1024)     { sel = FOCUS_SIZE_INFINITE; s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE; }
         else if (sel == FOCUS_SURVIVAL && !locked) { sel = FOCUS_CREATIVE; s.newWorldGamemode = 1; }
@@ -343,7 +337,7 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
             const CreateRowDef& row = kFieldRows[sel];
             startOsk(row.oskTarget, row.oskPrompt, rowText(s, sel));
         } else if (sel == FOCUS_TYPE_OLD)  { s.newWorldType = WORLD_TYPE_OLD;
-        } else if (sel == FOCUS_TYPE_FLAT) { if (!kFlatDisabled) s.newWorldType = WORLD_TYPE_FLAT;
+        } else if (sel == FOCUS_TYPE_FLAT) { s.newWorldType = WORLD_TYPE_FLAT;
         } else if (sel == FOCUS_SIZE_512)      { s.newWorldSizePreset = WORLD_SIZE_PRESET_512;
         } else if (sel == FOCUS_SIZE_1024)     { s.newWorldSizePreset = WORLD_SIZE_PRESET_1024;
         } else if (sel == FOCUS_SIZE_INFINITE) { s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE;
@@ -464,14 +458,6 @@ void CreateScreen::renderContent(MenuState& s) {
 
         drawFieldLabel(font, L.formX, L.typeY, "World Type");
         {
-            // Flat worlds are disabled for now -- shown, not hidden, same
-            // reasoning as the not-yet-available achievements in
-            // screen_achievements.cpp: hiding it would make the pill row
-            // look incomplete rather than communicating "not available
-            // yet". Only the label dims (active=false, same mechanism the
-            // Survival/Creative pills already use for gameModeLocked);
-            // the pill background keeps rendering normally since Old is
-            // still the selected/active choice either way.
             const bool flat = (s.newWorldType == WORLD_TYPE_FLAT);
             guiTButton(s, L.pill0X, L.typeY, L.pillW, L.pillH, !flat, BEVEL);
             guiTButtonLabel(s, L.pill0X, L.typeY, L.pillW, L.pillH,
@@ -480,7 +466,7 @@ void CreateScreen::renderContent(MenuState& s) {
             guiTButton(s, L.pill1X, L.typeY, L.pillW, L.pillH, flat, BEVEL);
             guiTButtonLabel(s, L.pill1X, L.typeY, L.pillW, L.pillH,
                             levelSourceFor(WORLD_TYPE_FLAT).label(),
-                            sel == FOCUS_TYPE_FLAT, !kFlatDisabled, TEXT_S);
+                            sel == FOCUS_TYPE_FLAT, true, TEXT_S);
         }
 
         drawFieldLabel(font, L.formX, L.sizeY, "World Size");
