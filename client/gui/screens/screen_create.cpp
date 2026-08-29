@@ -11,6 +11,7 @@
 #include "gpu/gui_atlas.h"
 #include "world/level/levelgen/level_source.h"
 #include "world/level/levelgen/gen_features.h"
+#include "world/level/levelgen/cheat_spawn_content.h"
 #include "world/level/storage/worldlist.h"
 #include "world/level/world.h"
 
@@ -112,6 +113,12 @@ float rowHeight() {
 }
 
 bool s_advanced = false;
+
+// Flat worlds are disabled for now. Kept as a single named constant
+// (checked from both handleInput and renderContent, hence file scope
+// rather than a local in either function) so re-enabling this later is a
+// one-line change, same shape as toggleRowUsable's per-row gate above.
+const bool kFlatDisabled = true;
 
 int  s_lastHeader = FOCUS_BACK;
 
@@ -306,7 +313,7 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
     if (pressed & PSP_CTRL_RIGHT) {
         if (sel == FOCUS_BACK)             sel = FOCUS_ADVANCED;
         else if (sel == ROW_NAME && s_advanced) sel = ROW_SEED;
-        else if (sel == FOCUS_TYPE_OLD)    { sel = FOCUS_TYPE_FLAT; s.newWorldType = WORLD_TYPE_FLAT; }
+        else if (sel == FOCUS_TYPE_OLD && !kFlatDisabled) { sel = FOCUS_TYPE_FLAT; s.newWorldType = WORLD_TYPE_FLAT; }
         else if (sel == FOCUS_SIZE_512)      { sel = FOCUS_SIZE_1024; s.newWorldSizePreset = WORLD_SIZE_PRESET_1024; }
         else if (sel == FOCUS_SIZE_1024)     { sel = FOCUS_SIZE_INFINITE; s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE; }
         else if (sel == FOCUS_SURVIVAL && !locked) { sel = FOCUS_CREATIVE; s.newWorldGamemode = 1; }
@@ -337,7 +344,7 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
             const CreateRowDef& row = kFieldRows[sel];
             startOsk(row.oskTarget, row.oskPrompt, rowText(s, sel));
         } else if (sel == FOCUS_TYPE_OLD)  { s.newWorldType = WORLD_TYPE_OLD;
-        } else if (sel == FOCUS_TYPE_FLAT) { s.newWorldType = WORLD_TYPE_FLAT;
+        } else if (sel == FOCUS_TYPE_FLAT) { if (!kFlatDisabled) s.newWorldType = WORLD_TYPE_FLAT;
         } else if (sel == FOCUS_SIZE_512)      { s.newWorldSizePreset = WORLD_SIZE_PRESET_512;
         } else if (sel == FOCUS_SIZE_1024)     { s.newWorldSizePreset = WORLD_SIZE_PRESET_1024;
         } else if (sel == FOCUS_SIZE_INFINITE) { s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE;
@@ -348,7 +355,25 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
         } else if (sel == FOCUS_CREATE) {
             char created[64];
 
-            long seed = worldSeedFromString(s.newWorldSeed);
+            // Dev-only escape hatch: typing "cheat" as the seed (case
+            // sensitive, exact match) creates a genuinely random world
+            // (same seed roll an empty seed box would produce, not a hash
+            // of the literal word "cheat" -- a hash would make every
+            // cheat world identical, which isn't "random") on the 512
+            // preset specifically, since that's the smaller of the two
+            // presets that actually carries a reserved Nether strip
+            // (worldHasReservedRegions in world.h) -- without one, the
+            // portal placeCheatSpawnContent builds would have nowhere to
+            // lead. Gamemode is likewise forced to Survival (0) rather
+            // than whatever the pill was last set to: FillingContainer::
+            // add() is a silent no-op in Creative (line 121, the item is
+            // deleted and true is returned since Creative doesn't need
+            // granted stacks), so a Creative cheat world would otherwise
+            // report success while the promised pickaxe/saddle never
+            // actually appear. See cheat_spawn_content.cpp for what
+            // actually gets placed at spawn.
+            bool cheatSeed = (strcmp(s.newWorldSeed, "cheat") == 0);
+            long seed = cheatSeed ? worldSeedFromString("") : worldSeedFromString(s.newWorldSeed);
             // Dev-only escape hatch: typing "debug" as the seed (case
             // sensitive, exact match) creates a WORLD_TYPE_DEBUG world
             // instead of whatever's selected in the type toggle. This
@@ -360,15 +385,22 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
             if (strcmp(s.newWorldSeed, "debug") == 0) worldType = WORLD_TYPE_DEBUG;
 
             int sizeX, sizeZ;
-            sizePresetChunks(s.newWorldSizePreset, &sizeX, &sizeZ);
+            sizePresetChunks(cheatSeed ? WORLD_SIZE_PRESET_512 : s.newWorldSizePreset, &sizeX, &sizeZ);
+
+            g_cheatWorldPending = cheatSeed;
 
             if (worldListCreate(&s.worlds, s.newWorldName, created,
-                                effectiveGameMode(s), seed, worldType,
+                                cheatSeed ? 0 : effectiveGameMode(s), seed, worldType,
                                 s.newWorldGenMask, sizeX, sizeZ)) {
                 snprintf(s.statusMsg, sizeof(s.statusMsg), "Loading: %s", created);
                 s.worldSelected = s.worlds.count - 1;
                 s.screen = SCREEN_GAME;
             } else {
+                g_cheatWorldPending = false; // creation failed; nothing will
+                                              // ever reach the spawn hook to
+                                              // consume this, so clear it
+                                              // rather than leave it armed
+                                              // for a later, unrelated world
                 s.screen = SCREEN_WORLDS;
             }
             s.uiRow = 1;
@@ -458,6 +490,14 @@ void CreateScreen::renderContent(MenuState& s) {
 
         drawFieldLabel(font, L.formX, L.typeY, "World Type");
         {
+            // Flat worlds are disabled for now -- shown, not hidden, same
+            // reasoning as the not-yet-available achievements in
+            // screen_achievements.cpp: hiding it would make the pill row
+            // look incomplete rather than communicating "not available
+            // yet". Only the label dims (active=false, same mechanism the
+            // Survival/Creative pills already use for gameModeLocked);
+            // the pill background keeps rendering normally since Old is
+            // still the selected/active choice either way.
             const bool flat = (s.newWorldType == WORLD_TYPE_FLAT);
             guiTButton(s, L.pill0X, L.typeY, L.pillW, L.pillH, !flat, BEVEL);
             guiTButtonLabel(s, L.pill0X, L.typeY, L.pillW, L.pillH,
@@ -466,7 +506,7 @@ void CreateScreen::renderContent(MenuState& s) {
             guiTButton(s, L.pill1X, L.typeY, L.pillW, L.pillH, flat, BEVEL);
             guiTButtonLabel(s, L.pill1X, L.typeY, L.pillW, L.pillH,
                             levelSourceFor(WORLD_TYPE_FLAT).label(),
-                            sel == FOCUS_TYPE_FLAT, true, TEXT_S);
+                            sel == FOCUS_TYPE_FLAT, !kFlatDisabled, TEXT_S);
         }
 
         drawFieldLabel(font, L.formX, L.sizeY, "World Size");

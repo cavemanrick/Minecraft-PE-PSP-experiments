@@ -461,6 +461,172 @@ static bool isNetherrackFace(World* w, int x, int y, int z) {
     return worldBlock(w, x, y, z) == BLOCK_NETHERRACK;
 }
 
+// --- Wastes cave texture: stalactites, stalagmites, wall alcoves ------
+//
+// Unlike the spire/formation/fossil structures above, this pass is meant
+// to run densely across nearly every chunk rather than as a rare
+// landmark roll -- the goal is a cavern that reads as naturally uneven
+// from any viewing angle, not scattered set-piece props in an otherwise
+// flat room.
+//
+// Everything here is strictly additive or shallow-subtractive within
+// bounds already proven safe by netherFillColumn's own fill: stalactites
+// and stalagmites only ever place blocks into air that column's own
+// floor/ceiling scan already confirmed is open, and wall alcoves only
+// remove netherrack immediately adjacent to the (untouched) bedrock
+// perimeter, never approaching the lava basin or the ceiling shell's
+// bedrock backing. Nothing here can produce the void-holes or floating
+// islands the earlier tunnel-carve attempt did, because nothing here
+// carves through the floor slab or the ceiling shell -- nothing that
+// isn't already known-solid gets removed, and nothing that isn't
+// already known-air gets added-into.
+
+// A short spike hanging from the ceiling. Rolls a length against
+// available headroom (scanning DOWN from the ceiling face, the mirror of
+// netherHeadroom's upward scan) and tapers near the tip so a field of
+// these doesn't read as a picket fence.
+static void placeStalactite(World* w, Random& random, int x, int y, int z) {
+    // y is the topmost AIR block directly under the ceiling face (i.e.
+    // worldBlock(x,y,z) == AIR, worldBlock(x,y+1,z) == NETHERRACK).
+    int want = 2 + random.nextInt(4); // 2-5 long
+    int len = 0;
+    for (; len < want; len++) {
+        if (worldBlock(w, x, y - len, z) != BLOCK_AIR) break;
+    }
+    if (len < 2) return; // not enough clearance to read as a stalactite
+
+    for (int i = 0; i < len; i++) {
+        // Tapers near the tip: the last block has a chance to stop short,
+        // giving an irregular drip silhouette instead of a rigid rod.
+        if (i == len - 1 && random.nextInt(3) == 0) break;
+        blockPut(w, x, y - i, z, BLOCK_NETHERRACK);
+    }
+}
+
+// A short spike rising from the floor. Mirror of placeStalactite, scanning
+// UP from the floor face using the same headroom pattern netherHeadroom
+// already established for the fungus generator.
+static void placeStalagmite(World* w, Random& random, int x, int y, int z) {
+    // y is the topmost solid NETHERRACK block of the floor (i.e.
+    // worldBlock(x,y,z) == NETHERRACK, worldBlock(x,y+1,z) == AIR).
+    int want = 2 + random.nextInt(3); // 2-4 tall, shorter than stalactites
+    int room = netherHeadroom(w, x, y + 1, z, want);
+    int len = room < want ? room : want;
+    if (len < 2) return;
+
+    for (int i = 1; i <= len; i++) {
+        if (i == len && random.nextInt(3) == 0) break;
+        blockPut(w, x, y + i, z, BLOCK_NETHERRACK);
+    }
+}
+
+// A shallow pocket bitten into the netherrack immediately behind the
+// Nether strip's bedrock perimeter. wallRunsAlongZ is true for the X0/X1
+// edges (wall face at a fixed x, running along the z axis) and false for
+// the Z0/Z1 edges (fixed z, running along x) -- i.e. it names the axis the
+// alcove's WIDTH varies along, which is the axis perpendicular to inward.
+// inward is the unit step from the wall face toward the strip's interior
+// (+1 or -1 along whichever axis the wall's depth is measured on). Depth
+// is capped small and, critically, is also capped by the column's own
+// floor/ceiling gap at that spot so an alcove can never bite deep enough
+// to expose the lava basin or breach the ceiling shell -- it only ever
+// hollows out netherrack that netherFillColumn already placed as backing
+// rock, one to three blocks deep, well short of where structural material
+// would matter.
+static void placeWallAlcove(World* w, Random& random, int wallX, int wallZ,
+                             bool wallRunsAlongZ, int inward, int y0, int y1) {
+    int depth = 1 + random.nextInt(3); // 1-3 blocks into the rock
+    int height = 2 + random.nextInt(3); // 2-4 blocks tall
+    int width = 2 + random.nextInt(3);  // 2-4 blocks along the wall
+
+    int y = y0 + random.nextInt((y1 > y0) ? (y1 - y0) : 1);
+
+    for (int d = 1; d <= depth; d++) {
+        for (int a = -width / 2; a <= width / 2; a++) {
+            for (int h = 0; h < height; h++) {
+                // wallRunsAlongZ: width runs along z (bz varies with a),
+                // depth steps inward along x (bx varies with d).
+                // !wallRunsAlongZ: the mirror -- width along x, depth along z.
+                int bx = wallRunsAlongZ ? wallX + inward * d : wallX + a;
+                int bz = wallRunsAlongZ ? wallZ + a          : wallZ + inward * d;
+                int by = y + h;
+                if (by < 1 || by >= NETHER_H - 1) continue;
+                // Only ever hollow rock that's already solid netherrack --
+                // never bedrock (the wall face itself, d==0, is never
+                // touched since d starts at 1) and never air/lava, which
+                // would mean carving into the open cavern or the basin
+                // rather than the backing rock behind the wall.
+                if (worldBlock(w, bx, by, bz) != BLOCK_NETHERRACK) continue;
+                blockPut(w, bx, by, bz, BLOCK_AIR);
+            }
+        }
+    }
+}
+
+// One roll per chunk edge for wall alcoves (so a chunk that touches two
+// strip edges, i.e. a corner, gets a chance on each), plus a denser
+// per-column scatter of stalactites/stalagmites across the whole chunk.
+// Called from decorateWastes, after the magma/spire/formation passes so
+// none of those roll against ground this pass has already pocked with
+// spikes (spires still want a clean flat column to stand on -- see their
+// own worldBlock checks -- and running this after them means a spire
+// site is already committed before stalagmites can crowd its base).
+static void decorateWastesCaveTexture(World* w, Random& random, int xo, int zo,
+                                       bool edgeX0, bool edgeX1,
+                                       bool edgeZ0, bool edgeZ1) {
+    // Stalactites: scan down from the ceiling shell's underside. One roll
+    // per column at a moderate rate -- dense enough to be "regularly
+    // noticeable" without every single ceiling tile growing one.
+    for (int x = 0; x < 16; x++) {
+        for (int z = 0; z < 16; z++) {
+            int gx = xo + x, gz = zo + z;
+            if (random.nextInt(5) != 0) continue; // ~1 in 5 columns
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+                if (worldBlock(w, gx, y, gz) != BLOCK_AIR) continue;
+                if (worldBlock(w, gx, y + 1, gz) != BLOCK_NETHERRACK) continue;
+                placeStalactite(w, random, gx, y, gz);
+                break;
+            }
+        }
+    }
+
+    // Stalagmites: mirror pass, scanning down from the ceiling to find
+    // the topmost exposed floor column (same search direction the spire/
+    // formation passes already use for "find the floor").
+    for (int x = 0; x < 16; x++) {
+        for (int z = 0; z < 16; z++) {
+            int gx = xo + x, gz = zo + z;
+            if (random.nextInt(5) != 0) continue; // ~1 in 5 columns
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+                if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
+                if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
+                placeStalagmite(w, random, gx, y, gz);
+                break;
+            }
+        }
+    }
+
+    // Wall alcoves: only rolled on chunks that actually touch a strip
+    // edge (onSideWall in netherFillColumn is the same condition). y-span
+    // is bounded to the lava-level-to-ceiling-base range, which is always
+    // within the shell regardless of that column's particular floor/
+    // ceiling height, since placeWallAlcove independently re-checks every
+    // block it touches is solid netherrack before hollowing it.
+    int y0 = NETHER_LAVA_LEVEL_Y + 1, y1 = NETHER_CEIL_BASE_Y - 2;
+    // X0/X1 edges: wall face is at a fixed x, running along z -- width
+    // varies along z, depth steps inward along x (+x for X0, -x for X1).
+    if (edgeX0 && random.nextInt(2) == 0)
+        placeWallAlcove(w, random, xo, zo + 8, /*wallRunsAlongZ=*/true, +1, y0, y1);
+    if (edgeX1 && random.nextInt(2) == 0)
+        placeWallAlcove(w, random, xo + 15, zo + 8, /*wallRunsAlongZ=*/true, -1, y0, y1);
+    // Z0/Z1 edges: wall face is at a fixed z, running along x -- width
+    // varies along x, depth steps inward along z (+z for Z0, -z for Z1).
+    if (edgeZ0 && random.nextInt(2) == 0)
+        placeWallAlcove(w, random, xo + 8, zo, /*wallRunsAlongZ=*/false, +1, y0, y1);
+    if (edgeZ1 && random.nextInt(2) == 0)
+        placeWallAlcove(w, random, xo + 8, zo + 15, /*wallRunsAlongZ=*/false, -1, y0, y1);
+}
+
 // --- Wastes structure: netherrack spire -----------------------------
 //
 // A thin rock column jutting up from the floor, tapering slightly near
@@ -667,6 +833,15 @@ static void decorateWastes(World* w, Random& random, int xo, int zo) {
             break;
         }
     }
+
+    // Cave texture: stalactites, stalagmites, wall alcoves. Edge flags
+    // recomputed here rather than threaded through from netherFillColumn --
+    // cheap (4 comparisons, same test that function already makes) and
+    // keeps this call self-contained.
+    int cx = xo / 16, cz = zo / 16;
+    bool edgeX0 = isNetherStripEdgeX0(w, cx), edgeX1 = isNetherStripEdgeX1(w, cx);
+    bool edgeZ0 = isNetherStripEdgeZ0(w, cz), edgeZ1 = isNetherStripEdgeZ1(w, cz);
+    decorateWastesCaveTexture(w, random, xo, zo, edgeX0, edgeX1, edgeZ0, edgeZ1);
 }
 
 static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {

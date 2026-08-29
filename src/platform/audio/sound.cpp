@@ -66,6 +66,23 @@ static bool loadPack(const char* path) {
     }
     fclose(f);
 
+    // Defensive validation: name is a fixed-width char[NAME_LEN] field read
+    // straight off disk, and findFirst()/soundPlay() strcmp() against it on
+    // every single sound call. If a pack entry's name fills all NAME_LEN
+    // bytes with no room left for a terminator (or the pack is otherwise
+    // corrupt), strcmp reads past the end of that Entry into whatever
+    // follows -- offset/frames, the next Entry, and eventually unmapped
+    // memory -- which reads as an intermittent, load-dependent crash rather
+    // than a deterministic one, since it only actually faults once the scan
+    // walks far enough to hit a bad page. That failure mode fits a burst of
+    // near-simultaneous sound calls (many mobs alerting/vocalizing at once)
+    // far better than it fits a single call, even though the bug itself has
+    // nothing to do with mob count. Force-terminate defensively here, once,
+    // at load time, rather than trusting every future strcmp against it.
+    for (int i = 0; i < count; i++) {
+        index[i].name[NAME_LEN - 1] = '\0';
+    }
+
     g_index   = index;
     g_count   = count;
     g_pcm     = pcm;
