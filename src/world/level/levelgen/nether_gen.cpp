@@ -485,6 +485,14 @@ static bool isNetherrackFace(World* w, int x, int y, int z) {
 // available headroom (scanning DOWN from the ceiling face, the mirror of
 // netherHeadroom's upward scan) and tapers near the tip so a field of
 // these doesn't read as a picket fence.
+//
+// Forward declaration: netherHeadroom's real definition sits much further
+// down (originally written for the huge-fungus generator, which comes
+// after all the Wastes cave-texture code in file order), but
+// placeStalagmite below needs it now too. A forward declaration here is
+// safer than moving the ~400-line block between them.
+static int netherHeadroom(World* w, int x, int y, int z, int cap);
+
 static void placeStalactite(World* w, Random& random, int x, int y, int z) {
     // y is the topmost AIR block directly under the ceiling face (i.e.
     // worldBlock(x,y,z) == AIR, worldBlock(x,y+1,z) == NETHERRACK).

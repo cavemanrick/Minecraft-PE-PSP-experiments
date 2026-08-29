@@ -4,7 +4,6 @@
 #include "world/level/chunk/chunk.h"
 #include "world/level/tile/nether_portal.h"
 #include "world/entity/player.h"
-#include "world/entity/local_player.h"
 #include "world/inventory/inventory.h"
 #include "world/item/item.h"
 #include "world/item/item_instance.h"

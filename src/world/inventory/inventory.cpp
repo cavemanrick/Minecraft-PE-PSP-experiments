@@ -54,6 +54,7 @@ static const short kPalette[] = {
 
     ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
     ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
+    ITEM_SPAWN_EGG,
 };
 static const unsigned char kPaletteData[] = {
 
@@ -87,6 +88,12 @@ static const unsigned char kPaletteData[] = {
     0,
     12, 11, 10, 13,
     32, 33, 34, 35, 36,
+    37, // strider (EntityTypes::IdStrider) -- was never added when the
+        // strider was implemented, so the Creative picker had no way to
+        // give one out even though MobFactory/EntityFactory both handle
+        // id 37 correctly. This is the same "table not updated when the
+        // mob was added" gap spawnEggColors (spawn_egg_colors.h) has for
+        // its cosmetic egg-color entry -- fixed alongside this one.
 };
 static const int kPaletteCount = (int)(sizeof(kPalette) / sizeof(kPalette[0]));
 static_assert((sizeof(kPaletteData) / sizeof(kPaletteData[0])) == (sizeof(kPalette) / sizeof(kPalette[0])),
