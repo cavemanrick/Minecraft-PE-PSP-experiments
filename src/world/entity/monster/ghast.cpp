@@ -10,6 +10,7 @@
 #include "world/item/item.h"
 #include "world/achievement/achievement.h"
 #include "nbt/compound_tag.h"
+#include "util/mth.h"
 #include <cmath>
 
 // Ticks between shots once one has fired. The wiki gives "every 3
