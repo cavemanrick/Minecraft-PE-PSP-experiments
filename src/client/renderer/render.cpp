@@ -34,6 +34,7 @@
 #include "world/level/levelgen/Random.h"
 #include "world/level/levelgen/level_source.h"
 #include "world/level/levelgen/features.h"
+#include "world/level/levelgen/cheat_spawn_content.h"
 #include <cstdlib>
 #include <pspgu.h>
 #include <pspgum.h>
@@ -1115,6 +1116,19 @@ void gameRender(MenuState& s) {
 
             if (g_quitAfterSave) {
                 g_quitAfterSave = false;
+                // Achievements are per-world and only get flushed to disk
+                // on their own dirty-save timer, on process exit
+                // (achievementsShutdown), or lazily the next time a
+                // (possibly different) world is loaded (achievementsInit's
+                // flush-before-switch, right after setActiveWorld above).
+                // Quitting to the title screen mid-session hits none of
+                // those: the process keeps running, so shutdown hasn't
+                // fired, and the player might not start another world
+                // before suspending/closing the PSP. Save explicitly here
+                // too, at the same point the world itself just finished
+                // saving, so progress from this session survives even if
+                // nothing else in the app happens to trigger a flush.
+                achievementsSave();
                 quitToMenuNoSave(s);
                 s.screen = SCREEN_TITLE;
             }
@@ -1189,6 +1203,12 @@ void gameRender(MenuState& s) {
             LevelStorage::setActiveWorld(tArgs.dir, tArgs.seed, tArgs.gamemode, tArgs.name,
                                          tArgs.worldType, tArgs.genMask, tArgs.sizeX, tArgs.sizeZ);
             worldListTouch(tArgs.dir);
+            // Achievements are per-world (achievement.cpp), so the active
+            // world changing means a different achievements.dat is now
+            // the right one -- reload here, right where the world itself
+            // becomes active, the same way worldListTouch already does
+            // its own per-world bookkeeping at this exact point.
+            achievementsInit();
 
             playerSpawnEnsure();
             g_loadedFromDisk = false;
@@ -1208,7 +1228,8 @@ void gameRender(MenuState& s) {
                     { int sx, sz, feetY; worldFindSpawn(a->w, &sx, &sz, &feetY);
                       g_level.player->x = sx + 0.5f; g_level.player->z = sz + 0.5f;
                       g_level.player->y = feetY + PLAYER_EYE;
-                      if (a->worldType == WORLD_TYPE_DEBUG) placeDebugSpawnContent(a->w, sx, sz, feetY); }
+                      if (a->worldType == WORLD_TYPE_DEBUG) placeDebugSpawnContent(a->w, sx, sz, feetY);
+                      if (g_cheatWorldPending) placeCheatSpawnContent(a->w, sx, sz, feetY); }
                     g_genPhase = 1;
                     g_saveShowProgress = false;
                     LevelStorage::save(a->w, a->dir, a->seed, a->gamemode, a->name, true);
@@ -1238,7 +1259,8 @@ void gameRender(MenuState& s) {
                       g_level.player->x = sx + 0.5f; g_level.player->z = sz + 0.5f;
                       g_level.player->y = feetY + PLAYER_EYE;
                       if (LevelStorage::getActiveWorldType() == WORLD_TYPE_DEBUG)
-                          placeDebugSpawnContent(&g_world, sx, sz, feetY); }
+                          placeDebugSpawnContent(&g_world, sx, sz, feetY);
+                      if (g_cheatWorldPending) placeCheatSpawnContent(&g_world, sx, sz, feetY); }
                     g_genPhase = 1;
                     g_saveShowProgress = false;
                     LevelStorage::save(&g_world, tArgs.dir, seedVal, tArgs.gamemode, tArgs.name, true);

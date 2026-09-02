@@ -40,4 +40,15 @@ struct McpeGen {
     int mPhaseBiome;
 };
 
+// True if a real, sufficiently deep body of open water exists at world
+// column (wx,wz) -- see McpeGen_isOceanAt's definition in mcpegen.cpp for
+// what "sufficiently deep" means and why this has to reproduce
+// getHeights' density formula rather than call it. Exposed here (not just
+// static in mcpegen.cpp) because the mushroom island's seed-placement
+// search in biome.cpp needs it, and that search runs before any per-chunk
+// generation -- see ensureBiomeSeeds' own comment on why it builds a
+// throwaway McpeGen just for this rather than depending on mcpegen.cpp's
+// file-static g_gen.
+bool McpeGen_isOceanAt(McpeGen* g, float wx, float wz);
+
 #endif

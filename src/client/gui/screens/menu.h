@@ -17,6 +17,8 @@ static const float VH = 272.0f / UI_SCALE;
 static const unsigned int WHITE = 0xFFFFFFFFu;
 static const unsigned int DIRT_TINT = 0xFF404040u;
 
+class Screen;
+
 struct MenuState {
     AppScreen screen;
 
@@ -186,6 +188,11 @@ extern bool g_furnaceOpen;
 void furnaceOpen(FurnaceTileEntity* fe);
 extern bool g_chestOpen;
 void chestOpen(ChestTileEntity* ce);
+extern bool g_tradeOpen;
+class Villager;
+void tradeOpen(Villager* villager);
+void tradeClose();
+Screen* tradeScreen();
 
 void chestClose();
 

@@ -20,6 +20,8 @@
 #include "gpu/spawn_egg_colors.h"
 #include "world/achievement/achievement.h"
 
+extern bool g_tradeOpen;
+
 #define CHAT_LINES 4
 #define CHAT_SHOW_S 10.0f
 static char  s_chat[CHAT_LINES][64];
@@ -467,6 +469,7 @@ const char* getBlockName(short id, unsigned char data) {
                     case 34: return "Spawn Skeleton";
                     case 35: return "Spawn Spider";
                     case 36: return "Spawn Zombie Pigman";
+                    case 37: return "Spawn Strider";
                     default: return "Spawn Egg";
                 }
             case ITEM_BED_ITEM: return "Bed";
@@ -911,7 +914,7 @@ void hotbarDraw(MenuState& s) {
     }
     }
 
-    bool overlayUp = g_invOpen || g_chestOpen || g_furnaceOpen ||
+    bool overlayUp = g_invOpen || g_chestOpen || g_furnaceOpen || g_tradeOpen ||
                      g_craftOpen || g_armorOpen || g_paused ||
                      (sleeping && g_barOnTop);
     extern int g_cloudTicks;

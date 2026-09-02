@@ -19,6 +19,7 @@ static inline bool spawnEggColors(short data, unsigned int* base, unsigned int* 
         case 34: c1 = 0xc1c1c1; c2 = 0x494949; break;
         case 35: c1 = 0x342d27; c2 = 0xa80e0e; break;
         case 36: c1 = 0xea9393; c2 = 0x4c7129; break;
+        case 37: c1 = 0x9c3436; c2 = 0x4d494d; break; // strider (EntityTypes::IdStrider) -- real vanilla values
         default: *base = *spot = 0xFFFFFFFFu; return false;
     }
     *base = eggAbgr(c1);

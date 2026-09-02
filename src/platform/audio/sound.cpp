@@ -38,6 +38,7 @@ static unsigned int       g_srcRate = 22050;
 static Voice              g_voices[MAX_VOICES];
 static int                g_channel = -1;
 static float              g_master  = 1.0f;
+static SceUID              g_voiceSema = -1;
 
 static bool loadPack(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -52,7 +53,7 @@ static bool loadPack(const char* path) {
     int count = (int)header[1];
     unsigned int pcmBytes = header[2];
     unsigned int rate     = header[3];
-    if (count <= 0 || !rate) { fclose(f); return false; }
+    if (count <= 0 || !rate || pcmBytes == 0 || pcmBytes > (64u * 1024u * 1024u)) { fclose(f); return false; }
 
     Entry* index      = (Entry*)malloc(sizeof(Entry) * count);
     signed char* pcm  = (signed char*)malloc(pcmBytes);
@@ -81,6 +82,16 @@ static bool loadPack(const char* path) {
     // at load time, rather than trusting every future strcmp against it.
     for (int i = 0; i < count; i++) {
         index[i].name[NAME_LEN - 1] = '\0';
+        // PCM is signed 8-bit mono: one byte per frame. Reject any entry
+        // whose range would point outside the loaded PCM buffer. Without
+        // this, a corrupt/incorrect pack can make the mixer dereference an
+        // arbitrary address later, often only after several voices are
+        // active and the bad sound actually gets mixed.
+        if (index[i].offset > pcmBytes || index[i].frames > pcmBytes - index[i].offset) {
+            free(index);
+            free(pcm);
+            return false;
+        }
     }
 
     g_index   = index;
@@ -103,12 +114,15 @@ static int findFirst(const char* name) {
 }
 
 void soundMixBlock(short* out) {
+    if (!out) return;
+    if (g_voiceSema >= 0) sceKernelWaitSema(g_voiceSema, 1, 0);
     bool any = false;
     for (int v = 0; v < MAX_VOICES; v++) {
         if (g_voices[v].playing) { any = true; break; }
     }
     if (!any) {
         memset(out, 0, SAMPLE_COUNT * 2 * sizeof(short));
+        if (g_voiceSema >= 0) sceKernelSignalSema(g_voiceSema, 1);
         return;
     }
 
@@ -142,6 +156,8 @@ void soundMixBlock(short* out) {
         if (sample < -32768) sample = -32768;
         out[i * 2] = out[i * 2 + 1] = (short)sample;
     }
+
+    if (g_voiceSema >= 0) sceKernelSignalSema(g_voiceSema, 1);
 }
 
 static int mixerThread(SceSize , void* ) {
@@ -171,9 +187,22 @@ void soundInit(void) {
     g_channel = sceAudioChReserve(0, SAMPLE_COUNT, PSP_AUDIO_FORMAT_STEREO);
     if (g_channel < 0) return;
 
+    g_voiceSema = sceKernelCreateSema("sound_voices", 0, 1, 1, 0);
+    if (g_voiceSema < 0) {
+        sceAudioChRelease(g_channel);
+        g_channel = -1;
+        return;
+    }
+
     int thid = sceKernelCreateThread("sound_thread", mixerThread, 0x12, 0x10000,
                                      PSP_THREAD_ATTR_USER, 0);
-    if (thid < 0) return;
+    if (thid < 0) {
+        sceKernelDeleteSema(g_voiceSema);
+        g_voiceSema = -1;
+        sceAudioChRelease(g_channel);
+        g_channel = -1;
+        return;
+    }
     sceKernelStartThread(thid, 0, 0);
 }
 
@@ -201,6 +230,8 @@ void soundPlay(const char* name, float volume, float pitch) {
     int first = findFirst(name);
     if (first < 0) return;
 
+    if (g_voiceSema >= 0) sceKernelWaitSema(g_voiceSema, 1, 0);
+
     int variants = 1;
     while (first + variants < g_count &&
            strcmp(g_index[first + variants].name, name) == 0)
@@ -211,7 +242,10 @@ void soundPlay(const char* name, float volume, float pitch) {
     for (int v = 0; v < MAX_VOICES; v++) {
         if (!g_voices[v].playing) { s = &g_voices[v]; break; }
     }
-    if (!s) return;
+    if (!s) {
+        if (g_voiceSema >= 0) sceKernelSignalSema(g_voiceSema, 1);
+        return;
+    }
 
     if (volume > 1.0f) volume = 1.0f;
     if (pitch < 0.1f) pitch = 0.1f;
@@ -223,4 +257,6 @@ void soundPlay(const char* name, float volume, float pitch) {
     s->step       = (unsigned int)(((float)g_srcRate / SAMPLE_RATE) * pitch * 65536.0f);
     s->vol        = (int)(volume * 4096.0f);
     s->playing    = 1;
+
+    if (g_voiceSema >= 0) sceKernelSignalSema(g_voiceSema, 1);
 }

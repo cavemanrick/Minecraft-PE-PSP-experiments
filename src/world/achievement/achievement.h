@@ -9,10 +9,12 @@
 // every achievement, no persistent per-block bookkeeping.
 //
 // Storage: an unlocked bitmask plus a small number of progress counters,
-// written as flat binary to a global (not per-world) save file via the
-// same fopen/assetPath convention already used by options.txt. Achievement
-// progress is a player-profile concept on PSP, not a per-world one, so it
-// deliberately lives outside saves/<world>/.
+// written as flat binary inside the active world's own save directory
+// (saves/<name>/achievements.dat), via the same fopen/fwrite convention
+// options.txt's global settings already use, just at a per-world path
+// instead of the shared install directory. Achievement progress is
+// per-world here (deliberately -- see achievementsInit's comment), not a
+// player-profile concept shared across every world.
 
 #define ACHV_MAX 40
 
@@ -100,6 +102,18 @@ void achievementsShutdown();      // flush any pending save
 void achvOnBlockMined(unsigned char blockId, int y);
 void achvOnBlockPlaced(unsigned char blockId);
 void achvOnMobKilled(int entityTypeId, float killDistance);
+// Narrow, purpose-built hook rather than folding this into
+// achvOnMobKilled: "killed by a fireball the player personally deflected"
+// isn't expressible from entityTypeId + killDistance, and stretching the
+// generic hostile-kill signature to carry a one-achievement-only bit of
+// context would compromise its own deliberately narrow scope (see
+// isHostileEntityType's comment in achievement.cpp). Ghast::die() calls
+// achvOnMobKilled as usual for the shared hostile-kill counters, then
+// this separately, only when the fireball that killed it had actually
+// been hit back by the player -- matching vanilla's real "Return to
+// Sender" condition (killed BY ITS OWN deflected fireball), not just
+// "a ghast died somehow while a fireball was involved."
+void achvOnGhastReturnToSender();
 void achvOnItemCrafted(short itemId);
 void achvOnItemObtained(short itemId);
 void achvOnBiomeEntered(int biomeId);          // overworld BiomeId

@@ -71,9 +71,9 @@
 #define NETHER_SCAN_MIN_Y       NETHER_BASIN_FLOOR_Y
 
 // Budget check, worst case: land top 21+7 = 28; ceiling bottom 46-7 = 39;
-// gap = 11, one clear of NETHER_MIN_GAP. The clamp below therefore never
-// fires on ordinary terrain and exists purely as a guard for the rare
-// touch-point columns' neighbours.
+// gap = 11, one clear of NETHER_MIN_GAP. The clamp below is retained as a
+// guard against future terrain-noise changes, but the old floor-to-ceiling
+// touch-point pillars are no longer generated.
 
 #define MCPE_PI 3.14159265f
 
@@ -103,7 +103,6 @@ static bool s_noiseReady = false;
 static long s_noiseForSeed = 0;
 static PerlinNoise* s_floorNoise = 0;   // land relief + which columns are sea
 static PerlinNoise* s_ceilNoise = 0;    // ceiling-hill depth
-static PerlinNoise* s_touchNoise = 0;   // sparse field picking touch-point columns
 static PerlinNoise* s_riverNoise = 0;   // ridged field tracing lava river channels
 
 // --- Field calibration ----------------------------------------------------
@@ -165,11 +164,8 @@ static PerlinNoise* s_riverNoise = 0;   // ridged field tracing lava river chann
 // (min()), so it cannot raise a bank out of a sea or fill a basin.
 #define NETHER_RIVER_BANK_EXTRA    0.075f
 
-#define NETHER_TOUCH_FRACTION      0.015f // columns allowed to become floor-to-ceiling pillars
-
 #define NETHER_HILL_NOISE_SCALE  0.02f
 #define NETHER_RIVER_NOISE_SCALE 0.010f
-#define NETHER_TOUCH_NOISE_SCALE 0.008f
 
 // Calibrated thresholds, in the fields' own raw units.
 static float s_seaThreshold    = 0.0f;
@@ -181,7 +177,6 @@ static float s_riverMedian     = 0.0f;
 static float s_riverHalfWidth  = 0.0f;
 static float s_riverShoreOuter = 0.0f;
 static float s_riverBankOuter  = 0.0f;
-static float s_touchThreshold  = 0.0f;
 
 // 40x40 samples across the strip. 1600 noise evaluations per field, four
 // fields, once per world -- negligible against the cost of generating even
@@ -226,12 +221,10 @@ static void ensureNetherNoise(long worldSeed, const World* w) {
     // share the same world seed.
     Random rf(worldSeed ^ 0x466C6F6FL); // "Floo"r
     Random rc(worldSeed ^ 0x4365696CL); // "Ceil"
-    Random rt(worldSeed ^ 0x546F7563L); // "Touc"h
     Random rr(worldSeed ^ 0x52697665L); // "Rive"r
-    delete s_floorNoise; delete s_ceilNoise; delete s_touchNoise; delete s_riverNoise;
+    delete s_floorNoise; delete s_ceilNoise; delete s_riverNoise;
     s_floorNoise = new PerlinNoise(&rf, 4);
     s_ceilNoise  = new PerlinNoise(&rc, 4);
-    s_touchNoise = new PerlinNoise(&rt, 2);
     s_riverNoise = new PerlinNoise(&rr, 3);
 
     // Calibrate over where this world's Nether actually is. The strip's X
@@ -273,9 +266,6 @@ static void ensureNetherNoise(long worldSeed, const World* w) {
     // each band's fraction is the EXTRA columns it adds, not its own total.
     s_riverBankOuter  = netherCalAt(n, NETHER_RIVER_FRACTION + NETHER_RIVER_SHORE_EXTRA
                                        + NETHER_RIVER_BANK_EXTRA);
-
-    n = netherCalSample(s_touchNoise, NETHER_TOUCH_NOISE_SCALE, ox, oz);
-    s_touchThreshold = netherCalAt(n, 1.0f - NETHER_TOUCH_FRACTION);
 
     s_noiseForSeed = worldSeed;
     s_noiseReady = true;
@@ -376,17 +366,6 @@ static int ceilHillDepth(int gx, int gz) {
     return (int)((0.35f + 0.65f * t) * t * (float)NETHER_CEIL_HILL_MAX + 0.5f);
 }
 
-// True for the rare columns chosen to be touch-point pillars, where the
-// floor and ceiling are deliberately allowed to meet instead of being held
-// apart by NETHER_MIN_GAP. Sparse low-frequency noise thresholded very
-// high, so genuine touch points are isolated rather than forming a whole
-// wall of pillars.
-static bool isTouchPointColumn(int gx, int gz) {
-    float v = s_touchNoise->getValue(gx * NETHER_TOUCH_NOISE_SCALE,
-                                     gz * NETHER_TOUCH_NOISE_SCALE);
-    return v >= s_touchThreshold;
-}
-
 // --- Bulk fill: bedrock box, netherrack slab, carved lava, ceiling hills --
 
 static void netherFillColumn(World* w, int cx, int cz) {
@@ -412,27 +391,22 @@ static void netherFillColumn(World* w, int cx, int cz) {
             int rockTop = netherRockTop(gx, gz);
             int ceilH   = ceilHillDepth(gx, gz);
 
-            if (!isTouchPointColumn(gx, gz)) {
-                // Hold the two layers apart by at least NETHER_MIN_GAP. Only
-                // the ceiling is ever shortened here: trimming the floor
-                // instead could drop a land column below the lava level and
-                // silently flood it, turning "this cavern was a bit tight"
-                // into "there is a lake here", which is exactly the kind of
-                // coupling the carved model exists to remove.
-                int ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
-                int gap = ceilBottomY - rockTop;
-                if (gap < NETHER_MIN_GAP) {
-                    int deficit = NETHER_MIN_GAP - gap;
-                    ceilH = (ceilH - deficit < 0) ? 0 : ceilH - deficit;
-                }
-            }
-            // touch==true columns skip the clamp entirely -- their floor and
-            // ceiling heights are used as-is, and since both noise fields
-            // tend toward their extremes near the same low-frequency peaks
-            // the touch field selects, they naturally meet or nearly meet
-            // without either height needing to be force-inflated.
-
+            // Keep a real navigable gap everywhere. The old touch-point
+            // field deliberately allowed the floor and ceiling to meet,
+            // producing vertical netherrack pillars/walls that looked like
+            // generation artifacts rather than Nether terrain. The ceiling
+            // is shortened when necessary; the floor is never raised or
+            // lowered by this safety pass, so lava coverage remains stable.
             int ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
+            int gap = ceilBottomY - rockTop;
+            if (gap < NETHER_MIN_GAP) {
+                int deficit = NETHER_MIN_GAP - gap;
+                ceilH = (ceilH - deficit < 0) ? 0 : ceilH - deficit;
+                // ceilH just changed, so ceilBottomY -- which the fill loop
+                // below depends on -- must be recomputed from the clamped
+                // value rather than left pointing at the pre-clamp height.
+                ceilBottomY = NETHER_CEIL_BASE_Y - ceilH;
+            }
 
             for (int y = 0; y < NETHER_H; y++) {
                 unsigned char id;
@@ -635,48 +609,6 @@ static void decorateWastesCaveTexture(World* w, Random& random, int xo, int zo,
         placeWallAlcove(w, random, xo + 8, zo + 15, /*wallRunsAlongZ=*/false, -1, y0, y1);
 }
 
-// --- Wastes structure: netherrack spire -----------------------------
-//
-// A thin rock column jutting up from the floor, tapering slightly near
-// the top and optionally capped with magma or glowstone. This is purely
-// ambient decoration for the otherwise-empty Nether Wastes biome -- no
-// footprint validation or chunk-rejection the way the fortress/dungeon
-// generators need, since a spire that fails its headroom check simply
-// isn't placed and the biome falls back to its existing flat terrain,
-// which was already the status quo.
-//
-// Height is capped conservatively (5-8 blocks) against NETHER_MIN_GAP
-// (10): even the tallest possible spire leaves at least 2 blocks of
-// clearance below the lowest the ceiling can ever sit relative to a
-// floor column directly below it, so there's no need to re-derive the
-// ceiling height here -- the local headroom scan below is the real
-// authority and the height cap is just a sane upper bound to roll from.
-static void placeNetherrackSpire(World* w, Random& random, int x, int y, int z) {
-    if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) return;
-    if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) return;
-
-    int wantHeight = 5 + random.nextInt(4);
-    int headroom = 0;
-    while (headroom < wantHeight && worldBlock(w, x, y + 1 + headroom, z) == BLOCK_AIR) headroom++;
-    int height = headroom < wantHeight ? headroom : wantHeight;
-    if (height < 3) return; // too little clearance to read as a spire; skip rather than stub
-
-    for (int h = 1; h <= height; h++) {
-        // Tapers near the top: the last two blocks have a chance to skip,
-        // giving an irregular jagged silhouette instead of a perfect rod.
-        if (h > height - 2 && random.nextInt(3) == 0) continue;
-        blockPut(w, x, y + h, z, BLOCK_NETHERRACK);
-    }
-
-    // Occasional accent cap -- magma reads as a scorched tip, glowstone
-    // as a light source that also helps the spire read from a distance.
-    // Never both; capChance keeps most spires plain rock, matching how
-    // sparse the existing magma-blob decoration already is in this biome.
-    int capRoll = random.nextInt(6);
-    if (capRoll == 0) blockPut(w, x, y + height + 1, z, BLOCK_MAGMA);
-    else if (capRoll == 1) blockPut(w, x, y + height + 1, z, BLOCK_GLOWSTONE);
-}
-
 // --- Wastes structure: small obsidian formation -----------------------
 //
 // A squat, irregular blob of obsidian sitting on the floor -- reads as a
@@ -817,21 +749,6 @@ static void decorateWastes(World* w, Random& random, int xo, int zo) {
         }
     }
 
-    // Spires and obsidian formations: the actual "give Wastes some
-    // structure" pass. One roll each per chunk, independent of the magma
-    // above -- both search for the topmost exposed floor column the same
-    // way decorateSoulSandValley already does for its floor material,
-    // since spires/formations need to sit on *any* floor surface, not
-    // specifically the narrow lava-shoreline band magma targets.
-    if (random.nextInt(3) == 0) {
-        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
-        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
-            if (worldBlock(w, x, y, z) != BLOCK_NETHERRACK) continue;
-            if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
-            placeNetherrackSpire(w, random, x, y, z);
-            break;
-        }
-    }
     if (random.nextInt(4) == 0) {
         int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
         for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {

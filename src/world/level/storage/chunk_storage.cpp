@@ -2,6 +2,7 @@
 #include "world/level/storage/region_file.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
+#include "world/level/levelgen/village_gen.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -20,11 +21,13 @@
 static const int CH_BLOCKS = 16 * 16 * 128;
 static const int CH_NIBBLE = CH_BLOCKS / 2;
 static const int CH_COLS   = 256;
-static const int CH_PAYLOAD = CH_BLOCKS + CH_NIBBLE * 3 + CH_COLS;
+static const int CH_VILLAGER_BYTES = 4;
+static const int CH_PAYLOAD = CH_BLOCKS + CH_NIBBLE * 3 + CH_COLS + CH_VILLAGER_BYTES;
 static const int OFF_DATA = CH_BLOCKS;
 static const int OFF_SKY  = OFF_DATA + CH_NIBBLE;
 static const int OFF_BLK  = OFF_SKY  + CH_NIBBLE;
 static const int OFF_UPD  = OFF_BLK  + CH_NIBBLE;
+static const int OFF_VILLAGER = OFF_UPD + CH_COLS;
 
 static const unsigned char CH_UNPOPULATED = 0x5A;
 
@@ -178,6 +181,13 @@ bool chunkStorageLoad(World* w, int cx, int cz, bool* outGotLight, bool* outPopu
 
     if (chunkHasLight)
         lightLoadChunk(w, cx, cz, buf + OFF_SKY, buf + OFF_BLK);
+
+    // Villager state is part of the chunk payload, not entities.dat.
+    // Old chunks simply have no marker and therefore no villager until a
+    // newly generated village is saved in the new format.
+    villageChunkLoaded(w, cx, cz,
+                       len >= OFF_VILLAGER + CH_VILLAGER_BYTES ? buf + OFF_VILLAGER : 0,
+                       len >= OFF_VILLAGER + CH_VILLAGER_BYTES ? CH_VILLAGER_BYTES : 0);
     delete[] buf;
     return true;
 }
@@ -215,6 +225,7 @@ bool chunkStorageSave(World* w, int cx, int cz) {
             }
         }
     }
+    villageChunkSaveData(w, cx, cz, buf + OFF_VILLAGER, CH_VILLAGER_BYTES);
     if (!rf->writeChunk(cx & 31, cz & 31, buf, CH_PAYLOAD)) return false;
     worldSlot(w, cx, cz)->unsaved = false;
     return true;

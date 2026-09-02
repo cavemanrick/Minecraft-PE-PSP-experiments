@@ -5,6 +5,9 @@
 #include "world/level/levelgen/loot_table.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
+#include "world/level/level.h"
+#include "world/entity/entity.h"
+#include "world/entity/villager.h"
 
 // A deliberately small village system. Each village lives entirely inside
 // one 16x16 chunk, which avoids cross-chunk structure bookkeeping on PSP.
@@ -31,6 +34,8 @@ static int s_villageChunkZ[MAX_TRACKED_VILLAGES];
 static int s_villageCount = 0;
 
 static void registerVillageChunk(int chunkX, int chunkZ) {
+    for (int i = 0; i < s_villageCount; ++i)
+        if (s_villageChunkX[i] == chunkX && s_villageChunkZ[i] == chunkZ) return;
     if (s_villageCount >= MAX_TRACKED_VILLAGES) return;
     s_villageChunkX[s_villageCount] = chunkX;
     s_villageChunkZ[s_villageCount] = chunkZ;
@@ -246,6 +251,73 @@ static void buildFarm(World* w, int x0, int z0, int y, bool desert) {
     }
 }
 
+
+static const unsigned char VILLAGER_SAVE_MARKER = 0x56;
+
+static Villager* findLoadedVillager(Level* level, int chunkX, int chunkZ) {
+    if (!level) return 0;
+    for (size_t i = 0; i < level->entities.size(); ++i) {
+        Entity* e = level->entities[i];
+        if (!e || e->removed || e->getEntityTypeId() != EntityTypes::IdVillager) continue;
+        int ecx = (int)floorf(e->x) >> 4;
+        int ecz = (int)floorf(e->z) >> 4;
+        if (ecx == chunkX && ecz == chunkZ) return (Villager*)e;
+    }
+    return 0;
+}
+
+static void spawnVillageVillager(World* w, int chunkX, int chunkZ,
+                                  const unsigned char* uses) {
+    extern Level g_level;
+    if (!w || g_level.w != w || findLoadedVillager(&g_level, chunkX, chunkZ)) return;
+    // Never push villagers onto the heap if the fixed entity pool is full.
+    // A village simply becomes villager-less until its chunk is reloaded.
+    if (!Entity::hasFreeSlot()) return;
+    if (!worldChunkInBounds(w, chunkX, chunkZ)) return;
+
+    int gx = chunkX * 16 + 3;
+    int gz = chunkZ * 16 + 3;
+    int sy = villageHeight(w, gx, gz);
+    if (sy <= 0 || sy + 2 >= WORLD_H) return;
+
+    Villager* v = new Villager(&g_level);
+    v->setPos((float)gx + 0.5f, (float)sy, (float)gz + 0.5f);
+    if (uses) v->setTradeUses(uses);
+    g_level.addEntity(v);
+}
+
+void villageChunkLoaded(World* w, int chunkX, int chunkZ,
+                        const unsigned char* data, int dataLen) {
+    if (!w) return;
+    if (data && dataLen >= 4 && data[0] == VILLAGER_SAVE_MARKER) {
+        registerVillageChunk(chunkX, chunkZ);
+        spawnVillageVillager(w, chunkX, chunkZ, data + 1);
+    }
+}
+
+void villageChunkSaveData(World* w, int chunkX, int chunkZ,
+                          unsigned char* out, int outLen) {
+    if (!out || outLen < 4) return;
+    out[0] = 0;
+    out[1] = out[2] = out[3] = 0;
+
+    Villager* v = findLoadedVillager(&g_level, chunkX, chunkZ);
+    if (!v) return;
+    out[0] = VILLAGER_SAVE_MARKER;
+    v->getTradeUses(out + 1);
+}
+
+void villageChunkUnloaded(Level* level, int chunkX, int chunkZ) {
+    if (!level) return;
+    for (size_t i = 0; i < level->entities.size(); ++i) {
+        Entity* e = level->entities[i];
+        if (!e || e->removed || e->getEntityTypeId() != EntityTypes::IdVillager) continue;
+        int ecx = (int)floorf(e->x) >> 4;
+        int ecz = (int)floorf(e->z) >> 4;
+        if (ecx == chunkX && ecz == chunkZ) e->remove();
+    }
+}
+
 void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
     unsigned int h = villageHash(worldSeed, chunkX, chunkZ);
     // Roughly one candidate chunk in 32, but only a fraction of those
@@ -276,7 +348,11 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
     if (!villageFlatEnough(w, chunkX, chunkZ, baseY)) return;
     flatten(w, chunkX, chunkZ, baseY, desert);
     registerVillageChunk(chunkX, chunkZ);
+    spawnVillageVillager(w, chunkX, chunkZ, 0);
 
+    // A generated villager is gameplay state, not just discovery metadata.
+    // If the compact entity pool is temporarily full it may be absent now;
+    // the next reload of this chunk can try again.
     int ox = chunkX * 16, oz = chunkZ * 16;
 
     // Loot rolls are seeded once per village from the same hash used for

@@ -7,7 +7,7 @@
 #include <pspgu.h>
 
 extern bool g_worldBuilt;
-extern bool g_craftOpen, g_armorOpen, g_furnaceOpen, g_chestOpen, g_deadScreen;
+extern bool g_craftOpen, g_armorOpen, g_furnaceOpen, g_chestOpen, g_tradeOpen, g_deadScreen;
 
 void Screen::render(MenuState& s) {
     renderBackground(s);
@@ -55,5 +55,6 @@ Screen* overlayScreen() {
     if (g_armorOpen)    return &armorScreen();
     if (g_furnaceOpen)  return &furnaceScreen();
     if (g_chestOpen)    return &chestScreen();
+    if (g_tradeOpen)     return &tradeScreen();
     return 0;
 }

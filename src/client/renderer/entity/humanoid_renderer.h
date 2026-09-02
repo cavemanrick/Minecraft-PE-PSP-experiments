@@ -8,7 +8,7 @@
 class HumanoidRenderer : public EntityRenderer {
 public:
 
-    explicit HumanoidRenderer(const char* texPath, bool thin = false, bool bow = false, short holdItem = 0);
+    explicit HumanoidRenderer(const char* texPath, bool thin = false, bool bow = false, short holdItem = 0, bool texture64 = false);
     virtual void render(Entity* entity, float x, float y, float z, float rot, float a);
 
 private:
@@ -18,6 +18,7 @@ private:
     bool    thin;
     bool    bow;
     short   holdItem;
+    bool    texture64;
 };
 
 #endif

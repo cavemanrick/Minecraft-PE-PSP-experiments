@@ -33,16 +33,27 @@ void Player::dismountVehicle() {
     // Put the player just to the side of the vehicle.  This deliberately
     // uses only the base Entity geometry so the player class does not need
     // to know which mob is being ridden.
+    //
+    // sideY/v->y are the VEHICLE's feet-relative ground height (matching
+    // whatever heightOffset the vehicle uses, e.g. 0 for Strider). The
+    // player's own y is its eye/reference position (heightOffset ==
+    // PLAYER_EYE), so writing sideY/v->y straight into the player's y with
+    // no conversion put the player's EYES at the vehicle's foot height,
+    // sinking the player's actual feet (y - heightOffset) that far below
+    // ground on every dismount. Adding heightOffset back converts from the
+    // vehicle's ground-relative height into the player's own y-convention,
+    // the same correction Strider::syncRider (strider.cpp) needed for the
+    // mounted case.
     float sideX = x + cosf((v->yRot + 90.0f) * Mth::PI / 180.0f) * (v->bbWidth + 0.35f);
     float sideZ = z + sinf((v->yRot + 90.0f) * Mth::PI / 180.0f) * (v->bbWidth + 0.35f);
-    float sideY = v->y + 0.05f;
+    float sideY = v->y + 0.05f + heightOffset;
     if (level->isUnobstructed(AABB(sideX - bbWidth * 0.5f, sideY - heightOffset,
                                    sideZ - bbWidth * 0.5f,
                                    sideX + bbWidth * 0.5f, sideY - heightOffset + bbHeight,
                                    sideZ + bbWidth * 0.5f)))
         setPos(sideX, sideY, sideZ);
     else
-        setPos(v->x, v->y + 0.05f, v->z);
+        setPos(v->x, v->y + 0.05f + heightOffset, v->z);
     xd = yd = zd = 0.0f;
 }
 

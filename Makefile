@@ -41,6 +41,7 @@ OBJS = \
 	src/client/gui/screens/screen_armor.o \
 	src/client/gui/screens/screen_furnace.o \
 	src/client/gui/screens/screen_chest.o \
+	src/client/gui/screens/screen_trade.o \
 	src/world/level/tile/entity/furnace_tile_entity.o \
 	src/world/level/tile/entity/reactor_tile_entity.o \
 	 src/world/level/tile/entity/mob_spawner_tile_entity.o \
@@ -98,6 +99,7 @@ OBJS = \
 	src/world/entity/painting.o \
 	src/world/entity/arrow.o \
 	src/world/entity/throwable.o \
+	src/world/entity/fireball.o \
 	src/world/entity/fishing_bobber.o \
 	src/world/entity/falling_tile.o \
 	src/world/entity/primed_tnt.o \
@@ -105,6 +107,7 @@ OBJS = \
 	src/world/entity/entity_factory.o \
 	src/world/entity/path_finder_mob.o \
 	src/world/entity/mob_factory.o \
+	src/world/entity/villager.o \
 	src/world/level/mob_spawner.o \
 	src/world/entity/animal/animal.o \
 	src/world/entity/animal/pig.o \
@@ -118,6 +121,7 @@ OBJS = \
 	src/world/entity/monster/creeper.o \
 	src/world/entity/monster/spider.o \
 	src/world/entity/monster/pig_zombie.o \
+	src/world/entity/monster/ghast.o \
 	src/world/level/pathfinder/path.o \
 	src/world/level/pathfinder/path_finder.o \
 	src/client/renderer/entity/entity_render_dispatcher.o \
@@ -135,6 +139,8 @@ OBJS = \
 	src/client/renderer/entity/chicken_renderer.o \
 	src/client/renderer/entity/sheep_renderer.o \
 	src/client/renderer/entity/strider_renderer.o \
+	src/client/renderer/entity/ghast_renderer.o \
+	src/client/renderer/entity/fireball_renderer.o \
 	src/client/renderer/entity/humanoid_renderer.o \
 	src/client/renderer/entity/creeper_renderer.o \
 	src/client/renderer/entity/spider_renderer.o \

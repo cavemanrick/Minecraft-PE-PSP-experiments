@@ -18,6 +18,8 @@ namespace EntityTypes {
     const int IdSpider    = 35;
     const int IdPigZombie = 36;
     const int IdStrider   = 37;
+    const int IdGhast     = 38;
+    const int IdVillager = 39;
 
     const int IdLocalPlayer = 63;
     const int IdItemEntity  = 64;
@@ -33,6 +35,7 @@ namespace EntityTypes {
     // therefore also absent from EntityFactory::createEntity: nothing can
     // ask for one by type id, only the rod can create one.
     const int IdFishingBobber = 84;
+    const int IdFireball      = 85;
 }
 
 #endif

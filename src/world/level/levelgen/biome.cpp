@@ -103,7 +103,7 @@ static void ensureBiomeSeeds(long worldSeed, const World* w) {
     // whichever side has no near neighbour.
     //
     // Computed BEFORE the seed loop because the mushroom seed's placement
-    // depends on it -- see the clamp below.
+    // depends on it -- see the ocean search below.
     float cellMin = (cellW < cellD) ? cellW : cellD;
     s_islandRadius = cellMin * 0.28f;
 
@@ -119,28 +119,106 @@ static void ensureBiomeSeeds(long worldSeed, const World* w) {
         s_seedX[i] = centerX + jitterX;
         s_seedZ[i] = centerZ + jitterZ;
 
-        if (kBiomeOrder[i] == B_MUSHROOM) {
-            s_mushroomIdx = i;
-            // Keep the whole island inside the world. Its grid cell is the
-            // bottom-right one, so on a finite world the jitter can push
-            // the seed close enough to the edge that the island's outer
-            // rim -- moat included -- would run past the boundary and be
-            // cut off by Level::getCubes' invisible wall instead of by
-            // water. That would break the one hard guarantee this biome
-            // has: fully surrounded, every time.
-            //
-            // Only for finite worlds. An infinite world has no edge to
-            // collide with, and clamping against the arbitrary 2048-chunk
-            // fallback span would be meaningless there.
+        if (kBiomeOrder[i] == B_MUSHROOM) s_mushroomIdx = i;
+    }
+
+    // The mushroom island no longer carves its own moat -- it has to sit
+    // in real, already-existing ocean instead, wide enough that the whole
+    // island (moat-free now, so its true edge is s_islandRadius itself,
+    // not radius-minus-moat) is over deep water on every side. That means
+    // searching for a genuine site rather than trusting the grid-cell
+    // jitter above, which only ever produced a position, never a
+    // guarantee about what terrain would generate there.
+    //
+    // A throwaway McpeGen, not mcpegen.cpp's file-static g_gen: this runs
+    // the first time ANY code asks classifyBiomeSpatialEx a question,
+    // which can happen before g_gen exists for this world (or for a world
+    // that never becomes the active one, e.g. a menu preview), and
+    // g_gen's lifetime is deliberately opaque to biome.cpp. McpeGen's
+    // whole state is a deterministic function of worldSeed alone, so a
+    // second instance built from the same seed reproduces byte-identical
+    // noise fields to whatever g_gen (if any) exists elsewhere -- this
+    // is NOT a second, different terrain generator, just the one formula
+    // evaluated standalone. The construction cost (permutation tables,
+    // same as g_gen already pays once per world) is paid once here, not
+    // per chunk or per search attempt.
+    if (s_mushroomIdx >= 0) {
+        McpeGen probe(worldSeed);
+
+        // Ring of sample points at the island's true outer edge (no moat
+        // margin to lean on any more), plus the centre -- a shallow shelf
+        // near a shore could pass a centre-only check while leaving part
+        // of the island's rim on dry land, so the perimeter has to be
+        // checked too, not just assumed from one interior sample.
+        const int PERIMETER_SAMPLES = 8;
+        const int OCEAN_SEARCH_ATTEMPTS = 96;
+
+        bool found = false;
+        float foundX = 0.0f, foundZ = 0.0f;
+        for (int attempt = 0; attempt < OCEAN_SEARCH_ATTEMPTS && !found; attempt++) {
+            // Reuse the seed's own grid cell as the search area rather
+            // than scanning the whole world: the mushroom biome is still
+            // meant to occupy roughly that region relative to the other
+            // eleven, just at whichever exact spot within it turns out to
+            // be real ocean rather than at a fixed jittered point.
+            int gx = s_mushroomIdx % cols, gz = s_mushroomIdx / cols;
+            float lo = s_islandRadius + 2.0f; // +2: a little slack past the
+                                               // exact edge so a barely-
+                                               // passing perimeter sample
+                                               // isn't immediately retested
+                                               // right on the search area's
+                                               // own boundary
+            float cx = gx * cellW + lo + seedRandom.nextFloat() * (cellW - 2.0f * lo);
+            float cz = gz * cellD + lo + seedRandom.nextFloat() * (cellD - 2.0f * lo);
             if (cxChunks && czChunks) {
-                float lo = s_islandRadius + 1.0f;
+                // Same finite-world edge guard the old fixed placement
+                // used, now applied to each candidate rather than to one
+                // fixed point.
                 float hiX = worldSpanX - s_islandRadius - 1.0f;
                 float hiZ = worldSpanZ - s_islandRadius - 1.0f;
-                if (s_seedX[i] < lo)  s_seedX[i] = lo;
-                if (s_seedX[i] > hiX) s_seedX[i] = hiX;
-                if (s_seedZ[i] < lo)  s_seedZ[i] = lo;
-                if (s_seedZ[i] > hiZ) s_seedZ[i] = hiZ;
+                float loBound = s_islandRadius + 1.0f;
+                if (cx < loBound || cx > hiX || cz < loBound || cz > hiZ) continue;
             }
+
+            bool allOcean = McpeGen_isOceanAt(&probe, cx, cz);
+            for (int p = 0; allOcean && p < PERIMETER_SAMPLES; p++) {
+                float ang = (float)p / (float)PERIMETER_SAMPLES * 6.2831853f;
+                float px = cx + cosf(ang) * s_islandRadius;
+                float pz = cz + sinf(ang) * s_islandRadius;
+                if (!McpeGen_isOceanAt(&probe, px, pz)) allOcean = false;
+            }
+
+            if (allOcean) { found = true; foundX = cx; foundZ = cz; }
+        }
+
+        if (found) {
+            s_seedX[s_mushroomIdx] = foundX;
+            s_seedZ[s_mushroomIdx] = foundZ;
+        } else {
+            // No ocean found anywhere in the search budget: don't build
+            // the biome at all rather than fall back to the old fixed
+            // placement, which had no relationship to real terrain.
+            //
+            // Banish the seed itself rather than merely setting
+            // s_mushroomIdx to -1: classifyBiomeSpatialEx's nearest-seed
+            // loop below runs over ALL N_BIOMES positions regardless of
+            // s_mushroomIdx, and its "best != s_mushroomIdx" check only
+            // ever guarded the RETURN VALUE, not whether this slot could
+            // still win nearest-seed in the first place -- kBiomeOrder[i]
+            // is a fixed array, so kBiomeOrder[s_mushroomIdx] is B_MUSHROOM
+            // no matter what s_mushroomIdx's own value is. Setting
+            // s_mushroomIdx to -1 alone would leave the seed sitting at
+            // its ordinary grid-cell position, geometrically eligible to
+            // still be the nearest seed for every column around it, and
+            // classifyBiomeSpatialEx would return B_MUSHROOM for them via
+            // kBiomeOrder[best] regardless -- the exact bug this comment
+            // exists to avoid reintroducing. Moving the position far
+            // outside any real world span means the distance-squared for
+            // this seed is always astronomically larger than every other
+            // seed's, so it can never be picked as best or second.
+            s_seedX[s_mushroomIdx] = -1.0e9f;
+            s_seedZ[s_mushroomIdx] = -1.0e9f;
+            s_mushroomIdx = -1;
         }
     }
 

@@ -9,6 +9,7 @@
 #include "client/gui/screens/menu.h"
 #include "client/gui/screens/panorama.h"
 #include "client/gui/hud.h"
+#include "world/entity/villager.h"
 #include "gpu/gu.h"
 #include "gpu/button_icons.h"
 #include "world/level/tile/entity/sign_tile_entity.h"
@@ -407,10 +408,13 @@ void menuHintsDraw(MenuState& s) {
 #include "client/gamemode/gamemode.h"
 #include "world/item/crafting/recipe.h"
 #include "client/gui/hud.h"
+#include "world/entity/villager.h"
 
 void guiOpenSignEditor(SignTileEntity* te) { if (te) signStartEdit(te); }
 void guiOpenFurnace(FurnaceTileEntity* te) { if (te) furnaceOpen(te); }
 void guiOpenChest(ChestTileEntity* te)     { if (te) chestOpen(te); }
+void tradeOpen(Villager* villager);
+void villageTradeOpen(Villager* v) { if (v) tradeOpen(v); }
 
 bool chestGuiSuppressed() { return g_gameMode && g_gameMode->isCreative(); }
 void guiOpenCrafting(bool stonecutter) {

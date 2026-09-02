@@ -2,6 +2,7 @@
 #define MCPSP_VILLAGE_GEN_H
 
 struct World;
+class Level;
 
 // Generates a small, PSP-friendly village entirely inside the supplied
 // chunk. Generation is deterministic from the world seed and chunk position.
@@ -14,5 +15,13 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ);
 // bound and what happens once it fills. Used by the achievement tick to
 // detect "player is standing in a village" without scanning blocks.
 bool villageChunkHasVillage(int chunkX, int chunkZ);
+
+// Compact villager state is kept with the village chunk save record.
+// The runtime entity exists only while its chunk is resident.
+void villageChunkLoaded(World* w, int chunkX, int chunkZ,
+                        const unsigned char* data, int dataLen);
+void villageChunkSaveData(World* w, int chunkX, int chunkZ,
+                          unsigned char* out, int outLen);
+void villageChunkUnloaded(Level* level, int chunkX, int chunkZ);
 
 #endif

@@ -4,6 +4,7 @@
 #include "world/level/world.h"
 #include "world/item/item.h"
 #include "world/entity/entity_types.h"
+#include "world/level/storage/level_storage.h"
 #include "platform/path.h"
 
 #include <cstdio>
@@ -21,7 +22,7 @@ static const AchievementDef kDefs[ACHV_COUNT] = {
     { ACHV_GETTING_UPGRADE,    ACHV_CAT_PROGRESSION, "Getting an Upgrade",  "Craft a better pickaxe", true },
     { ACHV_DIAMONDS,           ACHV_CAT_PROGRESSION, "Diamonds!",           "Obtain a diamond", true },
     { ACHV_INTO_THE_NETHER,    ACHV_CAT_PROGRESSION, "Into the Nether",     "Enter the Nether", true },
-    { ACHV_RETURN_TO_SENDER,   ACHV_CAT_PROGRESSION, "Return to Sender",    "Kill a Ghast", false },
+    { ACHV_RETURN_TO_SENDER,   ACHV_CAT_PROGRESSION, "Return to Sender",    "Kill a Ghast with a deflected fireball", true },
 
     { ACHV_ADVENTURER,         ACHV_CAT_EXPLORATION, "Adventurer",          "Visit 5 biomes", true },
     { ACHV_EXPLORER,           ACHV_CAT_EXPLORATION, "Explorer",            "Visit 10 biomes", true },
@@ -229,8 +230,32 @@ int achievementProgress(AchievementId id) {
 // this kind of compact global state is options.txt's plain fopen/fwrite
 // path (see optionsSave/optionsLoad in screen_options.cpp), not the NBT
 // tree used for per-world saves. NBT would be pure overhead here.
-
-static const char* saveFilePath() { return assetPath("achievements.dat"); }
+//
+// Per-world, not global: achievements.dat lives inside the active world's
+// own save directory (LevelStorage::getActiveDir(), the same "saves/<name>"
+// folder level.dat/level.txt/icon.png already live in), not the shared
+// install-directory assetPath() every world used to read the same file
+// from. That single shared file was the actual bug being fixed here --
+// unlocking an achievement in one world silently unlocked it "in" every
+// other world too, since there was only ever one save slot for all of
+// them.
+static const char* saveFilePath() {
+    static char buf[352];
+    const char* dir = LevelStorage::getActiveDir();
+    // No active world (e.g. the very first achievementsInit() call at
+    // process startup, before any world has been created or loaded --
+    // see main.cpp) has nowhere per-world to read or write, so fall back
+    // to the old global path rather than fopen("achievements.dat", ...)
+    // against a relative/empty directory, which would land wherever the
+    // process's current working directory happens to be. This path is
+    // only ever actually used before a real world is active; once one is,
+    // achievementsInit() is called again (see the setActiveWorld call
+    // site in render.cpp) and every subsequent save/load goes through the
+    // real per-world path below.
+    if (!dir || !dir[0]) return assetPath("achievements.dat");
+    snprintf(buf, sizeof(buf), "%s/achievements.dat", dir);
+    return buf;
+}
 
 static void resetToDefaults() {
     memset(s_unlocked, 0, sizeof(s_unlocked));
@@ -250,8 +275,33 @@ void achievementsSave() {
     s_dirty = false;
 }
 
+// s_loadedDir remembers which world's save directory the in-memory
+// s_unlocked/s_counters state actually belongs to, the same "cache plus
+// an identity check" shape ensureBiomeSeeds already uses for
+// s_seedsForWorldSeed. Without this, calling achievementsInit() again
+// after switching worlds (see the setActiveWorld call site in
+// render.cpp) would have no way to tell "a different world is now
+// active, reload" apart from "the same world is still active, this call
+// is redundant" -- and getting that wrong either loses the ability to
+// ever pick up a second world's progress, or repeatedly reloads (and
+// therefore silently discards any not-yet-saved s_dirty progress) every
+// time init happens to be called again for the world already active.
+static char s_loadedDir[352] = "";
+
 void achievementsInit() {
-    if (s_loaded) return;
+    const char* dir = LevelStorage::getActiveDir();
+    const char* effectiveDir = (dir && dir[0]) ? dir : "";
+
+    if (s_loaded && strcmp(s_loadedDir, effectiveDir) == 0) return;
+
+    // Switching to a different world (or to/from "no world active") while
+    // unsaved progress exists: flush it to the world that was previously
+    // loaded before overwriting the in-memory state with the new world's
+    // data, or that progress is lost with no save prompt or warning --
+    // achievements are the kind of state a player would never think to
+    // check is unsaved before backing out to the world list.
+    if (s_loaded && s_dirty) achievementsSave();
+
     resetToDefaults();
 
     FILE* f = fopen(saveFilePath(), "rb");
@@ -264,6 +314,9 @@ void achievementsInit() {
         if (!ok) resetToDefaults(); // corrupt/old-version file: start clean
                                      // rather than trust a partial read
     }
+
+    strncpy(s_loadedDir, effectiveDir, sizeof(s_loadedDir) - 1);
+    s_loadedDir[sizeof(s_loadedDir) - 1] = '\0';
     s_loaded = true;
 }
 
@@ -320,6 +373,10 @@ void achvOnMobKilled(int entityTypeId, float killDistance) {
         if ((s_counters.hostileKilledMask & HOSTILE_BASIC_MASK) == HOSTILE_BASIC_MASK)
             unlock(ACHV_SLAYER);
     }
+}
+
+void achvOnGhastReturnToSender() {
+    unlock(ACHV_RETURN_TO_SENDER);
 }
 
 void achvOnItemCrafted(short itemId) {

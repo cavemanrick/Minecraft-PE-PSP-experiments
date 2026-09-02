@@ -18,13 +18,124 @@
 
 #define MCPE_DEPTH    128
 
-// Floor of the mushroom island's moat. Sea level is 64 (blocks at y < 64
-// are water), so a bed at 60 gives four blocks of water -- deep enough to
-// read as a real channel and to stop a player simply walking across, and
-// shallow enough to swim.
-#define MUSHROOM_MOAT_BED_Y 60
 #define NCELL_W       4
 #define NCELL_H       8
+
+// How far below sea level the density surface must sit for a probed point
+// to count as real open ocean, not a shallow puddle or a beach the
+// island's own radius would immediately swallow back into land. 6 blocks
+// is comfortably past the sand/beach transition band real coastline
+// generates, without demanding the deepest part of an ocean trench.
+#define MUSHROOM_OCEAN_MIN_DEPTH 6
+
+// Single-point reproduction of getHeights' density formula, collapsed to
+// one (x,z) column instead of a region: island siting needs "is there
+// real ocean at this exact spot", not the batched per-chunk sampling
+// getHeights does for actual chunk generation, and PerlinNoise::getValue
+// (a genuine single-point query, unlike getRegion's batch path) makes
+// that cheap enough to call at a handful of candidate sites without
+// materializing a full region buffer for each one.
+//
+// Deliberately reimplements getHeights' math rather than calling it: this
+// runs BEFORE the mushroom seed's own position is decided, so it must
+// not itself depend on classifyBiomeSpatialEx (which needs s_mushroomIdx
+// to already be resolved) the way getHeights' own island-lift step does.
+// A probe site is never going to land inside the mushroom island itself
+// (that's the point), so the island-lift term getHeights adds is
+// correctly absent here.
+static float McpeGen_densityAt(McpeGen* g, float wx, float wz, float wy) {
+    // Every 2D-looking noise query in getHeights/computeBiome actually
+    // goes through PerlinNoise::getRegion's 2-arg-scale overload, which
+    // forwards to the 3D getRegion with y FIXED AT 10.0f (see
+    // PerlinNoise.cpp: "return getRegion(sr, x, 10.0f, z, ...)"). The
+    // getValue(x,y) 2-argument overload is a genuinely different, real 2D
+    // query -- it does NOT reproduce that fixed-y-10 behaviour. Every one
+    // of these calls therefore has to go through getValue(x,y,z) with
+    // y=10.0f explicitly, not the shorter 2-argument overload, or the
+    // sampled value is for a different noise field entirely.
+    const float FIXED_Y = 10.0f;
+
+    float temperature = g->temperatureMap.getValue(wx * BIOME_TEMP_SCALE, FIXED_Y, wz * BIOME_TEMP_SCALE) * 0.15f + 0.7f;
+    float noise = g->noiseMap.getValue(wx * BIOME_NOISE_SCALE, FIXED_Y, wz * BIOME_NOISE_SCALE) * 1.1f + 0.5f;
+    temperature = temperature * (1.0f - 0.01f) + noise * 0.01f;
+    temperature = 1.0f - ((1.0f - temperature) * (1.0f - temperature));
+    if (temperature < 0.0f) temperature = 0.0f;
+    if (temperature > 1.0f) temperature = 1.0f;
+
+    float downfall = g->downfallMap.getValue(wx * BIOME_DOWN_SCALE, FIXED_Y, wz * BIOME_DOWN_SCALE) * 0.15f + 0.5f;
+    downfall = downfall * (1.0f - 0.002f) + noise * 0.002f;
+    if (downfall < 0.0f) downfall = 0.0f;
+    if (downfall > 1.0f) downfall = 1.0f;
+    downfall *= temperature; // matches getHeights' mDownfall[pp] * temperature
+
+    float dd = 1.0f - downfall;
+    dd = dd * dd; dd = dd * dd;
+    dd = 1.0f - dd;
+
+    float s = 684.412f, hs = 684.412f;
+    float scale = ((g->scaleNoise.getValue(wx * 1.121f, FIXED_Y, wz * 1.121f) + 256.0f) / 512.0f);
+    scale *= dd;
+    if (scale > 1.0f) scale = 1.0f;
+    if (scale < 0.0f) scale = 0.0f;
+    scale += 0.5f;
+
+    float depth = (g->depthNoise.getValue(wx * 200.0f, FIXED_Y, wz * 200.0f) / 8000.0f);
+    if (depth < 0.0f) depth = -depth * 0.3f;
+    depth = depth * 3.0f - 2.0f;
+    int ySize = (WORLD_H / NCELL_H) + 1;
+    if (depth < 0.0f) {
+        depth = depth / 2.0f;
+        if (depth < -1.0f) depth = -1.0f;
+        depth = depth / 1.4f;
+        depth /= 2.0f;
+        scale = 0.0f;
+    } else {
+        if (depth > 1.0f) depth = 1.0f;
+        depth = depth / 8.0f;
+    }
+    depth = depth * ySize / 16.0f;
+
+    float yCenter = ySize / 2.0f + depth * 4.0f;
+
+    float yOffs = (wy - yCenter) * 12.0f / scale;
+    if (yOffs < 0.0f) yOffs *= 4.0f;
+
+    // These three ARE genuinely 3D queries in getHeights (perlinNoise1/
+    // lperlinNoise1/lperlinNoise2's own getRegion calls pass real x,y,z
+    // sizes, not the 2D overload), so wy is a real coordinate here, not a
+    // fixed dummy -- no FIXED_Y substitution for these three.
+    float bb = g->lperlinNoise1.getValue(wx * s, wy * hs, wz * s) / 512.0f;
+    float cc = g->lperlinNoise2.getValue(wx * s, wy * hs, wz * s) / 512.0f;
+    float v  = (g->perlinNoise1.getValue(wx * (s / 80.0f), wy * (hs / 160.0f), wz * (s / 80.0f)) / 10.0f + 1.0f) / 2.0f;
+
+    float val;
+    if (v < 0.0f) val = bb;
+    else if (v > 1.0f) val = cc;
+    else val = bb + (cc - bb) * v;
+    val -= yOffs;
+    return val;
+}
+
+// True if real open ocean exists at (wx,wz): the density surface (density
+// crosses from solid to air, scanning down from just above sea level)
+// sits at least MUSHROOM_OCEAN_MIN_DEPTH blocks under sea level. yCenter
+// in the density field is expressed in NCELL_H (8-block) units, so the
+// scan below steps by whole NCELL_H blocks -- fine resolution isn't
+// needed for a yes/no ocean check, only for actually building terrain.
+bool McpeGen_isOceanAt(McpeGen* g, float wx, float wz) {
+    const int waterHeight = 64;
+    int surfaceY = -1;
+    for (int y = waterHeight + NCELL_H; y >= 0; y -= NCELL_H) {
+        float yUnits = (float)y / (float)NCELL_H;
+        if (McpeGen_densityAt(g, wx / NCELL_W, wz / NCELL_W, yUnits) > 0.0f) {
+            surfaceY = y;
+            break;
+        }
+    }
+    if (surfaceY < 0) return false; // no solid ground found at all in range -- treat as not-ocean rather than guess
+    return (waterHeight - surfaceY) >= MUSHROOM_OCEAN_MIN_DEPTH;
+}
+
 
 McpeGen::McpeGen(long seed)
   : random(seed),
@@ -281,15 +392,6 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
             unsigned char bTop, bMat;
             biomeSurface(biome, &bTop, &bMat);
 
-            // The moat ring: the outer MUSHROOM_MOAT_WIDTH blocks of the
-            // island are always water, so the island is guaranteed to be
-            // surrounded whether it happened to generate in an ocean or in
-            // the middle of a continent. Carving it here rather than in
-            // prepareChunk costs nothing extra, because this is the one
-            // place that already classifies every single column.
-            bool moat = (biome == B_MUSHROOM && mushMargin > 0.0f &&
-                         mushMargin <= MUSHROOM_MOAT_WIDTH);
-
             bool sand   = (sandBuffer[z + x * 16]   + random.nextFloat() * 0.2f) > 0;
             bool gravel = (gravelBuffer[z + x * 16] + random.nextFloat() * 0.2f) > 3;
             int  runDepth = (int)(depthBuffer[z + x * 16] / 3 + 3 + random.nextFloat() * 0.25f);
@@ -303,38 +405,16 @@ void McpeGen::buildSurfacesChunk(World* w, int chunkX, int chunkZ) {
             unsigned char col[WORLD_H];
             blockColumnGet(w, gx, gz, col);
 
-            if (moat) {
-                // Cut everything from MUSHROOM_MOAT_BED_Y upward: solid
-                // below sea level becomes water, anything at or above sea
-                // level becomes air. Only ever REMOVES material -- a moat
-                // column that was already open ocean is left exactly as it
-                // was, so this cannot build a wall of water out over the
-                // sea. The surface pass below then finds the topmost
-                // remaining stone (always at MUSHROOM_MOAT_BED_Y - 1 or
-                // lower) and, because that is under sea level, dresses it
-                // with *material (dirt) rather than *top -- which is why no
-                // mycelium ever ends up submerged.
-                for (int y = WORLD_H - 1; y >= MUSHROOM_MOAT_BED_Y; y--) {
-                    if (y >= waterHeight) {
-                        if (col[y] != BLOCK_AIR) col[y] = BLOCK_AIR;
-                    } else if (col[y] == BLOCK_STONE) {
-                        col[y] = BLOCK_CALM_WATER;
-                    }
-                }
-            }
-
-            // The river channel. Structurally identical to the moat carve
-            // above -- same "only ever removes material" rule, so a river
+            // The river channel. Structurally identical to the old moat
+            // carve this biome used to have before the mushroom island
+            // moved into real ocean instead of manufacturing its own water
+            // ring -- same "only ever removes material" rule, so a river
             // crossing water that is already there changes nothing and no
-            // river can end up standing proud of the surrounding sea -- but
-            // with a bed that varies across the channel instead of a fixed
-            // one, which is what gives the water a sloped bottom rather
-            // than a flat trough with square sides.
-            //
-            // Never runs on a moat column: the two would be carving the
-            // same blocks to different depths, and biome.cpp already keeps
-            // rivers away from the island, so this is belt and braces.
-            if (riverT > 0.0f && !moat) {
+            // river can end up standing proud of the surrounding sea --
+            // but with a bed that varies across the channel instead of a
+            // fixed one, which is what gives the water a sloped bottom
+            // rather than a flat trough with square sides.
+            if (riverT > 0.0f) {
                 // Find the current top of the column. A seam that has
                 // climbed above RIVER_CUT_CEILING_Y is left alone -- see
                 // the constant's comment for why stopping beats gorging.

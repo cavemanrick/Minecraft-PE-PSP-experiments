@@ -10,14 +10,14 @@ BiomeId classifyBiomeSpatial(long worldSeed, const World* w, int worldX, int wor
 
 // Same classification, but also reports where the column sits relative to
 // the mushroom island. The island is the one biome region with a hard
-// radius and a guaranteed ring of water around it, so callers that need to
-// carve the moat or lift the land need more than just "which biome".
+// radius, sited in real ocean rather than carving its own moat -- see
+// mushroomLandLift below for the one thing this margin now still drives.
 //
 // *mushroomMargin is written as the column's distance INSIDE the island's
 // outer edge, in blocks:
-//     margin <= 0                      -> not on the island at all
-//     0 < margin <= MUSHROOM_MOAT_WIDTH -> in the moat ring (water)
-//     margin > MUSHROOM_MOAT_WIDTH      -> island land (mycelium)
+//     margin <= 0                       -> not on the island at all
+//     0 < margin <= MUSHROOM_SHORE_WIDTH -> shore band (lift still fading in)
+//     margin > MUSHROOM_SHORE_WIDTH      -> fully inland (full lift, mycelium)
 // It is only meaningful when the returned biome is B_MUSHROOM; for every
 // other biome it is written as 0 so callers can test it without first
 // testing the biome. Pass 0 if the margin isn't wanted -- the extra work
@@ -38,18 +38,21 @@ BiomeId classifyBiomeSpatialEx(long worldSeed, const World* w, int worldX, int w
                                float* mushroomMargin,
                                float* riverChannel = 0, float* riverValley = 0);
 
-// Width of the water ring around the mushroom island, in blocks. The moat
-// is carved out of the island's OWN claimed territory rather than out of
-// the neighbouring biome, so a mushroom island never eats into whatever it
-// borders -- see the note in classifyBiomeSpatialEx.
+// Inner reference radius for the island's terrain-lift fade, in blocks.
+// Formerly also the width of a self-carved moat ring; the moat is gone
+// now that the island is sited in real, pre-existing ocean (see
+// ensureBiomeSeeds' ocean search in biome.cpp) rather than manufacturing
+// its own water. Kept as MUSHROOM_MOAT_WIDTH rather than renamed to avoid
+// unnecessary churn, but nothing carves a moat with this value any more --
+// it is purely a height-shaping reference for mushroomLandLift below.
 #define MUSHROOM_MOAT_WIDTH 6.0f
 
-// How far inland the terrain lift fades in over, in blocks. Without this
-// the island would rise out of the sea as a vertical wall exactly at the
-// moat's inner edge.
+// How far inland the terrain lift fades in over, in blocks, past
+// MUSHROOM_MOAT_WIDTH. Without this the island would rise out of the sea
+// as a vertical wall right at the shore.
 #define MUSHROOM_SHORE_FADE 14.0f
 
-// 0 at the moat's inner edge, rising to 1 once fully inland. Callers use
+// 0 at the shore, rising to 1 once fully inland. Callers use
 // this to scale the island's elevation lift so the shore slopes instead of
 // forming a cliff. Returns 0 for any column not on the island.
 // --- Rivers ---------------------------------------------------------------
@@ -99,7 +102,14 @@ BiomeId classifyBiomeSpatialEx(long worldSeed, const World* w, int worldX, int w
 // Percentage of biome-pair seams that carry a river. At 45 a typical world
 // gets roughly a dozen river runs: enough that rivers feel like a feature
 // of the map, few enough that crossing a biome border is not always a swim.
-#define RIVER_PAIR_PERCENT 45u
+//
+// Set to 0 to disable rivers entirely: pairHasRiver's h % 100u is always
+// in [0,99], so "< 0" is never true for any seed or biome pair -- every
+// seam is treated as riverless. The rest of the river machinery (channel
+// carving, valley shaping in mcpegen.cpp) is left in place rather than
+// removed; it simply never fires once no pair ever qualifies, so this one
+// constant is the sole on/off switch.
+#define RIVER_PAIR_PERCENT 0u
 
 // 0 for a column with no river. 1 at the centre of the channel, falling to
 // 0 at the bank. *riverValley is the same shape over RIVER_VALLEY_HALF_WIDTH

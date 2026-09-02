@@ -4,6 +4,8 @@
 #include "world/level/levelgen/mcpegen.h"
 #include "world/level/levelgen/nether_gen.h"
 #include "world/level/storage/chunk_storage.h"
+#include "world/level/levelgen/village_gen.h"
+#include "world/level/level.h"
 
 #include <string.h>
 #include <math.h>
@@ -25,6 +27,7 @@ static void evict(World* w, int slotIdx) {
     if (!c->resident) return;
     profBegin(PROF_SEVICT);
     if (c->unsaved) chunkStorageSave(w, c->x, c->z);
+    villageChunkUnloaded(&g_level, c->x, c->z);
     c->resident = false;
     blockSlotRecycle(w, slotIdx);
     lightSlotRelease(w, slotIdx);

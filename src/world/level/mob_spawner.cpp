@@ -10,6 +10,7 @@
 #include "world/entity/entity_types.h"
 #include "world/entity/animal/animal.h"
 #include "world/entity/animal/strider.h"
+#include "world/entity/monster/ghast.h"
 #include "world/entity/monster/monster.h"
 #include "world/difficulty.h"
 #include "world/level/levelgen/Random.h"
@@ -359,6 +360,71 @@ static void spawnStriders(Level* level) {
     }
 }
 
+static const int GHAST_MAX_PER_LEVEL = 3;
+static const int GHAST_SPAWN_ATTEMPTS = 6;
+static const int GHAST_MIN_SPAWN_DISTANCE = 24;
+
+// Ghasts spawn in Nether Wastes and Soul Sand Valley (not Warped Forest --
+// see the wiki's spawn table), floating in open air rather than standing
+// on anything, so this is its own dedicated function rather than routed
+// through spawnMonsters: that function's whole design (netherProbeStandableY,
+// spawnOk's ground checks) assumes a standable floor under the spawn
+// point, which a ghast doesn't need or want. Same reasoning spawnStriders
+// already established for its own lava-surface spawn shape.
+static void spawnGhasts(Level* level) {
+    LocalPlayer* p = level->player;
+    if (!p) return;
+    if (level->getDifficulty() == Difficulty::PEACEFUL) return;
+
+    int count = level->countInstanceOfType(EntityTypes::IdGhast);
+    if (count >= GHAST_MAX_PER_LEVEL) return;
+
+    int pcx = (int)floorf(p->x / 16.0f);
+    int pcz = (int)floorf(p->z / 16.0f);
+    const int R = 128 / 16;
+
+    for (int attempt = 0; attempt < GHAST_SPAWN_ATTEMPTS; ++attempt) {
+        if (count >= GHAST_MAX_PER_LEVEL) return;
+
+        int cx = pcx + s_rng.nextInt(2 * R + 1) - R;
+        int cz = pcz + s_rng.nextInt(2 * R + 1) - R;
+        if (!worldChunkIsReserved(level->w, cx, cz) ||
+            !worldChunkIsNether(level->w, cx, cz)) continue;
+        if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
+
+        int x = cx * 16 + s_rng.nextInt(16);
+        int z = cz * 16 + s_rng.nextInt(16);
+
+        NetherBiomeId biome = classifyNetherBiome(worldGenSeed(), level->w, x, z);
+        if (biome != NB_WASTES && biome != NB_SOUL_SAND_VALLEY) continue;
+
+        // Random height within the navigable shell rather than a specific
+        // surface -- a ghast can be anywhere in open air, not just near
+        // the floor. netherShellFloorBaseY/CeilBaseY bound the shell the
+        // same way findLavaSurfaceY's own top bound does in Strider.
+        int loY = netherShellFloorBaseY() + 2;
+        int hiY = netherShellCeilBaseY() - 2;
+        if (hiY <= loY) continue;
+        int y = loY + s_rng.nextInt(hiY - loY);
+
+        float dx = x + 0.5f - p->x;
+        float dy = y - p->y;
+        float dz = z + 0.5f - p->z;
+        if (dx * dx + dy * dy + dz * dz <
+            (float)(GHAST_MIN_SPAWN_DISTANCE * GHAST_MIN_SPAWN_DISTANCE)) continue;
+
+        Ghast* ghast = (Ghast*)MobFactory::createMob(EntityTypes::IdGhast, level);
+        if (!ghast) return;
+        ghast->moveTo(x + 0.5f, (float)y, z + 0.5f, s_rng.nextFloat() * 360.0f, 0.0f);
+        if (!ghast->canSpawn()) {
+            delete ghast;
+            continue;
+        }
+        level->addEntity(ghast);
+        ++count;
+    }
+}
+
 static const int GEN_CREATURE_CAP = 40;
 
 void populateInitial(Level* level) {
@@ -432,6 +498,7 @@ void tick(Level* level, bool spawnEnemies, bool spawnFriendlies) {
     if (spawnEnemies)    {
         spawnMonsters(level);
         if ((level->w->time % 40) == 0) spawnStriders(level);
+        if ((level->w->time % 60) == 0) spawnGhasts(level);
     }
 }
 

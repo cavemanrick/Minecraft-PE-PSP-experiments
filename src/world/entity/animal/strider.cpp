@@ -60,10 +60,18 @@ void Strider::syncRider() {
         return;
     }
 
-    // Player y is its eye/reference position; the seat is just above the
-    // strider's body. No separate passenger entity is created, so riding
-    // costs no additional entity-pool slot.
-    rider->setPos(x, y + 1.15f, z);
+    // Player y is its eye/reference position (LocalPlayer::heightOffset ==
+    // PLAYER_EYE, set in local_player.cpp), NOT feet-relative like the
+    // strider's own y (Strider::heightOffset == 0). Writing the strider's
+    // seat height directly into rider->y, with no correction, was putting
+    // the player's EYES at seat height -- meaning the player's actual feet
+    // (y - heightOffset) landed roughly PLAYER_EYE below the seat, well
+    // under the strider's body and into the lava surface it's standing on.
+    // Adding rider->heightOffset back converts the seat height into
+    // whatever y-convention the specific rider entity uses, the same way
+    // Player::dismountVehicle (player.cpp) already has to for the
+    // dismount case.
+    rider->setPos(x, y + 1.15f + rider->heightOffset, z);
     rider->xd = xd;
     rider->yd = yd;
     rider->zd = zd;

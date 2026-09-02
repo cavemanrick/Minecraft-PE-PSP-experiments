@@ -150,15 +150,17 @@ void netherFortressGenerateChunk(World* w, long worldSeed, int chunkX, int chunk
     // purely heightmap-driven), so an open roof reads as lit rather than
     // dark, and the fortress's mob spawners below the brightness-8
     // threshold in MobSpawnerTileEntity::tick() would never activate.
-    // Require solid rock at topY+1 across most of the footprint before
-    // committing to generate, using the same proportional bar as the
-    // dungeon's roofSolid >= 45/81 -- scaled up for this footprint's
-    // 14x14 = 196 columns.
+    // The Nether ceiling shell bottoms out at y=39. The old code tested
+    // topY+1 (y=38), which is deliberately part of the air volume, so this
+    // test always counted zero and rejected every fortress. Check the real
+    // underside of the ceiling instead. A moderate majority threshold keeps
+    // this robust if ceiling decoration changes later.
+    const int ceilingBottomY = NETHER_CEIL_BASE_Y - NETHER_CEIL_HILL_MAX;
     int roofSolid = 0;
     for (int x = x0; x <= x1; ++x)
         for (int z = z0; z <= z1; ++z)
-            if (isSolidPhys(worldBlock(w, x, topY + 1, z))) ++roofSolid;
-    if (roofSolid < 109) return;
+            if (isSolidPhys(worldBlock(w, x, ceilingBottomY, z))) ++roofSolid;
+    if (roofSolid < 128) return;
 
     clearBox(w, x0, x1, deckY + 1, topY, z0, z1);
 

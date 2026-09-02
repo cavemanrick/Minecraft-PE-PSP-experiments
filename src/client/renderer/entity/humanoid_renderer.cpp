@@ -11,25 +11,26 @@ static const float PIF     = 3.14159265f;
 enum { P_HEAD, P_BODY, P_ARM0, P_ARM1, P_LEG0, P_LEG1, P_COUNT };
 static MobPart partsN[P_COUNT];
 static MobPart partsT[P_COUNT];
+static MobPart partsV[P_COUNT];
 static bool    g_built = false;
 
-static void buildInto(MobPart* p, bool thin) {
+static void buildInto(MobPart* p, bool thin, float texW = 64.0f, float texH = 32.0f) {
 
-    mobBuildBox(p[P_HEAD].base, -4,-8,-4,  4, 0, 4,  0,  0, 8,8,8, false, 0);
+    mobBuildBox(p[P_HEAD].base, -4,-8,-4,  4, 0, 4,  0,  0, 8,8,8, false, 0, texW, texH);
     p[P_HEAD].px = 0;  p[P_HEAD].py = 0;  p[P_HEAD].pz = 0;
-    mobBuildBox(p[P_BODY].base, -4, 0,-2,  4,12, 2, 16, 16, 8,12,4, false, 0);
+    mobBuildBox(p[P_BODY].base, -4, 0,-2,  4,12, 2, 16, 16, 8,12,4, false, 0, texW, texH);
     p[P_BODY].px = 0;  p[P_BODY].py = 0;  p[P_BODY].pz = 0;
     if (!thin) {
-        mobBuildBox(p[P_ARM0].base, -3,-2,-2,  1,10, 2, 40, 16, 4,12,4, false, 0);
-        mobBuildBox(p[P_ARM1].base, -1,-2,-2,  3,10, 2, 40, 16, 4,12,4, true,  0);
-        mobBuildBox(p[P_LEG0].base, -2, 0,-2,  2,12, 2,  0, 16, 4,12,4, false, 0);
-        mobBuildBox(p[P_LEG1].base, -2, 0,-2,  2,12, 2,  0, 16, 4,12,4, true,  0);
+        mobBuildBox(p[P_ARM0].base, -3,-2,-2,  1,10, 2, 40, 16, 4,12,4, false, 0, texW, texH);
+        mobBuildBox(p[P_ARM1].base, -1,-2,-2,  3,10, 2, 40, 16, 4,12,4, true,  0, texW, texH);
+        mobBuildBox(p[P_LEG0].base, -2, 0,-2,  2,12, 2,  0, 16, 4,12,4, false, 0, texW, texH);
+        mobBuildBox(p[P_LEG1].base, -2, 0,-2,  2,12, 2,  0, 16, 4,12,4, true,  0, texW, texH);
     } else {
 
-        mobBuildBox(p[P_ARM0].base, -1,-2,-1,  1,10, 1, 40, 16, 2,12,2, false, 0);
-        mobBuildBox(p[P_ARM1].base, -1,-2,-1,  1,10, 1, 40, 16, 2,12,2, true,  0);
-        mobBuildBox(p[P_LEG0].base, -1, 0,-1,  1,12, 1,  0, 16, 2,12,2, false, 0);
-        mobBuildBox(p[P_LEG1].base, -1, 0,-1,  1,12, 1,  0, 16, 2,12,2, true,  0);
+        mobBuildBox(p[P_ARM0].base, -1,-2,-1,  1,10, 1, 40, 16, 2,12,2, false, 0, texW, texH);
+        mobBuildBox(p[P_ARM1].base, -1,-2,-1,  1,10, 1, 40, 16, 2,12,2, true,  0, texW, texH);
+        mobBuildBox(p[P_LEG0].base, -1, 0,-1,  1,12, 1,  0, 16, 2,12,2, false, 0, texW, texH);
+        mobBuildBox(p[P_LEG1].base, -1, 0,-1,  1,12, 1,  0, 16, 2,12,2, true,  0, texW, texH);
     }
     p[P_ARM0].px = -5; p[P_ARM0].py = 2;  p[P_ARM0].pz = 0;
     p[P_ARM1].px = 5;  p[P_ARM1].py = 2;  p[P_ARM1].pz = 0;
@@ -42,18 +43,19 @@ static void build() {
     if (g_built) return;
     buildInto(partsN, false);
     buildInto(partsT, true);
+    buildInto(partsV, false, 64.0f, 64.0f);
     g_built = true;
 }
 
-HumanoidRenderer::HumanoidRenderer(const char* texPath, bool thin, bool bow, short holdItem)
-:   texPath(texPath), haveTex(false), thin(thin), bow(bow), holdItem(holdItem) {
+HumanoidRenderer::HumanoidRenderer(const char* texPath, bool thin, bool bow, short holdItem, bool texture64)
+:   texPath(texPath), haveTex(false), thin(thin), bow(bow), holdItem(holdItem), texture64(texture64) {
     shadowRadius = 0.5f; shadowStrength = 1.0f;
 }
 
 void HumanoidRenderer::render(Entity* e, float x, float y, float z, float rot, float a) {
     if (!haveTex) { haveTex = textureLoad16(texPath, &tex, GU_PSM_5551); if (!haveTex) return; }
     build();
-    MobPart* parts = thin ? partsT : partsN;
+    MobPart* parts = texture64 ? partsV : (thin ? partsT : partsN);
     Mob* mob = (Mob*)e;
 
     MobAnim m = mobAnimSetup(mob, rot, a);
