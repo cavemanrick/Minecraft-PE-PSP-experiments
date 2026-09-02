@@ -1411,6 +1411,7 @@ static void placeAmbientFires(World* w, int xo, int zo, Random& random) {
 // ever standable and probing down there is wasted effort.
 int netherShellFloorBaseY(void) { return NETHER_LAND_BASE_Y; }
 int netherShellCeilBaseY(void)  { return NETHER_CEIL_BASE_Y; }
+int netherShellCeilHillMax(void) { return NETHER_CEIL_HILL_MAX; }
 
 // The frame is 4 columns wide (interior 2, plus a post either side) and 5
 // tall (interior 3, plus floor and ceiling courses). Offsets are relative

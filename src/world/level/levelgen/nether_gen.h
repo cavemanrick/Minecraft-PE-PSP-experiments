@@ -21,6 +21,7 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz);
 // a stale duplicate behind.
 int netherShellFloorBaseY(void);   // lowest y a floor hill can occupy
 int netherShellCeilBaseY(void);    // highest y a ceiling hill can occupy
+int netherShellCeilHillMax(void);  // max per-column depth of a ceiling hill dip
 
 // Finds a spot in the Nether suitable for standing a 4-wide x 5-tall
 // obsidian portal frame on, searching outward from chunk (cxCentre,

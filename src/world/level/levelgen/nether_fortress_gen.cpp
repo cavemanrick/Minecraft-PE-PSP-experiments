@@ -1,4 +1,5 @@
 #include "world/level/levelgen/nether_fortress_gen.h"
+#include "world/level/levelgen/nether_gen.h"
 #include "world/level/levelgen/Random.h"
 #include "world/level/levelgen/loot_table.h"
 #include "world/level/world.h"
@@ -155,7 +156,7 @@ void netherFortressGenerateChunk(World* w, long worldSeed, int chunkX, int chunk
     // test always counted zero and rejected every fortress. Check the real
     // underside of the ceiling instead. A moderate majority threshold keeps
     // this robust if ceiling decoration changes later.
-    const int ceilingBottomY = NETHER_CEIL_BASE_Y - NETHER_CEIL_HILL_MAX;
+    const int ceilingBottomY = netherShellCeilBaseY() - netherShellCeilHillMax();
     int roofSolid = 0;
     for (int x = x0; x <= x1; ++x)
         for (int z = z0; z <= z1; ++z)
