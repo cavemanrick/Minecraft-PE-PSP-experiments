@@ -131,4 +131,4 @@ void TradeScreen::renderContent(MenuState& s) {
         fontDrawTextShadow(&s.font, G(42), G(218), "X: Trade   O: Close", 0xFFFFFFFFu, UI_SCALE);
     sceGuEnable(GU_DEPTH_TEST);
 }
-Screen* tradeScreen() { static TradeScreen s; return &s; }
+Screen& tradeScreen() { static TradeScreen s; return s; }

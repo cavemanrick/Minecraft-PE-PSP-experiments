@@ -192,7 +192,7 @@ extern bool g_tradeOpen;
 class Villager;
 void tradeOpen(Villager* villager);
 void tradeClose();
-Screen* tradeScreen();
+Screen& tradeScreen();
 
 void chestClose();
 
