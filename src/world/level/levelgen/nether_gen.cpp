@@ -553,38 +553,59 @@ static void placeWallAlcove(World* w, Random& random, int wallX, int wallZ,
 // spikes (spires still want a clean flat column to stand on -- see their
 // own worldBlock checks -- and running this after them means a spire
 // site is already committed before stalagmites can crowd its base).
+// Stalactite/stalagmite density. The original full-column scan rolled
+// odds independently on every one of a chunk's 256 columns (1-in-5 each,
+// stalactites and stalagmites separately), which is a fundamentally
+// different shape from every other pass in this file: everywhere else
+// rolls a handful of TRIES per chunk (see the warped-forest and glowstone
+// density comments above for what happens when a pass doesn't do this --
+// the same "count was inflated, then the miss-rate got fixed, count
+// never got scaled back down" story applies here just as much even
+// though this pass never had a broken surface search to begin with). A
+// per-column scan at 1-in-5 doesn't roll low odds a few times -- over 256
+// columns it's a near-guaranteed ~51 stalactites and ~51 stalagmites
+// EVERY chunk, on top of the magma/obsidian/wall-alcove passes, which is
+// what actually produced the "wastes are covered in blocks, looks
+// chaotic" report: a wall of spikes in every chunk rather than an
+// occasional cavern feature.
+//
+// Converted to the same bounded-tries idiom the rest of the file uses,
+// at a count that lands in the same ballpark as Warped Forest's
+// corrected tree density (a double-digit number of features per chunk,
+// not low hundreds).
+#define NETHER_STALACTITE_TRIES_MIN 3
+#define NETHER_STALACTITE_TRIES_VAR 4
+#define NETHER_STALAGMITE_TRIES_MIN 3
+#define NETHER_STALAGMITE_TRIES_VAR 4
+
 static void decorateWastesCaveTexture(World* w, Random& random, int xo, int zo,
                                        bool edgeX0, bool edgeX1,
                                        bool edgeZ0, bool edgeZ1) {
-    // Stalactites: scan down from the ceiling shell's underside. One roll
-    // per column at a moderate rate -- dense enough to be "regularly
-    // noticeable" without every single ceiling tile growing one.
-    for (int x = 0; x < 16; x++) {
-        for (int z = 0; z < 16; z++) {
-            int gx = xo + x, gz = zo + z;
-            if (random.nextInt(5) != 0) continue; // ~1 in 5 columns
-            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
-                if (worldBlock(w, gx, y, gz) != BLOCK_AIR) continue;
-                if (worldBlock(w, gx, y + 1, gz) != BLOCK_NETHERRACK) continue;
-                placeStalactite(w, random, gx, y, gz);
-                break;
-            }
+    // Stalactites: a handful of random columns per chunk, scanning down
+    // from the ceiling shell's underside to find a real ceiling face --
+    // dense enough to be "regularly noticeable" without paving the
+    // ceiling the way a full per-column scan does.
+    int stalactiteTries = NETHER_STALACTITE_TRIES_MIN + random.nextInt(NETHER_STALACTITE_TRIES_VAR);
+    for (int i = 0; i < stalactiteTries; i++) {
+        int gx = xo + random.nextInt(16), gz = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+            if (worldBlock(w, gx, y, gz) != BLOCK_AIR) continue;
+            if (worldBlock(w, gx, y + 1, gz) != BLOCK_NETHERRACK) continue;
+            placeStalactite(w, random, gx, y, gz);
+            break;
         }
     }
 
     // Stalagmites: mirror pass, scanning down from the ceiling to find
-    // the topmost exposed floor column (same search direction the spire/
-    // formation passes already use for "find the floor").
-    for (int x = 0; x < 16; x++) {
-        for (int z = 0; z < 16; z++) {
-            int gx = xo + x, gz = zo + z;
-            if (random.nextInt(5) != 0) continue; // ~1 in 5 columns
-            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
-                if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
-                if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
-                placeStalagmite(w, random, gx, y, gz);
-                break;
-            }
+    // the topmost exposed floor column.
+    int stalagmiteTries = NETHER_STALAGMITE_TRIES_MIN + random.nextInt(NETHER_STALAGMITE_TRIES_VAR);
+    for (int i = 0; i < stalagmiteTries; i++) {
+        int gx = xo + random.nextInt(16), gz = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+            if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
+            if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
+            placeStalagmite(w, random, gx, y, gz);
+            break;
         }
     }
 
@@ -607,6 +628,73 @@ static void decorateWastesCaveTexture(World* w, Random& random, int xo, int zo,
         placeWallAlcove(w, random, xo + 8, zo, /*wallRunsAlongZ=*/false, +1, y0, y1);
     if (edgeZ1 && random.nextInt(2) == 0)
         placeWallAlcove(w, random, xo + 8, zo + 15, /*wallRunsAlongZ=*/false, -1, y0, y1);
+}
+
+// --- Soul Sand Valley structure: basalt spire --------------------------
+//
+// "Large spires made of basalt" (wiki) -- tall, thin, roughly cylindrical
+// columns standing up out of the valley floor, sometimes tall enough to
+// nearly touch the ceiling. Built from BLOCK_BASALT (see chunk.h/
+// tile.cpp): a real block id now, not an obsidian stand-in, since basalt
+// reads as visually and texturally distinct from both netherrack and
+// obsidian and this biome's defining feature deserves its own material
+// rather than borrowing Wastes' obsidian-outcrop look.
+//
+// Shape: a 1-2 radius column, most of its height, that tapers to a
+// single center column for its top few blocks -- a spike, not a
+// cylinder with a flat top. Height is rolled against the real available
+// headroom (same netherHeadroom helper the huge fungus/stalagmite code
+// already uses) so a spire never tries to punch through the ceiling
+// shell; it just stops short if the gap is small.
+static bool basaltSpireSpaceClear(World* w, int x, int y, int z, int height, int baseRadius) {
+    if (y < 1 || y + height + 1 >= NETHER_CEIL_BASE_Y) return false;
+    for (int yy = y; yy <= y + height; yy++) {
+        // Wide for the base band, narrowing to the single center column
+        // for the top 2 levels -- matches what the builder below actually
+        // places, so clearance never lags behind the real footprint.
+        int r = (yy >= y + height - 1) ? 0 : baseRadius;
+        for (int xx = x - r; xx <= x + r; xx++)
+        for (int zz = z - r; zz <= z + r; zz++)
+            if (!isTreeClear(worldBlock(w, xx, yy, zz))) return false;
+    }
+    return true;
+}
+
+static void placeBasaltSpire(World* w, Random& random, int x, int y, int z) {
+    if (worldBlock(w, x, y, z) != BLOCK_SOUL_SAND && worldBlock(w, x, y, z) != BLOCK_SOUL_SOIL) return;
+    if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) return;
+
+    int room = netherHeadroom(w, x, y + 1, z, NETHER_HILL_MAX_HEIGHT + NETHER_MIN_GAP);
+    if (room < 6) return; // too cramped to read as a spire at all
+
+    int height = 6 + random.nextInt(10); // 6-15, vanilla's spires read as tall and prominent
+    if (height > room - 1) height = room - 1;
+    if (height < 6) return;
+
+    int baseRadius = 1 + random.nextInt(2); // 1-2, a thin column not a tower
+
+    if (!basaltSpireSpaceClear(w, x, y, z, height, baseRadius)) return;
+
+    for (int hh = 0; hh <= height; hh++) {
+        int cy = y + hh;
+        // Radius shrinks as it climbs: full baseRadius for most of the
+        // column, dropping to radius 1 for one level, then a single
+        // center column for the tip -- an actual taper rather than a
+        // cylinder with a flat cap.
+        int r = baseRadius;
+        if (hh >= height - 1) r = 0;
+        else if (hh >= height - 3) r = (baseRadius > 1) ? baseRadius - 1 : 1;
+
+        for (int xx = -r; xx <= r; xx++) {
+            for (int zz = -r; zz <= r; zz++) {
+                // Round off the base's corners at full radius so it reads
+                // as a rough column rather than a square pillar.
+                if (r > 1 && xx * xx + zz * zz > r * r) continue;
+                if (worldBlock(w, x + xx, cy, z + zz) != BLOCK_AIR) continue;
+                blockPut(w, x + xx, cy, z + zz, BLOCK_BASALT);
+            }
+        }
+    }
 }
 
 // --- Wastes structure: small obsidian formation -----------------------
@@ -723,6 +811,38 @@ static void placeFossilSkeleton(World* w, Random& random, int x, int y, int z) {
 }
 
 static void decorateWastes(World* w, Random& random, int xo, int zo) {
+    // Shoreline: "gravel and soul sand lining its shores" (wiki). Converts
+    // the topmost exposed netherrack immediately bordering a lava column
+    // into gravel or soul sand -- a full per-column scan is the right
+    // shape here (unlike the stalactite/stalagmite fix elsewhere in this
+    // function), because the qualifying set is already naturally small:
+    // only floor columns whose surface sits at the lava's edge pass the
+    // adjacency check below, so this cannot blanket a chunk the way an
+    // unconditional per-column roll would.
+    static const int dx4[4] = { 1, -1, 0, 0 };
+    static const int dz4[4] = { 0, 0, 1, -1 };
+    for (int x = 0; x < 16; x++) {
+        for (int z = 0; z < 16; z++) {
+            int gx = xo + x, gz = zo + z;
+            for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+                if (worldBlock(w, gx, y, gz) != BLOCK_NETHERRACK) continue;
+                if (worldBlock(w, gx, y + 1, gz) != BLOCK_AIR) continue;
+                // Only shoreline columns qualify: the lava level itself
+                // (a column right at the water's edge) or a cardinal
+                // neighbour at this same height already carved to lava.
+                bool atShore = (y == NETHER_LAVA_LEVEL_Y);
+                if (!atShore) {
+                    for (int d = 0; d < 4 && !atShore; d++)
+                        if (worldBlock(w, gx + dx4[d], y, gz + dz4[d]) == BLOCK_CALM_LAVA)
+                            atShore = true;
+                }
+                if (atShore)
+                    blockPut(w, gx, y, gz, (random.nextInt(2) == 0) ? BLOCK_GRAVEL : BLOCK_SOUL_SAND);
+                break; // only the topmost exposed layer at this column
+            }
+        }
+    }
+
     // Magma blocks scattered on floor hills near the lava sea, same
     // rough placement vanilla uses (small blobs just above the lava
     // line) -- purely decorative here (no lava-damage/bubble-column
@@ -785,6 +905,25 @@ static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
                 blockPut(w, gx, y, gz, floorBlock);
                 break; // only the topmost exposed layer at this column
             }
+        }
+    }
+
+    // Basalt spires: "large spires made of basalt" (wiki) -- this is the
+    // biome's single most identifying terrain feature, so it gets its own
+    // pass rather than being folded into the fossil roll above. A few
+    // tries per chunk, same tries-based idiom as everything else in this
+    // file (see the Wastes stalactite/stalagmite fix's own comment on why
+    // a full per-column scan is the wrong shape for a "regularly
+    // noticeable but not everywhere" feature).
+    int spireTries = 2 + random.nextInt(3);
+    for (int i = 0; i < spireTries; i++) {
+        int x = xo + random.nextInt(16), z = zo + random.nextInt(16);
+        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
+            unsigned char id = worldBlock(w, x, y, z);
+            if (id != BLOCK_SOUL_SAND && id != BLOCK_SOUL_SOIL) continue;
+            if (worldBlock(w, x, y + 1, z) != BLOCK_AIR) continue;
+            placeBasaltSpire(w, random, x, y, z);
+            break;
         }
     }
 

@@ -142,6 +142,15 @@ enum { BLOCK_AIR = 0,
        // mined and placed like stone, just a different texture/material.
        BLOCK_BONE_BLOCK = 178,
 
+       // Solid volcanic rock: Soul Sand Valley's basalt spires (see
+       // placeBasaltSpire in nether_gen.cpp). One texture on all six
+       // faces -- this codebase has no per-face top/side split for
+       // simple blocks (BLOCK_LOG is the one exception, via its own
+       // capFace branch in tile.cpp), and basalt doesn't get one either;
+       // see tile.cpp's BLOCK_BASALT case for which texture was chosen.
+       // Mined and placed like stone, no special behavior otherwise.
+       BLOCK_BASALT = 179,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };

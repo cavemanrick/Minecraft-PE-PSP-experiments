@@ -493,15 +493,13 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     computeBiome(chunkX, chunkZ);
     mPhaseBiome = (int)classifyBiomeSpatial(worldSeed, w, xo + 8, zo + 8);
 
-    // Jungle generation is temporarily disabled: jungle-classified territory
-    // is redirected to forest instead, so nothing jungle-specific (trees,
-    // vines, cocoa, oak-mixing, fern/litter, the boosted tree density) ever
-    // actually generates. This is a single redirect right after the real
-    // classification, not a removal -- every jungle-specific code path
-    // below is untouched and fully intact, ready to work again the moment
-    // this redirect (and its twin in the per-column re-check further down,
-    // and the one in the fern/bamboo block) is reverted.
-    if (mPhaseBiome == (int)B_JUNGLE) mPhaseBiome = (int)B_FOREST;
+    // Jungle generation is ENABLED. It was previously redirected to forest
+    // here while the vine bugs were outstanding; that redirect is gone.
+    // mPhaseBiome is set once in phase 0 and read by the decoration phases
+    // below, so this one assignment was the only gate -- biomeSurface()
+    // treats jungle exactly like forest (grass over dirt), and the two
+    // classifyBiomeSpatialEx() callers earlier only branch on B_MUSHROOM
+    // and river valleys, so nothing else needed unblocking.
 
     random.setSeed(worldSeed);
     int xScale = random.nextInt() / 2 * 2 + 1;
@@ -541,6 +539,10 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     if (biome == B_JUNGLE)   forests += oFor + 3;
     if (biome == B_SEASONAL) forests += oFor + 1;
     if (biome == B_TAIGA)    forests += oFor + 1;
+    // Dark forest: "a much higher density of trees compared to other
+    // forest biomes" (wiki) -- even denser than jungle here, dense enough
+    // that direct sky is often blocked, matching the reference.
+    if (biome == B_DARK_FOREST) forests += oFor + 4;
     if (biome == B_DESERT)   forests -= 20;
     if (biome == B_TUNDRA)   forests -= 20;
     if (biome == B_PLAINS)   forests -= 20;
@@ -564,6 +566,16 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
         } else if (biome == B_JUNGLE) {
             random.nextInt(3);
             treeJungle(w, random, tx, ty, tz);
+        } else if (biome == B_DARK_FOREST) {
+            // Dark oaks with the occasional ordinary oak mixed in (wiki:
+            // "Oak, dark oak, and sometimes birch trees generate in these
+            // biomes"). Birch is left out here even though the wiki
+            // mentions it -- treeBirch's 1-wide single trunk would read as
+            // sparse/thin against dark oak's thick 2x2 trunks and hurt the
+            // "dense, sky-blocking canopy" read this biome is going for.
+            random.nextInt(3);
+            if (random.nextInt(5) == 0) treeOak(w, random, tx, ty, tz);
+            else                        treeDarkOak(w, random, tx, ty, tz);
         } else {
             random.nextInt(10);
             treeOak(w, random, tx, ty, tz);
@@ -586,6 +598,25 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
             int ty = heightmapAt(w, tx, tz);
             if (random.nextInt(2) == 0) mushroomHugeRed(w, random, tx, ty, tz);
             else                        mushroomHugeBrown(w, random, tx, ty, tz);
+        }
+    }
+
+    if (biome == B_DARK_FOREST) {
+        // "Both types of huge mushrooms generate among the trees, though
+        // the red variants are more common" (wiki) -- occasional, not the
+        // dense per-chunk cluster mushroom fields gets: most chunks get
+        // none at all, a minority get one, rarely two. hugeMushroomSpace-
+        // Clear already rejects placement in space the dense dark oak
+        // canopy above has filled, which is exactly the "sometimes
+        // crowded out by trees" look the reference renders show, so no
+        // extra crowding logic is needed here beyond trying a couple of
+        // random spots.
+        int attempts = random.nextInt(3); // 0, 1, or 2 tries per chunk
+        for (int i = 0; i < attempts; i++) {
+            int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
+            int ty = heightmapAt(w, tx, tz);
+            if (random.nextInt(5) < 3) mushroomHugeRed(w, random, tx, ty, tz);   // red more common
+            else                       mushroomHugeBrown(w, random, tx, ty, tz);
         }
     }
 

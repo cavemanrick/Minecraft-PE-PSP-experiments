@@ -37,7 +37,10 @@ void cocoaShape(unsigned char data, float out[6]) {
 
     float cx0 = 0.5f - size * 0.5f, cx1 = 0.5f + size * 0.5f;
     float top = 0.9375f;                 // 15/16 -- hangs just under the log above
-    float bot = top - size;
+    // Vanilla pods are one pixel taller than they are wide (4x5, 6x7, 8x9),
+    // which is also the aspect of the side artwork, so the texture maps
+    // without squashing.
+    float bot = top - (size + 1.0f / 16.0f);
 
     float x0 = cx0, x1 = cx1, z0 = cx0, z1 = cx1;
     // dir tells us which neighbor is the supporting log; the pod sits

@@ -506,8 +506,14 @@ int emitCocoa(const World* w, int gx, int y, int gz, unsigned char id, unsigned 
     // small box offset in from all sides), so boxBoundaryMask is 0 here --
     // every face renders regardless of neighbors, which is correct for a
     // free-floating attached bump rather than a block-filling shape.
+    // fullTileUV = true: each pod face samples the ENTIRE atlas cell rather
+    // than the sub-rect its box happens to occupy. That is required here
+    // because the pod is offset flush against its supporting log, so with
+    // proportional UVs the u-range would shift with `dir` and the same
+    // artwork would land in a different place on each of the four
+    // orientations. With the full cell the art is orientation-independent.
     return emitPartialBox(w, gx, y, gz, id, data, x0, y0, z0, x1, y1, z1,
-                          0, 0, out, n, true);
+                          0, 0, out, n, true, true);
 }
 
 static inline int emitGateBox(const World* w, int gx, int y, int gz,

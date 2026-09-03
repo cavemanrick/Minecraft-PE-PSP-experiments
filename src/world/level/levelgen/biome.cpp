@@ -18,16 +18,26 @@
 // region, and the outer ring of that island is always carved to water. See
 // classifyBiomeSpatialEx.
 
-static const int N_BIOMES = 12;
+// 13 biomes placed on a 4x4 (16-cell) jittered grid -- three cells are
+// left empty each world (see the shuffle in ensureBiomeSeeds). Grown from
+// the old 4x3/12 exact fit to make room for B_DARK_FOREST. The spare
+// cells are deliberately kept rather than shrinking back to an exact
+// 13-cell rectangle, so a future biome addition again only has to claim
+// one of the already-empty slots instead of re-gridding to a new exact
+// fit.
+static const int N_BIOMES = 13;
+static const int N_GRID_CELLS = 16;
 static const BiomeId kBiomeOrder[N_BIOMES] = {
     B_TUNDRA, B_SAVANNA, B_DESERT, B_SWAMP, B_TAIGA, B_SHRUB,
-    B_FOREST, B_PLAINS, B_SEASONAL, B_RAIN, B_JUNGLE, B_MUSHROOM
+    B_FOREST, B_PLAINS, B_SEASONAL, B_RAIN, B_JUNGLE, B_MUSHROOM,
+    B_DARK_FOREST
 };
 
 static bool  s_seedsReady = false;
 static long  s_seedsForWorldSeed = 0;
 static float s_seedX[N_BIOMES];
 static float s_seedZ[N_BIOMES];
+static int   s_gridCellOfSeed[N_BIOMES]; // which of the N_GRID_CELLS cells each seed landed in
 static int   s_mushroomIdx = -1;
 static float s_islandRadius = 0.0f;
 static PerlinNoise* s_borderNoise = 0;
@@ -87,7 +97,7 @@ static void ensureBiomeSeeds(long worldSeed, const World* w) {
     // player actually walks that far; classifyBiomeSpatial's nearest-seed
     // math doesn't require the seeds to bound where the player can go,
     // only to be spread out relative to each other.
-    const int cols = 4, rows = 3; // 12 grid cells, all 12 used
+    const int cols = 4, rows = 4; // N_GRID_CELLS (16) cells; 13 used, 3 left empty
     int cxChunks = overworldChunksX(w), czChunks = overworldChunksZ(w);
     float worldSpanX = (float)((cxChunks ? cxChunks : 2048) * CHUNK_SX);
     float worldSpanZ = (float)((czChunks ? czChunks : 2048) * CHUNK_SZ);
@@ -107,9 +117,28 @@ static void ensureBiomeSeeds(long worldSeed, const World* w) {
     float cellMin = (cellW < cellD) ? cellW : cellD;
     s_islandRadius = cellMin * 0.28f;
 
+    // Which of the N_GRID_CELLS cells get a biome: shuffle 0..15 with the
+    // same per-world seedRandom stream, then take the first N_BIOMES. This
+    // spreads the three empty cells around the grid (rather than always
+    // leaving the last row bare, which is what simply looping i<N_BIOMES
+    // over sequential cells would do) and keeps a biome's cell -- and so
+    // its rough map position -- stable as more biomes are added later,
+    // since existing biomes keep drawing from the same early positions in
+    // the shuffle only so long as the shuffle algorithm and biome count
+    // don't change together. Adding a 14th biome will still reshuffle
+    // everyone; that tradeoff already exists for any grid resize.
+    int cellOrder[N_GRID_CELLS];
+    for (int c = 0; c < N_GRID_CELLS; c++) cellOrder[c] = c;
+    for (int c = N_GRID_CELLS - 1; c > 0; c--) {
+        int j = seedRandom.nextInt(c + 1);
+        int tmp = cellOrder[c]; cellOrder[c] = cellOrder[j]; cellOrder[j] = tmp;
+    }
+
     s_mushroomIdx = -1;
     for (int i = 0; i < N_BIOMES; i++) {
-        int gx = i % cols, gz = i / cols;
+        int cell = cellOrder[i];
+        s_gridCellOfSeed[i] = cell;
+        int gx = cell % cols, gz = cell / cols;
         float centerX = gx * cellW + cellW * 0.5f;
         float centerZ = gz * cellD + cellD * 0.5f;
         // Jitter within the cell, keeping a margin so seeds don't land right
@@ -159,9 +188,13 @@ static void ensureBiomeSeeds(long worldSeed, const World* w) {
             // Reuse the seed's own grid cell as the search area rather
             // than scanning the whole world: the mushroom biome is still
             // meant to occupy roughly that region relative to the other
-            // eleven, just at whichever exact spot within it turns out to
-            // be real ocean rather than at a fixed jittered point.
-            int gx = s_mushroomIdx % cols, gz = s_mushroomIdx / cols;
+            // biomes, just at whichever exact spot within it turns out to
+            // be real ocean rather than at a fixed jittered point. Cell
+            // index comes from s_gridCellOfSeed, not s_mushroomIdx itself
+            // -- the shuffle above means those are no longer the same
+            // number.
+            int cell = s_gridCellOfSeed[s_mushroomIdx];
+            int gx = cell % cols, gz = cell / cols;
             float lo = s_islandRadius + 2.0f; // +2: a little slack past the
                                                // exact edge so a barely-
                                                // passing perimeter sample

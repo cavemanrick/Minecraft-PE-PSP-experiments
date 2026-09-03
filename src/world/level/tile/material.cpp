@@ -52,6 +52,11 @@ const Material& materialOf(unsigned char id) {
             return Material::lava;
         case BLOCK_SAPLING: case BLOCK_FLOWER: case BLOCK_ROSE: case BLOCK_MUSHROOM_BROWN:
         case BLOCK_MUSHROOM_RED: case BLOCK_WHEAT: case BLOCK_REEDS: case BLOCK_MELON_STEM:
+        // Jungle foliage: these three used to fall through to the `default`
+        // (Material::stone), whose blocksLight() is true, which feeds
+        // Tile::blocksLight and darkens the smooth-lighting AO samples
+        // around every vine, cocoa pod and bamboo stalk.
+        case BLOCK_VINE: case BLOCK_COCOA: case BLOCK_BAMBOO:
             return Material::plant;
         case BLOCK_TALLGRASS:
             return Material::replaceablePlant;

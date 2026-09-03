@@ -110,6 +110,8 @@ static bool isFlat2DItem(short id) {
         || id == BLOCK_SAPLING
         || id == BLOCK_GLASS_PANE
         || id == BLOCK_LADDER
+        || id == BLOCK_VINE
+        || id == BLOCK_BAMBOO
         || id == BLOCK_COBWEB
         || id == BLOCK_TORCH
         || isDoor(id)

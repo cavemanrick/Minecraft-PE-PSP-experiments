@@ -86,7 +86,7 @@ struct AchievementCounters {
     int blocksMined;
     int blocksPlaced;
     int hostileKills;
-    int biomesVisitedMask;       // bit per BiomeId (11 used of 32)
+    int biomesVisitedMask;       // bit per BiomeId (13 used of 32)
     int netherBiomesVisitedMask; // bit per NetherBiomeId (3 used of 32)
     int hostileKilledMask;       // bit per EntityTypes hostile id, remapped -- see hostileBit()
     int deepestYReached;         // lowest (smallest) Y the player has stood at, init to a high sentinel
@@ -194,9 +194,9 @@ int achievementProgressTarget(AchievementId id) {
     }
 }
 
-static int popcount11(int mask) { // biomesVisitedMask only uses 11 bits
+static int popcount11(int mask) { // biomesVisitedMask now uses 13 bits (B_DARK_FOREST added)
     int n = 0;
-    for (int i = 0; i < 11; ++i) if (mask & (1 << i)) n++;
+    for (int i = 0; i < 13; ++i) if (mask & (1 << i)) n++;
     return n;
 }
 static int popcountN(int mask, int n) {
@@ -409,7 +409,7 @@ void achvOnItemObtained(short itemId) {
 }
 
 void achvOnBiomeEntered(int biomeId) {
-    if (biomeId < 0 || biomeId >= 11) return;
+    if (biomeId < 0 || biomeId >= 13) return;
     int bit = 1 << biomeId;
     if (s_counters.biomesVisitedMask & bit) return; // already counted
     s_counters.biomesVisitedMask |= bit;

@@ -18,11 +18,34 @@
 // wall face supports them (data 2/3/4/5, same convention as ladders)
 // rather than floating as loose disconnected chains.
 
-static const int VDX[4] = {  0,  0, -1,  1 }; // index matches vine face data 2,3,4,5
+// Cardinal offsets used for BOTH branch growth directions and vine wall
+// probing. Index f means "the neighbour at (VDX[f], VDZ[f])".
+static const int VDX[4] = {  0,  0, -1,  1 };
 static const int VDZ[4] = { -1,  1,  0,  0 };
-// data 2: wall at z-1 (quad faces +Z)   data 3: wall at z+1 (quad faces -Z)
-// data 4: wall at x-1 (quad faces +X)   data 5: wall at x+1 (quad faces -X)
-static const unsigned char VDATA[4] = { 2, 3, 4, 5 };
+
+// VDATA[f] is the vine data byte to write when the support wall is the
+// neighbour at (VDX[f], VDZ[f]).
+//
+// The engine's ladder/vine data convention -- agreed on by all five places
+// that read it (emitLadder in mesh_block.cpp, the isLadder branch in
+// tile_shapes.cpp, LadderTile::getAABB in tile.cpp, vineWallSolid in
+// tile_reed_cactus.cpp, and the BLOCK_LADDER case in tile_support.cpp) --
+// is that data names WHERE THE WALL IS, and the quad is drawn flush
+// against that same side:
+//     data 2 -> wall at z+1     data 3 -> wall at z-1
+//     data 4 -> wall at x+1     data 5 -> wall at x-1
+//
+// So the value paired with each offset is the INVERSE of the naive
+// f -> 2+f mapping, because VDX/VDZ are ordered -Z, +Z, -X, +X:
+//     f=0 wall at z-1 -> 3     f=1 wall at z+1 -> 2
+//     f=2 wall at x-1 -> 5     f=3 wall at x+1 -> 4
+//
+// Writing { 2, 3, 4, 5 } here (which is what this table used to say) makes
+// every generated vine render and collide on the face OPPOSITE its real
+// support -- floating in open air on one side with the trunk/leaf face
+// eaten on the other. Verified against all five reader tables; do not
+// "simplify" this back to 2,3,4,5.
+static const unsigned char VDATA[4] = { 3, 2, 5, 4 };
 
 // For a 2x2 mega trunk, (x,z) is the "northwestern" corner log (matching
 // vanilla's own convention for where a 2x2 sapling square is anchored);
@@ -56,7 +79,14 @@ static void dropVineChain(World* w, Random& random, int vx, int vy, int vz, int 
         int f = order[oi];
         int wx = vx + VDX[f], wz = vz + VDZ[f];
         unsigned char wallBlock = worldBlock(w, wx, vy, wz);
-        if (!isSolidGen(wallBlock) && !isLeaf(wallBlock)) continue;
+        // Must be the SAME predicate vineWallSolid() uses, or generation and
+        // survival disagree and the vine is culled on the first neighbour
+        // update. isSolidGen() is a pure id test that counts BLOCK_VINE (and
+        // torches, cactus, tallgrass, ...) as solid, so it would happily
+        // anchor a vine to another vine's side -- which vineWallSolid then
+        // rejects, since vine is non-solid. Roughly one vine per chunk was
+        // popping out of existence this way.
+        if (!isSolidPhys(wallBlock) && !isLeaf(wallBlock)) continue;
         if (worldBlock(w, vx, vy, vz) != BLOCK_AIR) continue;
 
         unsigned char data = VDATA[f];

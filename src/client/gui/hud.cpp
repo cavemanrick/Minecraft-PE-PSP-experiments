@@ -183,6 +183,7 @@ static short guiBlockIcon(short id) {
         case BLOCK_WOOD_SLAB_DOUBLE: return 30;
         case BLOCK_BAMBOO: return 272;
         case BLOCK_VINE: return 273;
+        case BLOCK_COCOA: return 274;
         default: return -1;
     }
 }

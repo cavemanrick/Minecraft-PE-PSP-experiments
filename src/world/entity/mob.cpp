@@ -126,8 +126,26 @@ void Mob::travel(float xs, float yf) {
 
         bool ladder = onLadder();
         if (ladder) {
+            // Vanilla climbable handling, in order:
+            //   * fall damage resets
+            //   * horizontal motion is clamped to +/-0.15 b/t
+            //   * descent is floored at -0.15 b/t (slow slide, not a fall)
+            //   * sneaking pins you in place instead of sliding down
+            // The actual climb (yd = 0.2) still requires a horizontal
+            // collision and happens after move(), same as vanilla -- you
+            // climb by pressing into the wall the vine is attached to.
             fallDistance = 0.0f;
+            if (xd >  0.15f) xd =  0.15f;
+            if (xd < -0.15f) xd = -0.15f;
+            if (zd >  0.15f) zd =  0.15f;
+            if (zd < -0.15f) zd = -0.15f;
             if (yd < -0.15f) yd = -0.15f;
+            // Sneak-hang. This is the only thing that makes a free-hanging
+            // vine chain (dropped below a canopy with no wall behind it, so
+            // there is nothing to collide with and therefore no climb)
+            // usable at all -- matching vanilla, where such a vine can be
+            // grabbed but not climbed.
+            if (yd < 0.0f && isSneaking()) yd = 0.0f;
         }
 
         move(xd, yd, zd);

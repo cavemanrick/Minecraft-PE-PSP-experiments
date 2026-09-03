@@ -41,6 +41,10 @@ void saplingGrow(World* w, int x, int y, int z) {
     worldSetTileUpdate(w, x, y, z, BLOCK_AIR, 0);
     if ((data & 3) == 1)      treeSpruce(w, rnd, x, y, z);
     else if ((data & 3) == 2) treeBirch(w, rnd, x, y, z);
+    // LEAF_JUNGLE (3) previously fell through to treeOak, so a jungle
+    // sapling silently grew an oak. treeJungle is already declared in
+    // features.h, which this file already includes.
+    else if ((data & 3) == 3) treeJungle(w, rnd, x, y, z);
     else                      treeOak(w, rnd, x, y, z);
     if (worldBlock(w, x, y, z) == BLOCK_AIR)
         worldSetTileUpdate(w, x, y, z, BLOCK_SAPLING, data);

@@ -384,8 +384,17 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
         case BLOCK_BAMBOO:         *col = 10; *row = 10; break;
         case BLOCK_COCOA: {
             int age = (data >> COCOA_AGE_SHIFT) & COCOA_AGE_MASK;
-            *col = 11; *row = 10;
-            *tint = (age >= 2) ? 0xFFFFFFFFu : 0xFFB0B0B0u;
+            if (age > 2) age = 2;
+            // One purpose-drawn cell per growth stage (olive bud -> tan ->
+            // ripe orange), replacing the old single-cell-plus-brightness
+            // -tint fake. The cells are NOT contiguous: terrain.png has no
+            // free cells left, so these are cocoa's original placeholder
+            // cell plus the only two unreferenced cells in the atlas.
+            // Colour is baked into the art, so *tint stays white.
+            static const unsigned char kCocoaCol[3] = { 11, 13, 13 };
+            static const unsigned char kCocoaRow[3] = { 10, 10, 13 };
+            *col = kCocoaCol[age];
+            *row = kCocoaRow[age];
             break;
         }
         case BLOCK_VINE:           *col = 15; *row = 8; *tint = 0xFF3E8A28u; break;
@@ -458,6 +467,7 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
         // --- Nether texture pack additions (see nether_gen.cpp) ---
         case BLOCK_SOUL_SAND:          *col = 8;  *row = 11; break;
         case BLOCK_SOUL_SOIL:          *col = 9;  *row = 11; break;
+        case BLOCK_BASALT:             *col = 10; *row = 15; break;
         case BLOCK_NETHER_QUARTZ_ORE:  *col = 10; *row = 11; break;
         case BLOCK_MAGMA:              *col = 11; *row = 11; break;
         case BLOCK_WARPED_NYLIUM:
@@ -1111,7 +1121,11 @@ static bool rawSolidPhys(unsigned char id) {
     if (id == BLOCK_TOPSNOW || id == BLOCK_TORCH) return false;
     if (id == BLOCK_FIRE) return false;
     if (isSign(id)) return false;
-    if (id == BLOCK_LADDER) return false;
+    // isLadder(), not BLOCK_LADDER: vine shares this id class and must share
+    // the flag. Vanilla vines are intangible -- you walk straight through
+    // them -- and a solid vine also poisons every other isSolidPhys() call
+    // site (vineWallSolid treating a vine as a wall, mob spawn checks, etc).
+    if (isLadder(id)) return false;
     if (id == BLOCK_PORTAL) return false; // walk straight through, same as a ladder/vine
     return true;
 }
@@ -1121,7 +1135,7 @@ static bool rawCube(unsigned char id) {
     if (id == BLOCK_CACTUS || id == BLOCK_TOPSNOW || id == BLOCK_TORCH) return false;
     if (isFence(id) || isFenceGate(id) || isPane(id)) return false;
     if (isStairs(id) || isSlab(id)) return false;
-    if (id == BLOCK_TRAPDOOR || isDoor(id) || id == BLOCK_LADDER || id == BLOCK_VINE ||
+    if (id == BLOCK_TRAPDOOR || isDoor(id) || isLadder(id) ||
         id == BLOCK_TORCH || isBed(id)) return false;
     if (id == BLOCK_FIRE) return false;
     if (isSign(id)) return false;
@@ -1135,7 +1149,11 @@ static bool rawOpaque(unsigned char id) {
     return id != BLOCK_AIR && !isLiquidId(id) && id != BLOCK_ICE &&
            !isLeaf(id) && id != BLOCK_GLASS && id != BLOCK_SAPLING && id != BLOCK_GLASS_PANE &&
            !isCrossShaped(id) && id != BLOCK_CACTUS && id != BLOCK_TOPSNOW && id != BLOCK_REEDS &&
-           !isSlab(id) && !isStairs(id) && id != BLOCK_FENCE && id != BLOCK_LADDER && id != BLOCK_TORCH &&
+           // isLadder(), not BLOCK_LADDER. mesh_block.cpp culls a neighbour
+           // face whenever isOpaque(nb) is true, so an opaque vine eats the
+           // trunk face it hangs on and the leaf face it hangs from -- the
+           // "see through the wood / sky through the canopy" bug.
+           !isSlab(id) && !isStairs(id) && id != BLOCK_FENCE && !isLadder(id) && id != BLOCK_TORCH &&
            !isDoor(id) && !isTrapdoor(id) && !isFenceGate(id) && !isBed(id) && id != BLOCK_FARMLAND &&
            id != BLOCK_CHEST && !isSign(id) && id != BLOCK_FIRE && id != BLOCK_CAKE && id != BLOCK_COCOA &&
            id != BLOCK_PORTAL;
@@ -1154,7 +1172,9 @@ static int rawLightOpacity(unsigned char id) {
         id == BLOCK_CACTUS || id == BLOCK_TOPSNOW ||
         id == BLOCK_GLASS || id == BLOCK_GLASS_PANE ||
         isFence(id) || isStairs(id) || isSlab(id) || isDoor(id) ||
-        isTrapdoor(id) || isFenceGate(id) || id == BLOCK_LADDER || id == BLOCK_TORCH || isBed(id) ||
+        // isLadder(), not BLOCK_LADDER: an opacity-15 vine casts a solid
+        // black shaft, and a jungle tree hangs dozens of vine chains.
+        isTrapdoor(id) || isFenceGate(id) || isLadder(id) || id == BLOCK_TORCH || isBed(id) ||
         id == BLOCK_FARMLAND || isSign(id) || id == BLOCK_FIRE ||
         id == BLOCK_CHEST || id == BLOCK_CAKE || id == BLOCK_COCOA ||
         id == BLOCK_PORTAL) return 0;
@@ -1238,6 +1258,8 @@ static float rawDestroySpeed(int id) {
         case BLOCK_STONE: case BLOCK_STONE_BRICKS: case BLOCK_BOOKSHELF:
         case BLOCK_STAIRS_STONE_BRICK: case BLOCK_BONE_BLOCK:
             return 1.5f;
+        case BLOCK_BASALT:
+            return 1.25f; // matches vanilla -- softer than stone, harder than netherrack
         case BLOCK_DIRT: case BLOCK_SAND:
             return 0.5f;
         case BLOCK_GRASS: case BLOCK_MYCELIUM:
@@ -1280,6 +1302,8 @@ static float rawDestroySpeed(int id) {
             return 0.5f;
         case BLOCK_CACTUS: case BLOCK_LADDER: case BLOCK_NETHERRACK:
             return 0.4f;
+        case BLOCK_VINE:
+            return 0.2f; // vanilla vine hardness; was falling through to the 1.0 default
         case BLOCK_SOUL_SAND: case BLOCK_SOUL_SOIL:
             return 0.5f;
         case BLOCK_CHEST: case BLOCK_CRAFTING_TABLE: case BLOCK_STONECUTTER:
