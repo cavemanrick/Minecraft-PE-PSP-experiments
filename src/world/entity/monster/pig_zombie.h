@@ -31,16 +31,30 @@ public:
 
     void alert(Entity* target);
 
+    // Anchors wandering AI to a small home patch near where this pig
+    // zombie spawned, the same idea as Strider::setWanderCenter (see
+    // strider.h) but expressed through getWalkTargetValue instead of a
+    // direct movement override, since PigZombie is a PathfinderMob and
+    // strolls via PathfinderMob::findRandomStrollLocation() picking the
+    // best-scoring nearby candidate rather than Strider's own direct
+    // steer-and-move. A pig zombie with no home set (e.g. one loaded from
+    // a save written before this existed) just falls back to
+    // Monster::getWalkTargetValue's ordinary darkness preference.
+    void setHome(float hx, float hy, float hz);
+
 protected:
     virtual Entity* findAttackTarget();
     virtual void dropDeathLoot();
     virtual int  getDeathLoot() { return 0; }
+    virtual float getWalkTargetValue(int x, int y, int z);
 
     virtual void addAdditonalSaveData(CompoundTag* tag);
     virtual void readAdditionalSaveData(CompoundTag* tag);
 
 private:
     int angerTime, playAngrySoundIn, stunedTime;
+    bool hasHome;
+    float homeX, homeY, homeZ;
 };
 
 #endif

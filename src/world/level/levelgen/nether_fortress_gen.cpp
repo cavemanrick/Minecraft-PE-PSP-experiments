@@ -232,10 +232,14 @@ void netherFortressGenerateChunk(World* w, long worldSeed, int chunkX, int chunk
         placeChest(w, xo + 12, deckY + 1, zo + 3, rng);
 
     // Until a Blaze entity exists in the engine, the fortress uses the
-    // existing Nether skeleton/pig-zombie mob set. These are real persistent
-    // mob spawners, not generation-time one-shot entities.
+    // existing Nether pig-zombie mob set plus WarpedSpider (a Nether-native
+    // spider variant -- see warped_spider.h) in place of an ordinary
+    // Skeleton. These are real persistent mob spawners, not
+    // generation-time one-shot entities: the fortress is a fixed landmark,
+    // so a spawner tied to it reads as the spiders "haunting" the
+    // structure rather than a roaming population.
     placeSpawner(w, xo + 7, deckY + 1, zo + 8,
-                 EntityTypes::IdSkeleton, 20 * 7, 20 * 14);
+                 EntityTypes::IdWarpedSpider, 20 * 7, 20 * 14);
     if (rng.nextInt(2) == 0)
         placeSpawner(w, xo + 8, deckY + 1, zo + 8,
                      EntityTypes::IdPigZombie, 20 * 8, 20 * 16);

@@ -18,6 +18,7 @@ extern World g_world;
 #include "world/item/item.h"
 #include "client/renderer/entity/creeper_renderer.h"
 #include "client/renderer/entity/spider_renderer.h"
+#include "client/renderer/entity/warped_spider_renderer.h"
 #include "client/renderer/entity/strider_renderer.h"
 #include "client/renderer/entity/ghast_renderer.h"
 #include "client/renderer/entity/fireball_renderer.h"
@@ -55,6 +56,7 @@ EntityRenderDispatcher::EntityRenderDispatcher() {
     assign(ER_FIREBALL_RENDERER, new FireballRenderer());
     assign(ER_CREEPER_RENDERER,   new CreeperRenderer());
     assign(ER_SPIDER_RENDERER,    new SpiderRenderer());
+    assign(ER_WARPED_SPIDER_RENDERER, new WarpedSpiderRenderer());
     for (int i = 0; i < MAX_RENDERERS; i++)
         if (_renderers[i]) _renderers[i]->init(this);
 }

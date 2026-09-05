@@ -27,6 +27,7 @@ static bool validSpawnerMob(int id) {
     return id == EntityTypes::IdZombie ||
            id == EntityTypes::IdSkeleton ||
            id == EntityTypes::IdSpider ||
+           id == EntityTypes::IdWarpedSpider ||
            id == EntityTypes::IdCreeper ||
            id == EntityTypes::IdPigZombie;
 }

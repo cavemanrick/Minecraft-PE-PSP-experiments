@@ -522,8 +522,19 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     for (int i = 0; i < 20; i++) { int x = xo + random.nextInt(16), y = random.nextInt(64), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_IRON, 8); }
     for (int i = 0; i < 2; i++) { int x = xo + random.nextInt(16), y = random.nextInt(32), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_GOLD, 8); }
     for (int i = 0; i < 8; i++) { int x = xo + random.nextInt(16), y = random.nextInt(16), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_REDSTONE, 7); }
-    for (int i = 0; i < 1; i++) { int x = xo + random.nextInt(16), y = random.nextInt(16), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_DIAMOND, 7); }
-    for (int i = 0; i < 1; i++) { int x = xo + random.nextInt(16), y = random.nextInt(16) + random.nextInt(16), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_LAPIS, 6); }
+    // Diamond and lapis attempt counts doubled (1 -> 2 per chunk each).
+    // Vanilla's real per-chunk counts are coal 20, iron 20, gold 2,
+    // redstone 8, diamond 1, lapis 1 -- this generator already matches
+    // that closely everywhere else, and diamond/lapis being stuck at 1
+    // attempt/chunk is a deliberate vanilla scarcity choice, not a bug.
+    // Doubling keeps them clearly rarer than gold (2) and far rarer than
+    // coal/iron (20), while still being noticeably more frequent than
+    // before -- a plain, easily-adjusted multiplier rather than an
+    // arbitrary-looking number. Vein size (7 / 6) and Y-range are
+    // unchanged; this only changes how often a vein is attempted, same
+    // as the quartz fix above.
+    for (int i = 0; i < 2; i++) { int x = xo + random.nextInt(16), y = random.nextInt(16), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_DIAMOND, 7); }
+    for (int i = 0; i < 2; i++) { int x = xo + random.nextInt(16), y = random.nextInt(16) + random.nextInt(16), z = zo + random.nextInt(16); oreFeature(w, random, x, y, z, BLOCK_ORE_LAPIS, 6); }
 
     return false; }
 

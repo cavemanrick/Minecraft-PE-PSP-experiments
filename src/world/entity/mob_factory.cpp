@@ -12,6 +12,7 @@
 #include "world/entity/monster/skeleton.h"
 #include "world/entity/monster/creeper.h"
 #include "world/entity/monster/spider.h"
+#include "world/entity/monster/warped_spider.h"
 #include "world/entity/monster/pig_zombie.h"
 #include <cstdlib>
 
@@ -34,6 +35,7 @@ typedef char assert_mob_fits_slot[
      sizeof(Skeleton)  <= Entity::ENTITY_SLOT &&
      sizeof(Creeper)   <= Entity::ENTITY_SLOT &&
      sizeof(Spider)    <= Entity::ENTITY_SLOT &&
+     sizeof(WarpedSpider) <= Entity::ENTITY_SLOT &&
      sizeof(Pig)       <= Entity::ENTITY_SLOT &&
      sizeof(Cow)       <= Entity::ENTITY_SLOT &&
      sizeof(Chicken)   <= Entity::ENTITY_SLOT &&
@@ -55,6 +57,7 @@ Mob* createMob(int mobType, Level* level) {
         case EntityTypes::IdSkeleton: r = new Skeleton(level); break;
         case EntityTypes::IdCreeper:  r = new Creeper(level); break;
         case EntityTypes::IdSpider:   r = new Spider(level); break;
+        case EntityTypes::IdWarpedSpider: r = new WarpedSpider(level); break;
         case EntityTypes::IdPigZombie:r = new PigZombie(level); break;
         case EntityTypes::IdStrider:   r = new Strider(level); break;
         case EntityTypes::IdGhast:     r = new Ghast(level); break;

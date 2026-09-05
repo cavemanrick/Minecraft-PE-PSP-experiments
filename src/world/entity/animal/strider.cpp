@@ -11,7 +11,8 @@
 #include <cmath>
 
 Strider::Strider(Level* level)
-: Mob(level), rider(0), saddled(false), riderStrafe(0), riderForward(0), lavaSnapTimer(0) {
+: Mob(level), rider(0), saddled(false), riderStrafe(0), riderForward(0), lavaSnapTimer(0),
+  hasWanderCenter(false), wanderCenterX(0), wanderCenterY(0), wanderCenterZ(0) {
     setSize(0.9f, 1.7f);
     heightOffset = 0.0f;
     footSize = 0.5f;
@@ -51,6 +52,11 @@ bool Strider::canSpawn() {
 void Strider::setRiderInput(float strafe, float forward) {
     riderStrafe = strafe;
     riderForward = forward;
+}
+
+void Strider::setWanderCenter(float wx, float wy, float wz) {
+    hasWanderCenter = true;
+    wanderCenterX = wx; wanderCenterY = wy; wanderCenterZ = wz;
 }
 
 void Strider::syncRider() {
@@ -135,6 +141,40 @@ void Strider::aiStep() {
         yya = riderForward;
         yRot = rider->yRot;
         xRot = 0.0f;
+    } else if (hasWanderCenter) {
+        // Small-area wander: same cheap turn-and-walk idiom as the
+        // unrestricted case below, but steered back toward wanderCenter
+        // whenever the strider has drifted past WANDER_LEASH blocks from
+        // it, instead of picking a heading at random. No target search or
+        // pathfinding added -- this is still just a random-walk with a
+        // bias term, so it stays as cheap as the plain wander case. This
+        // is what actually makes a spawned-in strider easy to catch: it
+        // stays near where it was found rather than drifting indefinitely
+        // across the whole biome.
+        const float WANDER_LEASH = 12.0f;
+        float dxw = x - wanderCenterX, dzw = z - wanderCenterZ;
+        float distw = sqrtf(dxw * dxw + dzw * dzw);
+
+        xxa = 0.0f;
+        yya = 0.0f;
+        if (distw > WANDER_LEASH) {
+            // Past the leash: turn directly toward center rather than
+            // rolling the random-turn dice, so it reliably comes back
+            // instead of maybe wandering further out first.
+            float targetYaw = atan2f(-dxw, dzw) * (180.0f / 3.14159265f);
+            float diff = targetYaw - yRot;
+            while (diff < -180.0f) diff += 360.0f;
+            while (diff >= 180.0f) diff -= 360.0f;
+            yRotA = diff * 0.15f;
+            yya = 0.35f;
+        } else {
+            if (sharedRandom.nextInt(30) == 0)
+                yRotA = (sharedRandom.nextFloat() - 0.5f) * 18.0f;
+            if (sharedRandom.nextInt(20) == 0) yya = 0.35f;
+        }
+        yRot += yRotA;
+        yRotA *= 0.85f;
+        xRot = 0.0f;
     } else {
         // Cheap wandering: no target search, no A*, no path allocation.
         xxa = 0.0f;
@@ -191,9 +231,25 @@ void Strider::tick() {
 void Strider::addAdditonalSaveData(CompoundTag* tag) {
     Mob::addAdditonalSaveData(tag);
     tag->putBoolean("Saddled", saddled);
+    tag->putBoolean("HasWanderCenter", hasWanderCenter);
+    if (hasWanderCenter) {
+        tag->putFloat("WanderCenterX", wanderCenterX);
+        tag->putFloat("WanderCenterY", wanderCenterY);
+        tag->putFloat("WanderCenterZ", wanderCenterZ);
+    }
 }
 
 void Strider::readAdditionalSaveData(CompoundTag* tag) {
     Mob::readAdditionalSaveData(tag);
     saddled = tag->getBoolean("Saddled");
+    // getBoolean/getFloat both default safely (false/0.0f) when the tag is
+    // absent, so a strider saved before this field existed loads with
+    // hasWanderCenter=false and simply falls back to the old unrestricted
+    // wander -- not yanked back to a phantom (0,0,0) center.
+    hasWanderCenter = tag->getBoolean("HasWanderCenter");
+    if (hasWanderCenter) {
+        wanderCenterX = tag->getFloat("WanderCenterX");
+        wanderCenterY = tag->getFloat("WanderCenterY");
+        wanderCenterZ = tag->getFloat("WanderCenterZ");
+    }
 }

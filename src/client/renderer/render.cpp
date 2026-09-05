@@ -169,9 +169,19 @@ static unsigned int g_cloudColorNow = 0xCCFFFFFFu;
 // NETHER_LAND_BASE_Y / NETHER_CEIL_BASE_Y in nether_gen.cpp), so letting the
 // fog run the full view-distance slider would leave far bedrock crisp and
 // undo the effect at exactly the settings where it matters most.
-#define NETHER_FOG_FRACTION 0.55f
-#define NETHER_FOG_MIN      16.0f
-#define NETHER_FOG_MAX      48.0f
+//
+// Thickness halved: fogDist is "how far you can see before it's fully
+// fogged", so halving thickness means doubling that distance. Since the
+// clamp is nonlinear (clamp(x*f, lo, hi)), doubling fogDist at every
+// possible view distance requires doubling the FRACTION *and* both clamp
+// bounds together -- doubling only the bounds, or only the fraction,
+// changes the shape of the curve instead of uniformly scaling it (verified
+// numerically: clamp(vd*0.55, 16,48)*2 == clamp(vd*1.1, 32,96) at every
+// vd, but neither "keep 0.55 and double 16/48" nor "double 0.55 alone"
+// does).
+#define NETHER_FOG_FRACTION 1.1f
+#define NETHER_FOG_MIN      32.0f
+#define NETHER_FOG_MAX      96.0f
 
 // Mist, not a wall. The overworld's general fog path (see the fogDist *
 // 0.25f case below) starts its fade at 25% of the far plane, which reads

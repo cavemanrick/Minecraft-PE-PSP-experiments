@@ -32,12 +32,28 @@ public:
     Player* getRider() const { return rider; }
     bool isSaddled() const { return saddled; }
 
+    // Anchors wandering AI to a small home patch instead of an unbounded
+    // random walk. Sets both the center and a "has a center" flag in one
+    // call -- a strider spawned before this existed (loaded from an old
+    // save) simply has no center and falls back to the old unrestricted
+    // wander, rather than defaulting to (0,0,0) and yanking itself across
+    // the map on load.
+    void setWanderCenter(float wx, float wy, float wz);
+
 private:
     Player* rider;
     bool saddled;
     float riderStrafe;
     float riderForward;
     int lavaSnapTimer;
+    bool hasWanderCenter;
+    // wanderCenterY is stored but not currently read by the leash logic in
+    // aiStep() (Warped Forest floor is flat nylium, so only the X/Z
+    // distance matters for now) -- kept for a future vertical leash if
+    // striders ever wander terrain with real elevation change, rather
+    // than dropping a third of the spawn point and having to re-add it
+    // later.
+    float wanderCenterX, wanderCenterY, wanderCenterZ;
 
     int findLavaSurfaceY(int x, int z) const;
     void syncRider();

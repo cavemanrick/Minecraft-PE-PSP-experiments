@@ -20,6 +20,7 @@ namespace EntityTypes {
     const int IdStrider   = 37;
     const int IdGhast     = 38;
     const int IdVillager = 39;
+    const int IdWarpedSpider = 40;
 
     const int IdLocalPlayer = 63;
     const int IdItemEntity  = 64;

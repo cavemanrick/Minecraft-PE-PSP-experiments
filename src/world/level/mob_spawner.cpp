@@ -11,6 +11,7 @@
 #include "world/entity/animal/animal.h"
 #include "world/entity/animal/strider.h"
 #include "world/entity/monster/ghast.h"
+#include "world/entity/monster/pig_zombie.h"
 #include "world/entity/monster/monster.h"
 #include "world/difficulty.h"
 #include "world/level/levelgen/Random.h"
@@ -42,25 +43,6 @@ static const SpawnEntry MONSTER_TABLE[] = {
 static const int MONSTER_COUNT = (int)(sizeof(MONSTER_TABLE) / sizeof(MONSTER_TABLE[0]));
 
 static const int MONSTER_TOTAL_WEIGHT = 30;
-
-// Nether Wastes gets its own monster table. Zombified piglins are the
-// biome's signature mob and, until ghasts and magma cubes exist here, its
-// only one -- so this is a single-entry table rather than a weighted mix.
-// The weight still has to match NETHER_WASTES_TOTAL_WEIGHT because
-// spawnMonsters derives a per-type population cap from
-// (weight / totalWeight), and a mismatch would silently cap the only mob
-// in the table at a fraction of the level limit.
-//
-// The other two Nether biomes deliberately still fall through to
-// MONSTER_TABLE above. Giving Soul Sand Valley skeletons and Warped Forest
-// its own spawns is a separate piece of work; leaving them alone here
-// keeps this change to the one biome that was asked for rather than
-// quietly redesigning Nether spawning as a whole.
-static const SpawnEntry NETHER_WASTES_TABLE[] = {
-    { EntityTypes::IdPigZombie, 30, 2, 4 },
-};
-static const int NETHER_WASTES_COUNT = (int)(sizeof(NETHER_WASTES_TABLE) / sizeof(NETHER_WASTES_TABLE[0]));
-static const int NETHER_WASTES_TOTAL_WEIGHT = 30;
 
 static const int MIN_SPAWN_DISTANCE = 24;
 
@@ -204,41 +186,26 @@ static void spawnMonsters(Level* level) {
 
         if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
 
-        // worldChunkIsNether deliberately does not check world size or the
-        // reserved bound itself (see its comment in world.h), so
-        // worldChunkIsReserved is checked alongside it rather than assumed
-        // -- on an infinite world those chunk coordinates are ordinary
-        // walkable overworld and must not be treated as the Nether.
-        bool nether = worldChunkIsReserved(level->w, cx, cz) &&
-                      worldChunkIsNether(level->w, cx, cz);
-
+        // This function is Overworld-only. Zombified piglins used to
+        // spawn from here too, gated to Nether Wastes via a second table
+        // (NETHER_WASTES_TABLE) -- moved out to their own spawnPigZombies
+        // below, with a real dedicated population cap (8) and a wander
+        // leash, the same way striders already have their own spawn
+        // function separate from this one rather than sharing the
+        // Overworld monster pool and its proportional-weight cap math.
+        // MONSTER_TABLE below is therefore reached unconditionally now;
+        // if this function is ever called for a Nether chunk it should
+        // simply find no valid standable spot via probeStandableY's
+        // Overworld-shaped search and skip the attempt, not spawn
+        // Overworld mobs into the Nether.
         int xStart = cx * 16 + s_rng.nextInt(16);
         int zStart = cz * 16 + s_rng.nextInt(16);
-        int yStart = nether ? netherProbeStandableY(level, xStart, zStart)
-                            : probeStandableY(level, xStart, zStart);
+        int yStart = probeStandableY(level, xStart, zStart);
         if (yStart < 0) continue;
 
-        // Biome is classified once per attempt, at the attempt's origin,
-        // rather than per pack member: a pack wanders up to a few blocks
-        // from the origin while placing, and re-rolling the table midway
-        // through would let a single pack come out half piglin and half
-        // zombie on a biome border.
-        //
-        // MONSTER_TABLE is Overworld-only (zombies, spiders, skeletons,
-        // creepers) and must never be reached inside the Nether. Nether
-        // Wastes gets its own table below; Soul Sand Valley and Warped
-        // Forest don't have one yet, so those attempts are skipped rather
-        // than silently falling through to Overworld mobs.
         const SpawnEntry* table = MONSTER_TABLE;
         int tableCount = MONSTER_COUNT;
         int tableWeight = MONSTER_TOTAL_WEIGHT;
-        if (nether) {
-            if (classifyNetherBiome(worldGenSeed(), level->w, xStart, zStart) != NB_WASTES)
-                continue;
-            table = NETHER_WASTES_TABLE;
-            tableCount = NETHER_WASTES_COUNT;
-            tableWeight = NETHER_WASTES_TOTAL_WEIGHT;
-        }
 
         if (level->isSolidBlockingTile(xStart, yStart, zStart)) continue;
         if (level->getTile(xStart, yStart, zStart) != BLOCK_AIR) continue;
@@ -282,6 +249,98 @@ static void spawnMonsters(Level* level) {
     }
 }
 
+// Zombified piglins: their own dedicated population budget, the same
+// pattern striders already use below, rather than sharing the Overworld
+// monster pool via a weighted table (NETHER_WASTES_TABLE, removed --
+// see spawnMonsters' comment). That table's per-type cap was derived
+// proportionally from MobCategory::monster.maxPerLevel and the table
+// weight, which produced a much higher and less predictable effective
+// cap than a plain fixed number; PIGZOMBIE_MAX_PER_LEVEL below is exactly
+// what it says instead.
+static const int PIGZOMBIE_MAX_PER_LEVEL = 8;
+static const int PIGZOMBIE_SPAWN_ATTEMPTS = 4;
+static const int PIGZOMBIE_MIN_SPAWN_DISTANCE = 24;
+
+static void spawnPigZombies(Level* level) {
+    LocalPlayer* p = level->player;
+    if (!p) return;
+    if (level->getDifficulty() == Difficulty::PEACEFUL) return;
+
+    int count = level->countInstanceOfType(EntityTypes::IdPigZombie);
+    if (count >= PIGZOMBIE_MAX_PER_LEVEL) return;
+
+    int pcx = (int)floorf(p->x / 16.0f);
+    int pcz = (int)floorf(p->z / 16.0f);
+    const int R = 128 / 16;
+
+    for (int attempt = 0; attempt < PIGZOMBIE_SPAWN_ATTEMPTS; ++attempt) {
+        if (count >= PIGZOMBIE_MAX_PER_LEVEL) return;
+
+        int cx = pcx + s_rng.nextInt(2 * R + 1) - R;
+        int cz = pcz + s_rng.nextInt(2 * R + 1) - R;
+
+        // worldChunkIsNether deliberately does not check world size or the
+        // reserved bound itself (see its comment in world.h), so
+        // worldChunkIsReserved is checked alongside it rather than assumed
+        // -- on an infinite world those chunk coordinates are ordinary
+        // walkable overworld and must not be treated as the Nether.
+        if (!worldChunkIsReserved(level->w, cx, cz) ||
+            !worldChunkIsNether(level->w, cx, cz)) continue;
+        if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
+
+        int xStart = cx * 16 + s_rng.nextInt(16);
+        int zStart = cz * 16 + s_rng.nextInt(16);
+
+        // Confined to Nether Wastes: the biome check happens before the
+        // (comparatively expensive) standable-floor probe, same ordering
+        // spawnMonsters used for its old Wastes-only gate.
+        if (classifyNetherBiome(worldGenSeed(), level->w, xStart, zStart) != NB_WASTES) continue;
+
+        int yStart = netherProbeStandableY(level, xStart, zStart);
+        if (yStart < 0) continue;
+
+        float dx = xStart + 0.5f - p->x;
+        float dy = yStart - p->y;
+        float dz = zStart + 0.5f - p->z;
+        if (dx * dx + dy * dy + dz * dz <
+            (float)(PIGZOMBIE_MIN_SPAWN_DISTANCE * PIGZOMBIE_MIN_SPAWN_DISTANCE)) continue;
+
+        if (level->isSolidBlockingTile(xStart, yStart, zStart)) continue;
+        if (level->getTile(xStart, yStart, zStart) != BLOCK_AIR) continue;
+
+        int cluster = 2 + s_rng.nextInt(3); // 2-4, same shape the old table entry used
+        if (cluster > PIGZOMBIE_MAX_PER_LEVEL - count)
+            cluster = PIGZOMBIE_MAX_PER_LEVEL - count;
+
+        for (int i = 0; i < cluster; ++i) {
+            int x = xStart + s_rng.nextInt(6) - s_rng.nextInt(6);
+            int z = zStart + s_rng.nextInt(6) - s_rng.nextInt(6);
+            if (!spawnOk(level, x, yStart, z)) continue;
+            // Re-check biome per cluster member: same reasoning as
+            // spawnStriders' own per-member check -- a jitter can walk
+            // off Wastes onto neighbouring Soul Sand Valley/Warped Forest
+            // ground.
+            if (classifyNetherBiome(worldGenSeed(), level->w, x, z) != NB_WASTES) continue;
+
+            PigZombie* pz = (PigZombie*)MobFactory::createMob(EntityTypes::IdPigZombie, level);
+            if (!pz) return;
+            pz->moveTo(x + 0.5f, (float)yStart, z + 0.5f,
+                      s_rng.nextFloat() * 360.0f, 0.0f);
+            if (!pz->canSpawn()) {
+                delete pz;
+                continue;
+            }
+            // Confines wandering to this patch afterward (see
+            // PigZombie::getWalkTargetValue) -- this is what actually
+            // keeps a spawned-in group near the Wastes ground it spawned
+            // on instead of pathfinding arbitrarily far away over time.
+            pz->setHome(x + 0.5f, (float)yStart, z + 0.5f);
+            level->addEntity(pz);
+            ++count;
+        }
+    }
+}
+
 
 // Striders are passive Nether mobs, but they deliberately have their own
 // small population budget rather than consuming the Overworld creature cap.
@@ -291,14 +350,20 @@ static const int STRIDER_MAX_PER_LEVEL = 4;
 static const int STRIDER_SPAWN_ATTEMPTS = 4;
 static const int STRIDER_MIN_SPAWN_DISTANCE = 24;
 
-static int findStriderLavaY(Level* L, int x, int z) {
-    // The generated Nether's lava sea is below the land base. Scan only the
-    // useful part of the shell rather than the full 128-block world height.
-    for (int y = netherShellFloorBaseY() - 1; y >= 1; --y) {
-        unsigned char id = (unsigned char)L->getTile(x, y, z);
-        if (!isLavaId(id)) continue;
-        unsigned char above = (unsigned char)L->getTile(x, y + 1, z);
-        if (!L->isSolidBlockingTile(x, y + 1, z) && !isLavaId(above)) return y;
+// Warped Forest floor search, replacing the old lava-surface search
+// (findStriderLavaY). Striders now spawn standing on warped nylium, not
+// floating on a lava sea -- Strider::travel() already has a full
+// non-lava/on-land branch (gravity + ground collision, see strider.cpp),
+// so this only changes where they come from, not how they move once
+// spawned. Returns the first open-air Y with warped nylium immediately
+// below, or -1 if the column has none in the searched range.
+static int findStriderNyliumY(Level* L, int x, int z) {
+    int lo = netherShellFloorBaseY(), hi = netherShellCeilBaseY();
+    for (int y = hi; y >= lo; --y) {
+        if ((unsigned char)L->getTile(x, y - 1, z) != BLOCK_WARPED_NYLIUM) continue;
+        if (L->isSolidBlockingTile(x, y, z)) continue;
+        if (L->isSolidBlockingTile(x, y + 1, z)) continue;
+        return y;
     }
     return -1;
 }
@@ -326,7 +391,13 @@ static void spawnStriders(Level* level) {
         int x = cx * 16 + s_rng.nextInt(16);
         int z = cz * 16 + s_rng.nextInt(16);
 
-        int y = findStriderLavaY(level, x, z);
+        // Biome-gated: only Warped Forest chunks are candidates at all.
+        // Checked before the (cheaper-looking, but now pointless if the
+        // biome is wrong) floor search, same order spawnMonsters already
+        // uses for its own Wastes-only gate above.
+        if (classifyNetherBiome(worldGenSeed(), level->w, x, z) != NB_WARPED_FOREST) continue;
+
+        int y = findStriderNyliumY(level, x, z);
         if (y < 0) continue;
 
         float dx = x + 0.5f - p->x;
@@ -343,7 +414,14 @@ static void spawnStriders(Level* level) {
         for (int i = 0; i < cluster; ++i) {
             int sx = x + s_rng.nextInt(5) - s_rng.nextInt(5);
             int sz = z + s_rng.nextInt(5) - s_rng.nextInt(5);
-            int sy = findStriderLavaY(level, sx, sz);
+            // Re-check biome per cluster member too: a 5-block jitter can
+            // walk off the Warped Forest edge onto neighbouring Wastes/
+            // Soul Sand Valley ground, which happens to still have nylium
+            // nowhere near it (so findStriderNyliumY would already return
+            // -1 there in practice), but the explicit check keeps the
+            // intent obvious rather than relying on that coincidence.
+            if (classifyNetherBiome(worldGenSeed(), level->w, sx, sz) != NB_WARPED_FOREST) continue;
+            int sy = findStriderNyliumY(level, sx, sz);
             if (sy < 0) continue;
 
             Strider* strider = (Strider*)MobFactory::createMob(EntityTypes::IdStrider, level);
@@ -354,6 +432,14 @@ static void spawnStriders(Level* level) {
                 delete strider;
                 continue;
             }
+            // Anchors this strider to a small home patch (see
+            // Strider::aiStep/wanderCenter in strider.cpp): wandering is
+            // clamped to a short leash from here instead of drifting
+            // indefinitely, which is what actually makes them "easier to
+            // catch" -- a strider that stays near where you found it
+            // rather than one that can wander off through the whole
+            // biome.
+            strider->setWanderCenter(sx + 0.5f, (float)sy, sz + 0.5f);
             level->addEntity(strider);
             ++count;
         }
@@ -498,6 +584,7 @@ void tick(Level* level, bool spawnEnemies, bool spawnFriendlies) {
     if (spawnEnemies)    {
         spawnMonsters(level);
         if ((level->w->time % 40) == 0) spawnStriders(level);
+        if ((level->w->time % 40) == 0) spawnPigZombies(level);
         if ((level->w->time % 60) == 0) spawnGhasts(level);
     }
 }
