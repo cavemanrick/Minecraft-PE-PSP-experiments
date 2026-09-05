@@ -58,6 +58,7 @@ OBJS = \
 	src/platform/malloc_lock.o \
 	src/platform/audio/sound.o \
 	src/platform/audio/music.o \
+	src/platform/audio/extended_sound_fx.o \
 	src/world/level/storage/external_servers.o \
 	src/world/level/storage/worldlist.o \
 	src/world/level/storage/region_file.o \

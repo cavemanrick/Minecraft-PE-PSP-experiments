@@ -18,6 +18,7 @@
 #include <cstring>
 #include "gpu/item_icons.h"
 #include "gpu/spawn_egg_colors.h"
+#include "platform/audio/extended_sound_fx.h"
 #include "world/achievement/achievement.h"
 
 extern bool g_tradeOpen;
@@ -78,6 +79,7 @@ static void achvToastTick() {
             strncpy(s_achvToastName, name, sizeof(s_achvToastName) - 1);
             s_achvToastName[sizeof(s_achvToastName) - 1] = '\0';
             s_achvToastStart = now;
+            extendedSoundFXPlay("data/sound/achievement.raw"); // streamed from disk, not the RAM-resident sound pack
         }
     }
 }
@@ -638,6 +640,46 @@ const char* getBlockName(short id, unsigned char data) {
             return (age >= 2) ? "Cocoa Pod" : "Cocoa Bud";
         }
         case BLOCK_VINE: return "Vine";
+
+        // --- Nether blocks -------------------------------------------
+        // These all fall through to Tile::getResource's
+        // `default: return { id, 1, 0 }`, so mining one puts the block
+        // itself in your hand and the hotbar label was reading "Block".
+        case BLOCK_MAGMA: return "Magma Block";
+        case BLOCK_SOUL_SAND: return "Soul Sand";
+        case BLOCK_SOUL_SOIL: return "Soul Soil";
+        case BLOCK_BASALT: return "Basalt";
+        case BLOCK_NETHER_QUARTZ_ORE: return "Nether Quartz Ore";
+        case BLOCK_WARPED_NYLIUM: return "Warped Nylium";
+        case BLOCK_WARPED_STEM: return "Warped Stem";
+        case BLOCK_WARPED_PLANKS: return "Warped Planks";
+        case BLOCK_WARPED_WART_BLOCK: return "Warped Wart Block";
+        case BLOCK_WARPED_FUNGUS: return "Warped Fungus";
+        case BLOCK_WARPED_ROOTS: return "Warped Roots";
+        case BLOCK_NETHER_SPROUTS: return "Nether Sprouts";
+        case BLOCK_TWISTING_VINES: return "Twisting Vines";
+
+        // --- Obtainable, but drop something other than themselves ----
+        case BLOCK_MOB_SPAWNER: return "Monster Spawner";
+        case BLOCK_BEDROCK: return "Bedrock";
+        case BLOCK_FURNACE_LIT: return "Furnace";
+        case BLOCK_ORE_REDSTONE_LIT: return "Redstone Ore";
+        case BLOCK_DOUBLE_SLAB: return "Double Slab";
+        case BLOCK_SIGN: case BLOCK_WALL_SIGN: return "Sign";
+        case BLOCK_WHEAT: return "Wheat Crops";
+        case BLOCK_MELON_STEM: return "Melon Stem";
+
+        // --- Internal / never legitimately held -----------------------
+        // Named anyway: a debug world can put any id in your hand, and
+        // "Block" tells you nothing when that happens.
+        case BLOCK_AIR: return "Air";
+        case BLOCK_WATER: case BLOCK_CALM_WATER: return "Water";
+        case BLOCK_LAVA: case BLOCK_CALM_LAVA: return "Lava";
+        case BLOCK_FIRE: return "Fire";
+        case BLOCK_PORTAL: return "Nether Portal";
+        case BLOCK_INVISIBLE_BEDROCK: return "Invisible Bedrock";
+        case BLOCK_UPDATE1: return "Update Game Block 1";
+        case BLOCK_UPDATE2: return "Update Game Block 2";
 
         default: return "Block";
     }

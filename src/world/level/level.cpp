@@ -1,4 +1,5 @@
 #include "world/level/level.h"
+#include "world/level/levelgen/village_gen.h"
 #include "world/entity/path_finder_mob.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
@@ -302,6 +303,11 @@ void Level::addEntity(Entity* e) {
 static const int SPAWN_INTERVAL = 2;
 
 void Level::tickEntities() {
+
+    // Village generation may run on the asynchronous chunk worker. Convert
+    // its lightweight spawn requests into real entities here, on the main
+    // gameplay thread, after streaming has made the chunk resident.
+    villageTick(w);
 
     // Refill the shared A* budget before any mob AI runs this tick. Has to
     // be here rather than inside PathfinderMob: the budget is global, so

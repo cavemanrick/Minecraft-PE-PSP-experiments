@@ -18,6 +18,9 @@ bool villageChunkHasVillage(int chunkX, int chunkZ);
 
 // Compact villager state is kept with the village chunk save record.
 // The runtime entity exists only while its chunk is resident.
+// Main-thread entity handoff for streamed/generated village villagers.
+void villageTick(World* w);
+
 void villageChunkLoaded(World* w, int chunkX, int chunkZ,
                         const unsigned char* data, int dataLen);
 void villageChunkSaveData(World* w, int chunkX, int chunkZ,

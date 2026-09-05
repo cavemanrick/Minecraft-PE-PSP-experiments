@@ -21,6 +21,13 @@ void reedCactusGrow(World* w, int x, int y, int z, unsigned char id, int ageThre
 bool bambooCanSurvive(World* w, int x, int y, int z);
 void bambooGrow(World* w, int x, int y, int z, int ageThreshold, int maxHeight);
 bool vineCanSurvive(World* w, int x, int y, int z);
+// Same check as vineCanSurvive, but takes the wall-face data value directly
+// instead of reading it from the world. Needed at placement time, when the
+// target cell's data hasn't been written yet (see TileItem::useOn: mayPlace
+// is checked before placeTileResolved writes the placed data), so reading
+// worldData(x,y,z) there would always see 0 regardless of which face the
+// player clicked.
+bool vineCanSurviveOnFace(World* w, int x, int y, int z, int data);
 bool cocoaCanSurvive(World* w, int x, int y, int z, int data);
 
 void tickFarmland(World* w, int x, int y, int z);

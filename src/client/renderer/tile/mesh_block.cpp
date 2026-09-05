@@ -245,7 +245,14 @@ int emitLadder(ChunkVertex* out, int n, int gx, int y, int gz, unsigned char id,
         P[0][0]=x0+r; P[0][1]=yt; P[0][2]=z1; P[1][0]=x0+r; P[1][1]=yb; P[1][2]=z1; P[2][0]=x0+r; P[2][1]=yb; P[2][2]=z0; P[3][0]=x0+r; P[3][1]=yt; P[3][2]=z0;
     } else return n;
     const float UV[4][2] = { {u0, v0}, {u0, v1}, {u1, v1}, {u1, v0} };
-    return writeQuadDouble(out, n, P, UV, bright);
+    // mulColor(bright, tint), not bare bright. The tint was being fetched
+    // from tileForBlock above and then thrown away, which is fine for a
+    // ladder (white tint) but not for a vine: the vine cell at (15,8) is
+    // an achromatic mask that carries its green entirely in the tint
+    // (0xFF3E8A28 -> rgb(40,138,62)), so discarding it rendered every
+    // vine in greyscale. Matches emitCross/emitFlat/emitPane, which all
+    // already combine the two the same way.
+    return writeQuadDouble(out, n, P, UV, mulColor(bright, tint));
 }
 
 static inline bool isNoMipLayerId(unsigned char id) {

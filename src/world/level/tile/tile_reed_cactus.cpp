@@ -42,11 +42,14 @@ static bool vineWallSolid(World* w, int x, int y, int z, int data) {
     return isSolidPhys(wallBlock) || isLeaf(wallBlock);
 }
 
-bool vineCanSurvive(World* w, int x, int y, int z) {
+bool vineCanSurviveOnFace(World* w, int x, int y, int z, int data) {
     unsigned char above = worldBlock(w, x, y + 1, z);
     if (above == BLOCK_VINE || isSolidPhys(above) || isLeaf(above)) return true;
-    int data = worldData(w, x, y, z);
     return vineWallSolid(w, x, y, z, data);
+}
+
+bool vineCanSurvive(World* w, int x, int y, int z) {
+    return vineCanSurviveOnFace(w, x, y, z, worldData(w, x, y, z));
 }
 
 static inline bool isJungleLog(World* w, int x, int y, int z) {

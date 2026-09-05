@@ -44,6 +44,18 @@ CELLS = [
     # mip cells were both wrong art and double-tinted at distance.
     (4, 11, "fern lower"),
     (5, 11, "fern upper"),
+    # The shared wool mask. All 16 wool colours render from this one cell
+    # plus a per-colour tint (see tile_wool.cpp), so it is the only wool
+    # cell that still needs mip coverage.
+    (0, 4, "wool mask"),
+]
+
+# Cells freed by the wool collapse. Cleared to fully transparent in
+# terrain.png and both mips. Move an entry into CELLS above when you put
+# real art in one.
+FREE_CELLS = [
+    (1, 7), (1, 8), (1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14),
+    (2, 7), (2, 8), (2, 9), (2, 10), (2, 11), (2, 12), (2, 13),
 ]
 
 

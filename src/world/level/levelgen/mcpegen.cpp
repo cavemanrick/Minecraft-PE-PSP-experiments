@@ -536,13 +536,42 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     if (random.nextInt(10) == 0) forests += 1;
     if (biome == B_FOREST)   forests += oFor + 2;
     if (biome == B_RAIN)     forests += oFor + 2;
-    if (biome == B_JUNGLE)   forests += oFor + 3;
+    // Jungle: denser than the plain forests, and denser than it used to be
+    // (was oFor + 3). About a third of these come out as short oaks filling
+    // the understorey under the tall jungle canopy, so the extra rolls buy
+    // a layered forest rather than just more of the same tree.
+    if (biome == B_JUNGLE)   forests += oFor + 8;
     if (biome == B_SEASONAL) forests += oFor + 1;
     if (biome == B_TAIGA)    forests += oFor + 1;
-    // Dark forest: "a much higher density of trees compared to other
-    // forest biomes" (wiki) -- even denser than jungle here, dense enough
-    // that direct sky is often blocked, matching the reference.
-    if (biome == B_DARK_FOREST) forests += oFor + 4;
+    // Dark forest: the canopy is meant to be a continuous roof -- thick
+    // enough to walk across, to black out the forest floor, and so to let
+    // hostiles spawn under it in daylight. That needs far more trees than
+    // the other forest biomes, not slightly more.
+    //
+    // Monte Carlo over a 3x3 chunk area, canopy modelled as the r=3/4/4/3/2
+    // blob stack treeDarkOak actually builds, rejecting a tree when a log
+    // is already within 3 blocks (leaves do not block placement --
+    // isSolidGen excludes them -- so canopies interpenetrate freely and
+    // only trunks compete):
+    //
+    //   attempts/chunk    trees planted    sky covered
+    //          6 (old)          4.3            66%
+    //         12                6.7            85%
+    //         18                7.1            88%
+    //         24                8.7            95%
+    //         30                9.4            98%
+    //
+    // Trunk collisions cap planted trees around 9-10 per chunk, so past
+    // ~24 attempts the extra rolls buy almost nothing.
+    //
+    // The vertex cost is far below what 4x the trees suggests, because
+    // mesh_block.cpp:432 culls leaf-against-leaf whenever leavesCull or
+    // leavesOpaque is set (i.e. always, unless fancy graphics AND fancy
+    // leaves are both on). Merged canopies therefore render one shared
+    // shell rather than one shell per tree: exposed leaf faces per chunk
+    // go 678 -> 1006 from 6 to 24 attempts, about 6k verts in layer 2
+    // against a 65536 scratch cap. Beyond 18 attempts it is flat.
+    if (biome == B_DARK_FOREST) forests += oFor + 22;
     if (biome == B_DESERT)   forests -= 20;
     if (biome == B_TUNDRA)   forests -= 20;
     if (biome == B_PLAINS)   forests -= 20;
@@ -564,8 +593,27 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
             random.nextInt(3);
             treeOak(w, random, tx, ty, tz);
         } else if (biome == B_JUNGLE) {
+            // Roughly one tree in three is an ordinary short oak. Jungle
+            // trees are tall with the canopy held high, so a jungle built
+            // only from them has an empty, walkable understorey; the short
+            // oaks fill that lower layer and give the vines something to
+            // hang on at eye level.
+            //
+            // Both kinds get their trunk sheathed. treeJungle does its own
+            // columns internally (it knows whether it built a 1x1 or a 2x2
+            // trunk); the oak is coated here, since treeOak is shared with
+            // every other biome and must not start growing vines in them.
+            //
+            // vineCoatTrunk walks upward while the column is still log, so
+            // it does not need to be told the tree's height, and it is a
+            // no-op if treeOak declined to build (no log at ty).
             random.nextInt(3);
-            treeJungle(w, random, tx, ty, tz);
+            if (random.nextInt(3) == 0) {
+                treeOak(w, random, tx, ty, tz);
+                vineCoatTrunk(w, random, tx, ty, tz);
+            } else {
+                treeJungle(w, random, tx, ty, tz);
+            }
         } else if (biome == B_DARK_FOREST) {
             // Dark oaks with the occasional ordinary oak mixed in (wiki:
             // "Oak, dark oak, and sometimes birch trees generate in these
@@ -602,17 +650,24 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     }
 
     if (biome == B_DARK_FOREST) {
-        // "Both types of huge mushrooms generate among the trees, though
-        // the red variants are more common" (wiki) -- occasional, not the
-        // dense per-chunk cluster mushroom fields gets: most chunks get
-        // none at all, a minority get one, rarely two. hugeMushroomSpace-
-        // Clear already rejects placement in space the dense dark oak
-        // canopy above has filled, which is exactly the "sometimes
-        // crowded out by trees" look the reference renders show, so no
-        // extra crowding logic is needed here beyond trying a couple of
-        // random spots.
-        int attempts = random.nextInt(3); // 0, 1, or 2 tries per chunk
-        for (int i = 0; i < attempts; i++) {
+        // Huge mushrooms are a rare landmark here, not scenery. The old
+        // random.nextInt(3) meant 0/1/2 attempts per chunk -- an average
+        // of one per chunk, so on the order of eighty across a dark forest
+        // region on the 512 preset. They read as a mushroom field with
+        // trees in it rather than a forest with the odd mushroom.
+        //
+        // One attempt in DARK_FOREST_MUSHROOM_ODDS chunks instead. A
+        // Voronoi region is roughly 1/13 of the world, so:
+        //
+        //   512 preset  (1024 chunks) -> ~79 chunks/biome  -> ~2 mushrooms
+        //   1024 preset (4096 chunks) -> ~315 chunks/biome -> ~8 mushrooms
+        //
+        // and the real count comes in under that, because
+        // hugeMushroomSpaceClear still rejects spots the dense canopy has
+        // already filled. Tuned for the 512 default; this is the knob to
+        // turn if the 1024 preset feels crowded.
+        const int DARK_FOREST_MUSHROOM_ODDS = 40;
+        if (random.nextInt(DARK_FOREST_MUSHROOM_ODDS) == 0) {
             int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
             int ty = heightmapAt(w, tx, tz);
             if (random.nextInt(5) < 3) mushroomHugeRed(w, random, tx, ty, tz);   // red more common

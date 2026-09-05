@@ -79,11 +79,18 @@ static void leafBlob(World* w, Random& random, int cx, int cy, int cz, int radiu
     }
 }
 
-// Short, gnarled branch stub jutting off the trunk, ending in its own
+// Short, gnarled branch KNOB jutting off the trunk, ending in its own
 // small leaf clump -- dark oak's branches are irregular and asymmetric
 // rather than evenly spaced, matching vanilla's actual look.
 static void growDarkOakBranch(World* w, Random& random, int x, int y, int z, int dx, int dz) {
-    int len = 1 + random.nextInt(3); // 1-3 logs, deliberately short/stubby
+    // 1-2 logs, not 1-3. At three the branch reads as a limb reaching out
+    // of the silhouette rather than a knob on the trunk, and its tip blob
+    // sits far enough out to break the canopy's flat roofline.
+    //
+    // DARK_OAK_FIRST_BRANCH_LAYER's clearance comment still refers to a
+    // 5-block reach; that is now conservative rather than wrong, so the
+    // clearance test simply rejects slightly more than it needs to.
+    int len = 1 + random.nextInt(2);
     int bx = x, by = y, bz = z;
     for (int i = 0; i < len; i++) {
         bx += dx; bz += dz;

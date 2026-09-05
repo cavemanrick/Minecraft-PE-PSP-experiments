@@ -17,6 +17,7 @@
 #include "util/prof.h"
 #include "platform/audio/sound.h"
 #include "platform/audio/music.h"
+#include "platform/audio/extended_sound_fx.h"
 #include "world/level/storage/worldlist.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
@@ -138,6 +139,7 @@ int main(int argc, char* argv[]) {
     srand((unsigned int)sceKernelGetSystemTimeWide());
     soundInit();
     musicInit();
+    extendedSoundFXInit();
     optionsLoad();
     achievementsInit();
 

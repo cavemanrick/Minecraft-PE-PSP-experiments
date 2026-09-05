@@ -510,7 +510,7 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
 
         case BLOCK_STAIRS_NETHER_BRICK:
         case BLOCK_NETHER_BRICK: *col = 0; *row = 14; break;
-        case BLOCK_WOOL: tileWool(data, f, col, row); break;
+        case BLOCK_WOOL: tileWool(data, f, col, row, tint); break;
         case BLOCK_TNT:
             if (f == F_TOP)       { *col = 9;  *row = 0; }
             else if (f == F_DOWN) { *col = 10; *row = 0; }
@@ -1021,6 +1021,24 @@ struct BambooTile : GrowerTile { BambooTile(unsigned char i) : GrowerTile(i) {}
 struct VineTile : GrowerTile { VineTile(unsigned char i) : GrowerTile(i) {}
     bool canSurvive(World* w, int x, int y, int z) { return vineCanSurvive(w, x, y, z); }
     bool mayPlace(World* w, int x, int y, int z) { return Tile::mayPlace(w, x, y, z) && canSurvive(w, x, y, z); }
+
+    // Face-aware overload: tileMayPlace() calls this one, and at this point
+    // the target cell's data hasn't been written yet (placement writes data
+    // only after mayPlace passes), so we must derive the wall-face data from
+    // `face` directly rather than reading worldData -- see vineCanSurviveOnFace.
+    bool mayPlace(World* w, int x, int y, int z, int face) {
+        if (!Tile::mayPlace(w, x, y, z)) return false;
+        return vineCanSurviveOnFace(w, x, y, z,
+                                     getPlacedOnFaceDataValue(w, x, y, z, face, 0.0f, 0.0f, 0.0f, 0));
+    }
+
+    // Same face->data convention as LadderTile (data encodes which side the
+    // supporting wall is on): F_BACK->z+1, F_FORWARD->z-1, F_LEFT->x+1,
+    // F_RIGHT->x-1. F_TOP/F_DOWN have no vine wall mapping.
+    int getPlacedOnFaceDataValue(World*, int, int, int, int face, float, float, float, int) {
+        switch (face) { case F_BACK: return 2; case F_FORWARD: return 3;
+                        case F_LEFT: return 4; case F_RIGHT: return 5; default: return 0; }
+    }
 
     void grow(World* w, int x, int y, int z) {
         if (worldBlock(w, x, y - 1, z) != BLOCK_AIR) return;

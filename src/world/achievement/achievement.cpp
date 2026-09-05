@@ -21,7 +21,6 @@ static const AchievementDef kDefs[ACHV_COUNT] = {
     { ACHV_STONE_AGE,          ACHV_CAT_PROGRESSION, "Stone Age",           "Obtain stone", true },
     { ACHV_GETTING_UPGRADE,    ACHV_CAT_PROGRESSION, "Getting an Upgrade",  "Craft a better pickaxe", true },
     { ACHV_DIAMONDS,           ACHV_CAT_PROGRESSION, "Diamonds!",           "Obtain a diamond", true },
-    { ACHV_INTO_THE_NETHER,    ACHV_CAT_PROGRESSION, "Into the Nether",     "Enter the Nether", true },
     { ACHV_RETURN_TO_SENDER,   ACHV_CAT_PROGRESSION, "Return to Sender",    "Kill a Ghast with a deflected fireball", true },
 
     { ACHV_ADVENTURER,         ACHV_CAT_EXPLORATION, "Adventurer",          "Visit 5 biomes", true },
@@ -80,7 +79,9 @@ const char* achievementCategoryName(AchievementCategory c) {
 // few dozen bytes here -- clarity of the on-disk struct matters more than
 // squeezing it further.
 
-#define ACHV_SAVE_VERSION 1
+#define ACHV_SAVE_VERSION 2 // bumped: ACHV_INTO_THE_NETHER removed, shifting every
+                             // subsequent AchievementId's bit index -- old saves must
+                             // reset rather than silently reinterpret stale bits
 
 struct AchievementCounters {
     int blocksMined;
@@ -429,7 +430,6 @@ void achvOnNetherBiomeEntered(int netherBiomeId) {
 }
 
 void achvOnNetherEntered() {
-    unlock(ACHV_INTO_THE_NETHER);
     unlock(ACHV_INTO_THE_FIRE);
 }
 

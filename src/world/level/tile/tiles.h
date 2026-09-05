@@ -2,7 +2,7 @@
 #define TILES_H__
 
 void tileGlass(unsigned char data, int f, int* col, int* row);
-void tileWool(unsigned char data, int f, int* col, int* row);
+void tileWool(unsigned char data, int f, int* col, int* row, unsigned int* tint);
 void tileLeaves(unsigned char data, int f, int* col, int* row, unsigned int* tint);
 void tileFurnace(unsigned char data, int f, bool lit, int* col, int* row);
 void tileChest(unsigned char data, int f, int* col, int* row);

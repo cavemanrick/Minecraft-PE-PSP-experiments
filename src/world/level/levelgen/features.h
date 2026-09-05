@@ -47,6 +47,10 @@ void treeBirch(World* w, Random& random, int x, int y, int z);
 void treeSpruce(World* w, Random& random, int x, int y, int z);
 void treePine(World* w, Random& random, int x, int y, int z);
 void treeJungle(World* w, Random& random, int x, int y, int z);
+// Sheathes a log column in vines from (x,y,z) upward. Exposed so the
+// ordinary oaks mixed into the jungle can be coated the same way the
+// jungle trees are -- see the B_JUNGLE branch in mcpegen.cpp.
+void vineCoatTrunk(World* w, Random& random, int x, int y, int z);
 void treeDarkOak(World* w, Random& random, int x, int y, int z);
 void flowerFeature(World* w, Random& random, int x, int y, int z, unsigned char tile, unsigned char data = 0);
 void mushroomFeature(World* w, Random& random, int x, int y, int z, unsigned char tile);

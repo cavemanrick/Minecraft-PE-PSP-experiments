@@ -219,6 +219,12 @@ int itemBuildFlatMesh(short id, unsigned char data, ChunkVertex* out, int bowSta
 
     float tex_w;
     float sx, sy;
+    // Tint of the block being drawn. Blocks whose artwork is a greyscale
+    // mask (wool, grass top, leaves, vines) carry their colour in
+    // tileForBlock's tint rather than in the texture, so dropping it here
+    // renders them grey. Only the terrain-atlas branch below can produce a
+    // non-white value; gui_blocks artwork already has colour baked in.
+    unsigned int blockTint = 0xFFFFFFFFu;
     if (id >= 256) {
 
         if (id == ITEM_SADDLE && g_haveSaddleItem) {
@@ -243,6 +249,7 @@ int itemBuildFlatMesh(short id, unsigned char data, ChunkVertex* out, int bowSta
         } else {
             int col, row; unsigned int tint;
             tileForBlock(id, data, 0, &col, &row, &tint);
+            blockTint = tint;
             sx = col * 16.0f;
             sy = row * 16.0f;
             tex_w = 256.0f;
@@ -252,9 +259,13 @@ int itemBuildFlatMesh(short id, unsigned char data, ChunkVertex* out, int bowSta
     const float z0 = 0.0f, z1 = -1.0f/16.0f;
     const float T  = 1.0f/16.0f;
 
-    const unsigned int colFB = 0xFFFFFFFFu;
-    const unsigned int colLR = 0xFFCCCCCCu;
-    const unsigned int colTB = 0xFF999999u;
+    // Face shading, with the block tint folded in. eggMul is just a
+    // per-channel multiply, so it works as a general colour combine.
+    // blockTint is white for everything drawn from gui_blocks, which
+    // leaves those cases bit-identical to before.
+    const unsigned int colFB = eggMul(0xFFFFFFFFu, blockTint);
+    const unsigned int colLR = eggMul(0xFFCCCCCCu, blockTint);
+    const unsigned int colTB = eggMul(0xFF999999u, blockTint);
 
     const Texture* texPtr = itemFlatTexture(id, data);
     const int basex = (int)sx, basey = (int)sy;

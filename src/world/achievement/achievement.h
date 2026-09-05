@@ -23,7 +23,6 @@ enum AchievementId {
     ACHV_STONE_AGE,            // Obtain stone
     ACHV_GETTING_UPGRADE,      // Craft a better pickaxe
     ACHV_DIAMONDS,             // Obtain a diamond
-    ACHV_INTO_THE_NETHER,      // Enter the Nether
     ACHV_RETURN_TO_SENDER,     // Kill a Ghast (reserved; no Ghast yet -- see achievement.cpp)
 
     ACHV_ADVENTURER,           // Visit 5 biomes
@@ -53,7 +52,7 @@ enum AchievementId {
     ACHV_FARMER,                // Harvest crops
     ACHV_TRADER,                // Trade with a villager (reserved; no villagers yet)
 
-    ACHV_INTO_THE_FIRE,        // Enter the Nether (Nether-category duplicate of Into the Nether per plan doc)
+    ACHV_INTO_THE_FIRE,        // Enter the Nether
     ACHV_FORTRESS_FOUND,       // Discover a Nether Fortress (reserved; no fortress structure yet)
     ACHV_BLAZE_HUNTER,         // Kill a Blaze (reserved; no Blaze yet)
     ACHV_NETHER_TREASURE,      // Open a fortress chest (reserved; no fortress structure yet)

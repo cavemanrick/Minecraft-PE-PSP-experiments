@@ -33,6 +33,20 @@ static int s_villageChunkX[MAX_TRACKED_VILLAGES];
 static int s_villageChunkZ[MAX_TRACKED_VILLAGES];
 static int s_villageCount = 0;
 
+// IMPORTANT: terrain generation may run on the streaming worker thread.
+// Never construct an Entity (or touch Level::entities) from that thread.
+// Instead, village generation and chunk loading put a tiny request here;
+// villageTick() drains it from the normal game thread. Fixed-size storage
+// keeps this completely allocation-free and PSP friendly.
+#define MAX_PENDING_VILLAGERS 64
+struct PendingVillager {
+    int chunkX;
+    int chunkZ;
+    unsigned char uses[3];
+};
+static PendingVillager s_pendingVillagers[MAX_PENDING_VILLAGERS];
+static int s_pendingVillagerCount = 0;
+
 static void registerVillageChunk(int chunkX, int chunkZ) {
     for (int i = 0; i < s_villageCount; ++i)
         if (s_villageChunkX[i] == chunkX && s_villageChunkZ[i] == chunkZ) return;
@@ -41,6 +55,23 @@ static void registerVillageChunk(int chunkX, int chunkZ) {
     s_villageChunkZ[s_villageCount] = chunkZ;
     s_villageCount++;
 }
+
+static bool pendingVillager(int chunkX, int chunkZ) {
+    for (int i = 0; i < s_pendingVillagerCount; ++i)
+        if (s_pendingVillagers[i].chunkX == chunkX &&
+            s_pendingVillagers[i].chunkZ == chunkZ) return true;
+    return false;
+}
+
+static void queueVillageVillager(int chunkX, int chunkZ, const unsigned char* uses) {
+    if (pendingVillager(chunkX, chunkZ)) return;
+    if (s_pendingVillagerCount >= MAX_PENDING_VILLAGERS) return;
+    PendingVillager& p = s_pendingVillagers[s_pendingVillagerCount++];
+    p.chunkX = chunkX;
+    p.chunkZ = chunkZ;
+    for (int i = 0; i < 3; ++i) p.uses[i] = uses ? uses[i] : 0;
+}
+
 
 bool villageChunkHasVillage(int chunkX, int chunkZ) {
     for (int i = 0; i < s_villageCount; ++i)
@@ -271,10 +302,14 @@ static void spawnVillageVillager(World* w, int chunkX, int chunkZ,
     extern Level g_level;
     if (!w || g_level.w != w || findLoadedVillager(&g_level, chunkX, chunkZ)) return;
     // Never push villagers onto the heap if the fixed entity pool is full.
-    // A village simply becomes villager-less until its chunk is reloaded.
+    // The request remains queued so a later tick can try again.
     if (!Entity::hasFreeSlot()) return;
     if (!worldChunkInBounds(w, chunkX, chunkZ)) return;
+    if (!worldChunkReady(w, chunkX, chunkZ)) return;
 
+    // House 1 occupies local x=1..5, z=1..6. Spawn in its interior.
+    // villageHeight() is evaluated after terrain/building generation, so it
+    // resolves to the house floor rather than the original terrain height.
     int gx = chunkX * 16 + 3;
     int gz = chunkZ * 16 + 3;
     int sy = villageHeight(w, gx, gz);
@@ -286,12 +321,51 @@ static void spawnVillageVillager(World* w, int chunkX, int chunkZ,
     g_level.addEntity(v);
 }
 
+void villageTick(World* w) {
+    extern Level g_level;
+    if (!w || g_level.w != w) return;
+
+    // Only this function is allowed to turn generation requests into
+    // runtime entities. It is called from Level::tickEntities() on the main
+    // thread, never from the chunk-generation worker.
+    int i = 0;
+    while (i < s_pendingVillagerCount) {
+        PendingVillager p = s_pendingVillagers[i];
+
+        registerVillageChunk(p.chunkX, p.chunkZ);
+
+        if (!worldChunkInBounds(w, p.chunkX, p.chunkZ) ||
+            !worldChunkReady(w, p.chunkX, p.chunkZ)) {
+            s_pendingVillagers[i] = s_pendingVillagers[--s_pendingVillagerCount];
+            continue;
+        }
+
+        if (findLoadedVillager(&g_level, p.chunkX, p.chunkZ)) {
+            s_pendingVillagers[i] = s_pendingVillagers[--s_pendingVillagerCount];
+            continue;
+        }
+
+        if (!Entity::hasFreeSlot()) {
+            ++i;
+            continue;
+        }
+
+        spawnVillageVillager(w, p.chunkX, p.chunkZ, p.uses);
+        if (findLoadedVillager(&g_level, p.chunkX, p.chunkZ))
+            s_pendingVillagers[i] = s_pendingVillagers[--s_pendingVillagerCount];
+        else
+            ++i;
+    }
+}
+
 void villageChunkLoaded(World* w, int chunkX, int chunkZ,
                         const unsigned char* data, int dataLen) {
     if (!w) return;
     if (data && dataLen >= 4 && data[0] == VILLAGER_SAVE_MARKER) {
-        registerVillageChunk(chunkX, chunkZ);
-        spawnVillageVillager(w, chunkX, chunkZ, data + 1);
+        // Chunk loading can be reached by the streaming pipeline. Queue the
+        // entity for the main-thread tick instead of modifying Level::entities
+        // while a chunk is being installed.
+        queueVillageVillager(chunkX, chunkZ, data + 1);
     }
 }
 
@@ -302,9 +376,24 @@ void villageChunkSaveData(World* w, int chunkX, int chunkZ,
     out[1] = out[2] = out[3] = 0;
 
     Villager* v = findLoadedVillager(&g_level, chunkX, chunkZ);
-    if (!v) return;
-    out[0] = VILLAGER_SAVE_MARKER;
-    v->getTradeUses(out + 1);
+    if (v) {
+        out[0] = VILLAGER_SAVE_MARKER;
+        v->getTradeUses(out + 1);
+        return;
+    }
+
+    // A generated village can be saved/evicted before the next gameplay
+    // tick gets a chance to instantiate its villager (this is especially
+    // important during the large finite-world pre-generation sweep). Keep
+    // the compact marker in the chunk so the villager is recreated when the
+    // village is streamed back in.
+    for (int i = 0; i < s_pendingVillagerCount; ++i) {
+        if (s_pendingVillagers[i].chunkX != chunkX ||
+            s_pendingVillagers[i].chunkZ != chunkZ) continue;
+        out[0] = VILLAGER_SAVE_MARKER;
+        for (int j = 0; j < 3; ++j) out[j + 1] = s_pendingVillagers[i].uses[j];
+        return;
+    }
 }
 
 void villageChunkUnloaded(Level* level, int chunkX, int chunkZ) {
@@ -347,12 +436,14 @@ void villageGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ) {
     int baseY = 0;
     if (!villageFlatEnough(w, chunkX, chunkZ, baseY)) return;
     flatten(w, chunkX, chunkZ, baseY, desert);
-    registerVillageChunk(chunkX, chunkZ);
-    spawnVillageVillager(w, chunkX, chunkZ, 0);
+    // Do not construct the villager here: this function may be running on
+    // the asynchronous chunk-generation worker. The main-thread tick will
+    // spawn it once the chunk is fully resident and decorated.
+    queueVillageVillager(chunkX, chunkZ, 0);
 
     // A generated villager is gameplay state, not just discovery metadata.
-    // If the compact entity pool is temporarily full it may be absent now;
-    // the next reload of this chunk can try again.
+    // The request is tiny and fixed-size; no entity memory is consumed until
+    // the normal entity tick creates the villager.
     int ox = chunkX * 16, oz = chunkZ * 16;
 
     // Loot rolls are seeded once per village from the same hash used for
