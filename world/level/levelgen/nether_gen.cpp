@@ -380,7 +380,14 @@ static void netherFillColumn(World* w, int cx, int cz) {
             int gx = xo + x, gz = zo + z;
 
             // Side-wall bedrock: only the single outermost block-column on
-            // whichever of the 4 sides this chunk actually touches.
+            // whichever of the 4 sides this chunk actually touches. The
+            // wall's netherrack cladding (thicker near the top and bottom,
+            // one block thick along the wall's horizontal run) is applied
+            // afterward, in the second pass below -- doing it here would
+            // mean reaching into the neighbouring interior column before
+            // or after it's been filled depending on x/z scan order and
+            // which of the 4 walls this is, which this single forward
+            // pass can't guarantee consistently.
             bool onSideWall = (edgeX0 && x == 0) || (edgeX1 && x == 15) ||
                                (edgeZ0 && z == 0) || (edgeZ1 && z == 15);
             if (onSideWall) {
@@ -425,7 +432,150 @@ static void netherFillColumn(World* w, int cx, int cz) {
             }
         }
     }
+
+    // Wall cladding: a netherrack skin over the bedrock side walls, meant
+    // to read as if the whole Nether shell were carved out of a giant
+    // natural cavern rather than sitting in a clean rectangular box --
+    // so the cladding needs to look like an irregular, lumpy rock face,
+    // not a uniform bulge. An earlier version of this pass varied depth
+    // only with y (thicker near the top/bottom, tapering linearly to a
+    // bare single-block wall in the middle) and was identical at every
+    // point along every wall -- correct-looking from directly in front of
+    // one spot, but obviously a repeating, mechanical pattern from any
+    // angle that took in more than a few blocks of wall at once, which is
+    // the opposite of a natural cavern. This version varies depth with
+    // BOTH y and position along the wall, using a cheap coordinate-hash
+    // value noise (see wallNoise2D below) rather than standing up a full
+    // PerlinNoise field for what is a purely cosmetic wall texture -- a
+    // wall doesn't need Perlin's smooth octave continuity, it needs to
+    // look rocky, and a hashed-and-smoothed value noise is both cheaper
+    // and simpler here.
+    //
+    // Depth profile: hash noise gives 0..NETHER_WALL_CLAD_MAX_DEPTH at
+    // every (along-wall, y) position, then a top/bottom bias is added on
+    // top so the cavern still reads as more enclosed near the floor and
+    // ceiling shell and more open through the navigable middle band --
+    // matching the original ask (thicker near top/bottom) while no
+    // longer being a clean, repeating taper along the wall's length.
+    // Still never reaches past NETHER_WALL_CLAD_MAX_DEPTH+1 columns in
+    // from the true wall face, so this can't eat into the middle of the
+    // strip, and it only ever overwrites netherrack, lava, air, or the
+    // bedrock cap the box fill above placed -- never an already-placed
+    // decoration from some other pass.
+    const int NETHER_WALL_CLAD_BAND      = 10; // blocks in from each end where the top/bottom bias applies
+    const int NETHER_WALL_CLAD_MAX_DEPTH = 4;  // deepest the cladding can ever reach
+
+    // Cheap 2D value noise: hash the integer lattice points around (a,b),
+    // bilinear-blend between them. No octaves, no PerlinNoise object --
+    // this only needs to look bumpy at a glance, not have real fractal
+    // structure. worldSeed folded into the hash so the cavern face differs
+    // between worlds instead of every world sharing an identical pattern.
+    auto wallHash = [](int a, int b, long seed) -> float {
+        unsigned int h = (unsigned int)a * 0x27d4eb2du;
+        h ^= (unsigned int)b * 0x165667b1u;
+        h ^= (unsigned int)seed * 0x9e3779b9u;
+        h ^= h >> 15; h *= 0x85ebca6bu;
+        h ^= h >> 13; h *= 0xc2b2ae35u;
+        h ^= h >> 16;
+        return (float)(h & 0xFFFF) / 65535.0f; // 0..1
+    };
+    auto wallNoise2D = [&](float a, float b, long seed) -> float {
+        int a0 = (int)floorf(a), b0 = (int)floorf(b);
+        float fa = a - a0, fb = b - b0;
+        float h00 = wallHash(a0,     b0,     seed);
+        float h10 = wallHash(a0 + 1, b0,     seed);
+        float h01 = wallHash(a0,     b0 + 1, seed);
+        float h11 = wallHash(a0 + 1, b0 + 1, seed);
+        float sa = fa * fa * (3.0f - 2.0f * fa); // smoothstep, not a linear lerp
+        float sb = fb * fb * (3.0f - 2.0f * fb);
+        float top = h00 + (h10 - h00) * sa;
+        float bot = h01 + (h11 - h01) * sa;
+        return top + (bot - top) * sb;
+    };
+
+    // Skip the whole pass for interior chunks: only a chunk that actually
+    // touches one of the 4 strip edges has any wall column to clad at all,
+    // and those are a small minority of chunks in any real world. Without
+    // this, every single Nether chunk generated would pay for a full
+    // 16x16 scan whose body only ever does anything on the (at most) 4
+    // edge chunks per axis.
+    if (edgeX0 || edgeX1 || edgeZ0 || edgeZ1) {
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                int gx = xo + x, gz = zo + z;
+
+                // inward: unit step from the wall face toward the strip's
+                // interior, and the wall face coordinate itself in whichever
+                // axis is relevant. along: the global coordinate that runs
+                // ALONG this wall (Z for the two X-facing walls, X for the
+                // two Z-facing walls) -- fed into wallNoise2D so the bumpy
+                // pattern is continuous across chunk borders along the
+                // wall's length, instead of resetting every 16 blocks.
+                // Only one of the 4 can be true for a given column, since
+                // corner chunks still only touch 2 walls at once and this
+                // loop handles each wall independently anyway (a literal
+                // corner column matches two of these four branches and
+                // gets clad from both directions in turn, which is fine --
+                // claddings from two different walls never overlap in a
+                // way that matters, since each only writes columns
+                // strictly inward of its own face).
+                struct WallDir { bool onWall; int inwardDx, inwardDz; int along; };
+                WallDir dirs[4] = {
+                    { edgeX0 && x == 0,  1, 0, gz },
+                    { edgeX1 && x == 15, -1, 0, gz },
+                    { edgeZ0 && z == 0,  0, 1, gx },
+                    { edgeZ1 && z == 15, 0, -1, gx },
+                };
+
+                for (int di = 0; di < 4; di++) {
+                    if (!dirs[di].onWall) continue;
+
+                    for (int y = 0; y < NETHER_H; y++) {
+                        // Base depth: irregular, from the hash noise alone --
+                        // this is what makes the wall look like natural rock
+                        // rather than a machined surface, present at every
+                        // y, not just near the ends.
+                        float n = wallNoise2D((float)dirs[di].along * 0.15f,
+                                               (float)y * 0.15f, worldGenSeed());
+
+                        // Top/bottom bias: additively pushes depth up near
+                        // the floor/ceiling shell, fading to 0 through the
+                        // middle -- keeps the "more enclosed near the
+                        // extremes" read from the original ask without
+                        // making the whole wall a clean taper.
+                        int distFromEnd = (y < NETHER_H - y) ? y : (NETHER_H - 1 - y);
+                        float bias = (distFromEnd < NETHER_WALL_CLAD_BAND)
+                                   ? (1.0f - (float)distFromEnd / (float)NETHER_WALL_CLAD_BAND)
+                                   : 0.0f;
+
+                        float combined = n * 0.6f + bias * 0.7f; // both contribute, neither dominates
+                        if (combined > 1.0f) combined = 1.0f;
+                        int depth = (int)(combined * (float)NETHER_WALL_CLAD_MAX_DEPTH + 0.5f);
+                        if (depth <= 0) continue;
+
+                        for (int d = 1; d <= depth; d++) {
+                            int bx = gx + dirs[di].inwardDx * d;
+                            int bz = gz + dirs[di].inwardDz * d;
+                            unsigned char cur = worldBlock(w, bx, y, bz);
+                            // Never overwrite the true bedrock box's own
+                            // top/bottom cap at depth 0 (that's the wall
+                            // column itself, untouched here since d starts at
+                            // 1) or anything that isn't backing rock/void/lava
+                            // -- in particular this must never clad over an
+                            // already-placed decoration (glowstone, ore, a
+                            // structure) from a pass that happened to run
+                            // first for some other reason.
+                            if (cur != BLOCK_NETHERRACK && cur != BLOCK_AIR &&
+                                cur != BLOCK_CALM_LAVA && cur != BLOCK_BEDROCK) continue;
+                            blockPut(w, bx, y, bz, BLOCK_NETHERRACK);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
+
 // --- Per-biome decoration -----------------------------------------------
 // Decoration only ever lands on hill surfaces (netherrack exposed to an
 // open air pocket, per netherFillColumn's floor/ceiling hill shape above)
@@ -573,28 +723,17 @@ static void placeWallAlcove(World* w, Random& random, int wallX, int wallZ,
 // at a count that lands in the same ballpark as Warped Forest's
 // corrected tree density (a double-digit number of features per chunk,
 // not low hundreds).
-#define NETHER_STALACTITE_TRIES_MIN 3
-#define NETHER_STALACTITE_TRIES_VAR 4
 #define NETHER_STALAGMITE_TRIES_MIN 3
 #define NETHER_STALAGMITE_TRIES_VAR 4
 
 static void decorateWastesCaveTexture(World* w, Random& random, int xo, int zo,
                                        bool edgeX0, bool edgeX1,
                                        bool edgeZ0, bool edgeZ1) {
-    // Stalactites: a handful of random columns per chunk, scanning down
-    // from the ceiling shell's underside to find a real ceiling face --
-    // dense enough to be "regularly noticeable" without paving the
-    // ceiling the way a full per-column scan does.
-    int stalactiteTries = NETHER_STALACTITE_TRIES_MIN + random.nextInt(NETHER_STALACTITE_TRIES_VAR);
-    for (int i = 0; i < stalactiteTries; i++) {
-        int gx = xo + random.nextInt(16), gz = zo + random.nextInt(16);
-        for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
-            if (worldBlock(w, gx, y, gz) != BLOCK_AIR) continue;
-            if (worldBlock(w, gx, y + 1, gz) != BLOCK_NETHERRACK) continue;
-            placeStalactite(w, random, gx, y, gz);
-            break;
-        }
-    }
+    // Stalactites removed: no ceiling-hanging spikes placed at all. The
+    // placeStalactite() function itself is left in place further up this
+    // file, unused, in case ceiling spikes come back later -- only this
+    // call site and its NETHER_STALACTITE_TRIES_* constants were removed.
+    // Stalagmites (floor spikes) are unaffected; see the loop below.
 
     // Stalagmites: mirror pass, scanning down from the ceiling to find
     // the topmost exposed floor column.
@@ -1535,16 +1674,10 @@ static bool findFloorSurfaceSpot(World* w, int xo, int zo, Random& random, int t
     return false;
 }
 
-static void placeChunkLightSource(World* w, int xo, int zo, Random& random) {
-    int x, y, z;
-    if (findFloorSurfaceSpot(w, xo, zo, random, 8, &x, &y, &z))
-        blockPut(w, x, y, z, BLOCK_TORCH);
-    // If no valid surface spot turns up in 8 tries (a chunk that's
-    // entirely open lava sea/river with no floor hill at all), the chunk
-    // simply goes without its own torch rather than forcing one into an
-    // unsupported spot -- decorateWastes' glowstone clusters and
-    // neighboring chunks' torches still light the area.
-}
+// Chunk-wide ambient torch removed: the Nether now relies entirely on
+// glowstone clusters, lava glow, and ambient fires for lighting -- no
+// placed BLOCK_TORCH source anywhere in Nether generation. findFloorSurfaceSpot
+// is kept, since placeAmbientFires below still needs it.
 
 static void placeAmbientFires(World* w, int xo, int zo, Random& random) {
     // 1-3 permanent fires per chunk (infinite-burn on netherrack, see
@@ -1760,7 +1893,6 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
             break;
     }
 
-    placeChunkLightSource(w, xo, zo, random);
     placeCeilingGlowstone(w, xo, zo, random);
     // Lavafalls run after decoration so they pour over finished terrain
     // and cut through any nylium/soul sand surfacing, rather than being
@@ -1773,8 +1905,16 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
     // chunk.h/tile.cpp) instead of the first pass's BLOCK_QUARTZ_BLOCK
     // stand-in. Present in Wastes and Soul Sand Valley, matching vanilla's
     // own distribution (quartz doesn't generate in Warped Forest).
+    //
+    // Attempt count raised from 1-3 to 20 per chunk, matching the
+    // Overworld's own BLOCK_ORE_COAL attempt count exactly (see the coal
+    // oreFeature call in mcpegen.cpp) -- quartz was generating an order of
+    // magnitude less often than coal, not merely "less common" but
+    // barely present at all by comparison. Vein size (12) is unchanged;
+    // matching commonality is about how often a vein is attempted, not
+    // resizing the vein itself.
     if (biome == NB_WASTES || biome == NB_SOUL_SAND_VALLEY) {
-        int veins = 1 + random.nextInt(3);
+        int veins = 20;
         for (int i = 0; i < veins; i++) {
             int x = xo + random.nextInt(16), y = NETHER_SCAN_MIN_Y + random.nextInt(NETHER_CEIL_BASE_Y - NETHER_SCAN_MIN_Y), z = zo + random.nextInt(16);
             netherOreFeature(w, random, x, y, z, BLOCK_NETHER_QUARTZ_ORE, 12);

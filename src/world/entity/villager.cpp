@@ -17,7 +17,25 @@ Villager::Villager(Level* level) : Mob(level) {
     canRemove = false;
 }
 
-void Villager::tick() { Entity::tick(); }
+// Must go through Mob::tick(), not Entity::tick() directly. Mob::tick() is
+// what sets xOld/yOld/zOld every tick (before calling Entity::tick() itself),
+// and the renderer interpolates render position as
+// xOld + (x - xOld) * partialTick (entity_render_dispatcher.cpp). Villager is
+// spawned with setPos() (village_gen.cpp), which sets x/y/z but never touches
+// xOld/yOld/zOld -- those stay at the constructor's (0,0,0) default. Calling
+// only Entity::tick() here meant xOld/yOld/zOld were NEVER updated after
+// spawn, so every frame interpolated between world origin (0,0,0) and the
+// real house position: the "flickering, barely rendering, flies up and
+// away" symptom.
+//
+// Mob::tick() also runs aiStep(), which is where gravity and ground
+// collision live (Mob::travel(), called from aiStep()). Villager was never
+// settling onto the floor or having its motion state (xd/yd/zd, written to
+// directly by Entity::push() whenever another entity bumps into it)
+// consumed or decayed -- aiStep()'s isImmobile() branch zeroes the *input*
+// axes (xxa/yya) and skips updateAi(), it does not skip travel()/gravity,
+// so an immobile mob still settles and still clears pushes correctly.
+void Villager::tick() { Mob::tick(); }
 
 bool Villager::playerInteract() {
     if (!level || !level->player) return false;

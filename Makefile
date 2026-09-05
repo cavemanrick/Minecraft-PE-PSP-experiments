@@ -121,6 +121,7 @@ OBJS = \
 	src/world/entity/monster/skeleton.o \
 	src/world/entity/monster/creeper.o \
 	src/world/entity/monster/spider.o \
+	src/world/entity/monster/warped_spider.o \
 	src/world/entity/monster/pig_zombie.o \
 	src/world/entity/monster/ghast.o \
 	src/world/level/pathfinder/path.o \
@@ -145,6 +146,7 @@ OBJS = \
 	src/client/renderer/entity/humanoid_renderer.o \
 	src/client/renderer/entity/creeper_renderer.o \
 	src/client/renderer/entity/spider_renderer.o \
+	src/client/renderer/entity/warped_spider_renderer.o \
 	src/client/renderer/entity/player_model.o \
 	src/client/renderer/tileentity/sign_renderer.o src/client/renderer/tileentity/chest_renderer.o \
 	src/world/inventory/filling_container.o \

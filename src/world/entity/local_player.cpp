@@ -120,6 +120,21 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
     } else if (jumping) {
         if (isInWater() || isInLava()) yd += 0.04f;
         else if (onGround)             yd = 0.42f;
+        // Ladder/vine dismount boost. Without this, jump was a complete
+        // no-op while climbing: onGround is false for the whole climb, so
+        // neither branch above ever fired, and the ONLY upward motion came
+        // from Mob::travel()'s passive "yd = 0.2f on horizontal collision
+        // while onLadder()" line -- which fires on collision with ANYTHING
+        // solid in the feet column, not specifically the vine's own
+        // support wall. That made it impossible to press off the top: try
+        // to step sideways onto a canopy at vine-top height, clip the
+        // canopy's edge, get shoved back onto the vine instead of onto the
+        // platform. This mirrors vanilla's ladder-top jump -- same 0.2f
+        // magnitude as the passive climb speed above, enough to clear a
+        // one-block lip without being a full jump -- and gives an actual
+        // player-driven way off, independent of which direction the
+        // collision that re-triggers the passive climb happens to be.
+        else if (onLadder())           yd = 0.2f;
     }
 
     xs *= 0.98f; yf *= 0.98f;

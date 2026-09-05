@@ -101,16 +101,41 @@ static void dropVineChain(World* w, Random& random, int vx, int vy, int vz, int 
     }
 }
 
-// Places a flat square-ish leaf plate centered at (cx,cy,cz) with the given
-// half-width, trimming the four corners for a softer, less box-like edge
-// (still blocky, matching vanilla foliage, just not perfectly square).
+// Places a flat leaf plate centered at (cx,cy,cz) with the given half-width,
+// using a circular footprint test (squared distance from center vs a radius
+// just past half) instead of a square, so the silhouette reads as a rounded,
+// stepped plateau rather than a flat square slab -- this is the actual shape
+// vanilla jungle/oak canopies use, not a coincidence of vanilla's art.
+// A prior version only coin-flip-trimmed the four literal outermost corner
+// cells, which is invisible on anything bigger than a tiny plate: on a
+// half=6 (13x13) mega-canopy plate it leaves 4 single-cell notches on an
+// otherwise dead-flat square. A later attempt used a randomized per-cell
+// falloff keyed on distance from each corner along each axis, but that also
+// ate into the middle of the straight edges (not just the corners) on
+// anything but the largest plates, giving a moth-eaten look rather than a
+// rounded one -- keeping a plain circular cutoff and confining the random
+// jitter to a thin ring right at the boundary avoids both failure modes.
 static void leafPlate(World* w, Random& random, int cx, int cy, int cz, int half) {
+    // r2: squared radius of the solid core. +0.5 (not +1) keeps the circle
+    // snug to the half-width instead of ballooning past it -- half=6 should
+    // still read as "radius 6", just rounded, not effectively radius 7.
+    float r = (float)half + 0.5f;
+    float r2 = r * r;
+    // ringInner: squared radius of the boundary ring's inner edge. Cells
+    // between ringInner and r2 are the outermost shell and get a light
+    // 1-in-5 random gap for a slightly organic edge instead of a
+    // mathematically perfect circle; everything inside ringInner is solid.
+    float rInner = (float)half - 0.5f;
+    float ringInner = rInner > 0.0f ? rInner * rInner : 0.0f;
     for (int xx = cx - half; xx <= cx + half; xx++) {
         int axo = xx - cx;
         for (int zz = cz - half; zz <= cz + half; zz++) {
             int azo = zz - cz;
-            if (half >= 2 && abs(axo) == half && abs(azo) == half && random.nextInt(2) == 0)
-                continue; // trim outer corners
+            float d2 = (float)(axo * axo + azo * azo);
+            if (half >= 2) {
+                if (d2 > r2) continue; // outside the plate entirely
+                if (d2 > ringInner && random.nextInt(5) == 0) continue; // boundary jitter
+            }
             if (!isSolidGen(worldBlock(w, xx, cy, zz)))
                 setBlock(w, xx, cy, zz, BLOCK_LEAVES, LEAF_JUNGLE);
         }
@@ -218,6 +243,57 @@ static void growBranch(World* w, Random& random, int x, int y, int z, int dir) {
         int dz2 = bz + random.nextInt(3) - 1;
         dropVineChain(w, random, dx2, by, dz2, 5);
     }
+}
+
+// Small, static jungle understory feature. This deliberately does NOT use a
+// tree-style space scan, recursion, entities, or growth logic. It is just a
+// handful of block writes around a ground point, so increasing jungle density
+// mostly costs generation-time writes rather than the expensive geometry of
+// another tree. Leaves are jungle leaves, while the center is occasionally a
+// short fern to break up the silhouette at ground level.
+//
+// Fixed vs. the originally-submitted version: index 0 in dx[]/dz[] (the
+// center cell) used to be exempt from the random skip below, so it was
+// ALWAYS filled with a leaf before the fern-accent check ran. That check
+// requires the center to still be BLOCK_AIR, so the fern could never
+// actually place -- dead code that looked live. The center is now included
+// in the same random skip as every other offset, so it has a real chance
+// of staying open for the fern.
+void jungleUnderstoryFeature(World* w, Random& random, int x, int y, int z) {
+    unsigned char below = worldBlock(w, x, y - 1, z);
+    if (below != BLOCK_GRASS && below != BLOCK_DIRT) return;
+    if (worldBlock(w, x, y, z) != BLOCK_AIR) return;
+
+    // Keep the feature deliberately small: up to 7 possible leaves, with
+    // each position (including the center) independently skipped at
+    // random. That gives a bushy silhouette without creating another
+    // canopy-sized mesh, and leaves the center open often enough for the
+    // fern accent below to actually have somewhere to go.
+    //
+    // Known minor asymmetry, left as-is: this offset set includes the
+    // (1,1) and (-1,-1) diagonals but not (1,-1)/(-1,1), so every bush in
+    // the world has the same slightly lopsided orientation rather than a
+    // varied one. Cosmetic only -- fix by randomizing which diagonal pair
+    // is used per call, if it's ever worth the extra RNG draw.
+    static const int dx[7] = { 0, 1, -1, 0, 0, 1, -1 };
+    static const int dz[7] = { 0, 0, 0, 1, -1, 1, -1 };
+    const int count = 5 + random.nextInt(3);
+    int placed = 0;
+    for (int i = 0; i < count; ++i) {
+        if (random.nextInt(4) == 0) continue;
+        int bx = x + dx[i];
+        int bz = z + dz[i];
+        if (worldBlock(w, bx, y, bz) == BLOCK_AIR) {
+            setBlock(w, bx, y, bz, BLOCK_LEAVES, LEAF_JUNGLE);
+            ++placed;
+        }
+    }
+
+    // A few bushes get a single fern poking through the leaves. The fern is
+    // only one block high here; the existing dedicated fern pass handles the
+    // taller two-block ferns elsewhere.
+    if (placed > 0 && random.nextInt(3) == 0 && worldBlock(w, x, y, z) == BLOCK_AIR)
+        setBlock(w, x, y, z, BLOCK_TALLGRASS, TG_FERN);
 }
 
 void treeJungle(World* w, Random& random, int x, int y, int z) {

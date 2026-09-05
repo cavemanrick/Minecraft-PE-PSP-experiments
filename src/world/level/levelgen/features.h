@@ -47,6 +47,15 @@ void treeBirch(World* w, Random& random, int x, int y, int z);
 void treeSpruce(World* w, Random& random, int x, int y, int z);
 void treePine(World* w, Random& random, int x, int y, int z);
 void treeJungle(World* w, Random& random, int x, int y, int z);
+
+// Very low-cost jungle floor decoration: a tiny static bush/fern patch.
+// See feature_tree_jungle.cpp for the fixed version of the fern-accent
+// logic (the originally-submitted patch had a dead branch: it always
+// filled the center cell with a leaf first, so the "fern poking through"
+// check -- which required the center to still be BLOCK_AIR -- could never
+// fire).
+void jungleUnderstoryFeature(World* w, Random& random, int x, int y, int z);
+
 // Sheathes a log column in vines from (x,y,z) upward. Exposed so the
 // ordinary oaks mixed into the jungle can be coated the same way the
 // jungle trees are -- see the B_JUNGLE branch in mcpegen.cpp.

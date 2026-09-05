@@ -345,20 +345,34 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             }
             break;
         case BLOCK_LEAVES_DARK_OAK:
-            // Purpose-drawn dark oak leaf art at (14,1), with the colour
+            // Purpose-drawn dark oak leaf art at (1,8), with the colour
             // BAKED IN -- it is the (4,3) oak leaf mask multiplied through
             // by a dark green, so *tint must stay white. Tinting as well
             // would modulate twice (mesh_block.cpp does mulColor(bright,
             // tint) with the GU in GU_TFX_MODULATE) and come out near
             // black.
             //
-            // Fire is the neighbouring cell at (15,1). If this block ever
-            // renders as flames again, the atlas being loaded is an older
-            // terrain.png that predates the dark oak art -- check
-            // terrainMipMapLevel2.png and terrainMipMapLevel3.png too,
-            // since a stale mip will show the wrong cell at distance even
-            // when the base atlas is correct.
-            *col = 14; *row = 1;
+            // col MUST have a real, purpose-drawn opaque variant at col+1.
+            // mesh_block.cpp does `if (layer == 2 && leavesOpaque) col += 1;`
+            // and the equivalent `if (leafOpaqueDst) col += 1;` in the other
+            // mesh path -- unconditionally, for every leaf block, whenever
+            // the player has fast/opaque leaves enabled in graphics
+            // settings. That happens regardless of camera distance, so it
+            // reproduces up close exactly as readily as far away; the mip
+            // level is irrelevant to this bug.
+            //
+            // An earlier version of this code placed the base art at
+            // (14,1) with no opaque sibling drawn at (15,1) -- (15,1) is
+            // fire, so fast-graphics dark oak leaves rendered as flame
+            // every time, not just at a distance. (1,8)/(2,8) were chosen
+            // because they're a genuinely blank pair of cells with nothing
+            // else addressed nearby (verified against the full atlas grid,
+            // not just eyeballed), so col+1 can never again land on an
+            // unrelated block's texture. Both cells must stay in sync
+            // across terrain.png, terrainMipMapLevel2.png and
+            // terrainMipMapLevel3.png -- a stale mip reintroduces the bug
+            // at distance even when the base atlas is correct.
+            *col = 1; *row = 8;
             break;
         case BLOCK_MYCELIUM:
             // Same three-way face split as BLOCK_GRASS above, but with no
