@@ -64,12 +64,22 @@ void treeDarkOak(World* w, Random& random, int x, int y, int z);
 void flowerFeature(World* w, Random& random, int x, int y, int z, unsigned char tile, unsigned char data = 0);
 void mushroomFeature(World* w, Random& random, int x, int y, int z, unsigned char tile);
 
-// Huge mushrooms (mushroom-forest / mushroom-fields / dark-forest style
-// biomes). Brown: flat 7x7 plate cap, corners clipped, stem fully hidden
-// beneath it. Red: hollow box of walls standing off around the stem,
-// partway down only, topped with a slightly rounded roof. Both use
+// Huge mushrooms (mushroom-fields / dark-forest style biomes). Brown: broad
+// vanilla-style parasol cap, one level, 7x7 with clipped corners. Red: a
+// shallow dome rather than a hollow box -- 3x3 top level over three 5x5
+// levels beneath it, with the classic corner/edge shape metadata. Both use
 // BLOCK_HUGE_MUSHROOM_CAP/STEM (see chunk.h) -- placement/biome choice is
 // left entirely to the caller, same as every treeXxx function.
+//
+// Cap data packs a `shape` value into bits 2-4 on top of the existing
+// HUGE_MUSHROOM_RED_BIT (see capData() in feature_mushroom_huge.cpp) --
+// this is currently WRITE-ONLY. tile.cpp's texture selection for
+// BLOCK_HUGE_MUSHROOM_CAP only reads HUGE_MUSHROOM_RED_BIT and picks one
+// of two textures; the shape bits have no reader yet, so every cap face
+// still renders with the same red/brown pore texture regardless of
+// position. The geometry/silhouette is real; per-face texture variation
+// (gills vs. pores vs. cap-top) is not wired up and would need a
+// tile.cpp change to actually show anything.
 void mushroomHugeBrown(World* w, Random& random, int x, int y, int z);
 void mushroomHugeRed(World* w, Random& random, int x, int y, int z);
 void cactusFeature(World* w, Random& random, int x, int y, int z);

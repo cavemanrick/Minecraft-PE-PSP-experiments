@@ -582,7 +582,13 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     // shell rather than one shell per tree: exposed leaf faces per chunk
     // go 678 -> 1006 from 6 to 24 attempts, about 6k verts in layer 2
     // against a 65536 scratch cap. Beyond 18 attempts it is flat.
-    if (biome == B_DARK_FOREST) forests += oFor + 22;
+    // Tree count reduced from +22 to +14: the current dark oak generator
+    // (feature_tree_dark_oak.cpp) builds a broader, more overlapping crown
+    // per tree specifically so neighboring trees merge into a continuous
+    // canopy without needing as many attempts -- the count above was
+    // tuned for an earlier, smaller-crown tree shape and left the biome
+    // overly dense once the new crown shape replaced it.
+    if (biome == B_DARK_FOREST) forests += oFor + 14;
     if (biome == B_DESERT)   forests -= 20;
     if (biome == B_TUNDRA)   forests -= 20;
     if (biome == B_PLAINS)   forests -= 20;
@@ -626,14 +632,18 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
                 treeJungle(w, random, tx, ty, tz);
             }
         } else if (biome == B_DARK_FOREST) {
-            // Dark oaks with the occasional ordinary oak mixed in (wiki:
-            // "Oak, dark oak, and sometimes birch trees generate in these
-            // biomes"). Birch is left out here even though the wiki
-            // mentions it -- treeBirch's 1-wide single trunk would read as
-            // sparse/thin against dark oak's thick 2x2 trunks and hurt the
-            // "dense, sky-blocking canopy" read this biome is going for.
+            // Dark oak dominates the biome. A small amount of ordinary oak
+            // keeps the forest from becoming a wall of identical trunks.
+            // Birch is intentionally omitted: its thin single trunk makes
+            // the PSP dark forest look noticeably less dense.
+            //
+            // Oak ratio changed from 1-in-5 to 1-in-8: with the mushroom
+            // patch's grid-based huge mushroom placement below now
+            // producing natural small clusters rather than a single
+            // chunk-wide roll, a slightly denser dark-oak canopy reads
+            // better alongside them than the original 1-in-5 mix did.
             random.nextInt(3);
-            if (random.nextInt(5) == 0) treeOak(w, random, tx, ty, tz);
+            if (random.nextInt(8) == 0) treeOak(w, random, tx, ty, tz);
             else                        treeDarkOak(w, random, tx, ty, tz);
         } else {
             random.nextInt(10);
@@ -642,47 +652,64 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     }
 
     if (biome == B_MUSHROOM) {
-        // Huge mushrooms are this biome's canopy. Placed after the tree
-        // loop rather than inside it because they are not trees: they take
-        // no part in the forestNoise density that drives tree count, and
-        // their own generators do their own clearance and ground checks
-        // (grass/dirt/mycelium -- see feature_mushroom_huge.cpp).
+        // Vanilla mushroom fields use roughly one huge-mushroom attempt per
+        // chunk. The previous 3-6 attempts made this biome much denser than
+        // vanilla and added unnecessary block-clearance work on the PSP.
         //
-        // Note this loop only draws from `random` when the biome actually
-        // is mushroom, so adding it does not shift the random stream for
-        // any other biome's chunks.
-        int huge = 3 + random.nextInt(4);
-        for (int i = 0; i < huge; i++) {
-            int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
-            int ty = heightmapAt(w, tx, tz);
-            if (random.nextInt(2) == 0) mushroomHugeRed(w, random, tx, ty, tz);
-            else                        mushroomHugeBrown(w, random, tx, ty, tz);
-        }
+        // Still placed after the tree loop rather than inside it, same
+        // reasoning as before: huge mushrooms are not trees, take no part
+        // in the forestNoise density that drives tree count, and this
+        // single call only draws from `random` when the biome actually is
+        // mushroom, so it does not shift the draw sequence for any other
+        // biome's chunks.
+        int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
+        int ty = heightmapAt(w, tx, tz);
+        if (random.nextInt(2) == 0) mushroomHugeRed(w, random, tx, ty, tz);
+        else                        mushroomHugeBrown(w, random, tx, ty, tz);
     }
 
     if (biome == B_DARK_FOREST) {
-        // Huge mushrooms are a rare landmark here, not scenery. The old
-        // random.nextInt(3) meant 0/1/2 attempts per chunk -- an average
-        // of one per chunk, so on the order of eighty across a dark forest
-        // region on the 512 preset. They read as a mushroom field with
-        // trees in it rather than a forest with the odd mushroom.
-        //
-        // One attempt in DARK_FOREST_MUSHROOM_ODDS chunks instead. A
-        // Voronoi region is roughly 1/13 of the world, so:
-        //
-        //   512 preset  (1024 chunks) -> ~79 chunks/biome  -> ~2 mushrooms
-        //   1024 preset (4096 chunks) -> ~315 chunks/biome -> ~8 mushrooms
-        //
-        // and the real count comes in under that, because
-        // hugeMushroomSpaceClear still rejects spots the dense canopy has
-        // already filled. Tuned for the 512 default; this is the knob to
-        // turn if the 1024 preset feels crowded.
-        const int DARK_FOREST_MUSHROOM_ODDS = 40;
-        if (random.nextInt(DARK_FOREST_MUSHROOM_ODDS) == 0) {
-            int tx = xo + random.nextInt(16) + 8, tz = zo + random.nextInt(16) + 8;
-            int ty = heightmapAt(w, tx, tz);
-            if (random.nextInt(5) < 3) mushroomHugeRed(w, random, tx, ty, tz);   // red more common
-            else                       mushroomHugeBrown(w, random, tx, ty, tz);
+        // Huge mushroom placement: vanilla roofed forest scatters its
+        // special decoration across a 4x4 grid of 16 candidate positions,
+        // each with a 1-in-20 chance -- this produces natural small
+        // clusters instead of a single chunk-wide lottery roll, and
+        // averages well under one huge mushroom per chunk (16 * 1/20 =
+        // 0.8 attempts/chunk, most of which still fail
+        // hugeMushroomSpaceClear under the dense dark-oak canopy).
+        // Replaces an earlier single-roll version (1-in-40 to 1-in-48
+        // across two separate patch attempts) that could only ever
+        // produce one huge mushroom per chunk at most and never let them
+        // cluster the way vanilla's roofed forest landmarks do.
+        for (int gx = 0; gx < 4; ++gx) {
+            for (int gz = 0; gz < 4; ++gz) {
+                if (random.nextInt(20) != 0) continue;
+                int tx = xo + gx * 4 + 9 + random.nextInt(3);
+                int tz = zo + gz * 4 + 9 + random.nextInt(3);
+                int ty = heightmapAt(w, tx, tz);
+                if (random.nextInt(5) < 3) mushroomHugeRed(w, random, tx, ty, tz);
+                else                       mushroomHugeBrown(w, random, tx, ty, tz);
+            }
+        }
+
+        // Small mushrooms are much more appropriate for the shaded forest
+        // floor than the huge landmark form alone. Placed with
+        // heightmapAt (correct ground level) rather than a random Y,
+        // which would frequently miss the actual surface. Additive to the
+        // huge-mushroom grid above -- a separate, cheap ground-cover pass,
+        // not a replacement for it.
+        for (int i = 0; i < 3; i++) {
+            int mx = xo + random.nextInt(16) + 8;
+            int mz = zo + random.nextInt(16) + 8;
+            int my = heightmapAt(w, mx, mz);
+            mushroomFeature(w, random, mx, my, mz,
+                            BLOCK_MUSHROOM_BROWN);
+        }
+        for (int i = 0; i < 2; i++) {
+            int mx = xo + random.nextInt(16) + 8;
+            int mz = zo + random.nextInt(16) + 8;
+            int my = heightmapAt(w, mx, mz);
+            mushroomFeature(w, random, mx, my, mz,
+                            BLOCK_MUSHROOM_RED);
         }
     }
 
@@ -696,11 +723,13 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
     // rather than scaling the counts keeps every other biome's draw
     // sequence from `random` byte-identical to what it was.
     if (biome == B_MUSHROOM) {
-        for (int i = 0; i < 12; i++) {
-            int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8;
-            mushroomFeature(w, random, x, y, z,
-                            (random.nextInt(2) == 0) ? BLOCK_MUSHROOM_BROWN : BLOCK_MUSHROOM_RED);
-        }
+        // Vanilla's mushroom biome has mushrooms as its ground vegetation,
+        // but only one patch attempt per chunk. mushroomFeature itself
+        // makes a local 64-position patch search, so twelve calls was
+        // excessive and could fill the pending-block-update queue.
+        int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8;
+        mushroomFeature(w, random, x, y, z,
+                        (random.nextInt(2) == 0) ? BLOCK_MUSHROOM_BROWN : BLOCK_MUSHROOM_RED);
     } else {
 
     for (int i = 0; i < 2; i++) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; flowerFeature(w, random, x, y, z, BLOCK_FLOWER); }
@@ -716,7 +745,12 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
 
     }
 
-    for (int i = 0; i < 10; i++) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; reedsFeature(w, random, x, y, z); }
+    // Reeds don't belong in Mushroom Fields -- vanilla's mushroom biome has
+    // no sugar cane, and this pass previously ran unconditionally for
+    // every biome including this one.
+    if (biome != B_MUSHROOM) {
+        for (int i = 0; i < 10; i++) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; reedsFeature(w, random, x, y, z); }
+    }
 
     int cacti = (biome == B_DESERT) ? 5 : 0;
     for (int i = 0; i < cacti; i++) { int x = xo + random.nextInt(16) + 8, y = random.nextInt(128), z = zo + random.nextInt(16) + 8; cactusFeature(w, random, x, y, z); }
