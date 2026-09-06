@@ -1,6 +1,7 @@
 #include "world/entity/animal/pig.h"
 #include "world/entity/entity_types.h"
 #include "world/entity/player.h"
+#include "world/entity/local_player.h"
 #include "world/level/level.h"
 #include "world/item/item.h"
 #include "world/inventory/inventory.h"

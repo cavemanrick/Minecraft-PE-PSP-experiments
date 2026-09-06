@@ -93,6 +93,7 @@ OBJS = \
 	src/world/item/bonemeal_item.o \
 	src/world/item/spawn_egg_item.o \
 	src/world/item/armor_item.o \
+	src/world/item/bamboo_raft_item.o \
 	src/world/level/level.o \
 	src/world/entity/entity.o \
 	src/world/entity/hanging_entity.o \
@@ -116,6 +117,7 @@ OBJS = \
 	src/world/entity/animal/chicken.o \
 	src/world/entity/animal/sheep.o \
 	src/world/entity/animal/strider.o \
+	src/world/entity/vehicle/raft.o \
 	src/world/entity/monster/monster.o \
 	src/world/entity/monster/zombie.o \
 	src/world/entity/monster/skeleton.o \
