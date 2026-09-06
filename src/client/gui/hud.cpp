@@ -43,12 +43,59 @@ extern bool    g_haveTerrain;
 extern Texture g_guiBlocks;
 extern Texture g_saddleItem;
 extern bool g_haveSaddleItem;
+extern Texture g_hudExtra;
+extern bool    g_haveHudExtra;
+extern World   g_world;   // day meter reads World::dayTime directly
+
+// data/images/gui/hud_extra.png, 256x32. Built from vanilla icons.png:
+//
+//   (0,0)  72x9  the hunger row, icons.png x=16..87 y=27..35, so the eight
+//                9px cells land at u = 0,9,18,27,36,45,54,63 (container,
+//                blinking container, hunger-effect container, blinking
+//                hunger-effect container, full haunch, half haunch,
+//                blinking full, blinking half).
+//   (0,9)  161x5 day-meter background, icons.png (0,64)
+//   (0,14) 161x5 day-meter fill,       icons.png (0,69)
+//
+// The two bars are 162 wide, not vanilla's 182, so that at HB_S they come
+// out exactly as wide as the hotbar (162 * HB_S is both the bar's width
+// and the hotbar's, cap included). They are not a crop of the vanilla art
+// but a re-tile of it: one end cap, sixteen copies of its 10px repeating
+// segment, one end cap. Cropping cannot reach 162 cleanly, because
+// vanilla's centre tick at x=90/91 shifts the right half's phase and only
+// cuts of 21 columns rejoin without a doubled divider. The background is
+// one segment repeated; the fill cycles the eight segments of the source's
+// left half, which all share a phase, so its dividers stay lined up with
+// the background's underneath.
+#define HX_HUNGER_Y        0.0f
+#define HX_HUNGER_CONTAIN  0.0f
+#define HX_HUNGER_BLINK    9.0f
+#define HX_HUNGER_FULL    36.0f
+#define HX_HUNGER_HALF    45.0f
+#define HX_BAR_W         162.0f
+#define HX_BAR_H           5.0f
+#define HX_BAR_BG_Y        9.0f
+#define HX_BAR_FILL_Y     14.0f
 extern bool    g_haveGuiBlocks;
 
 #define HUD_S   2.0f
 #define HUD_N   (HOTBAR_SLOTS + 1)
 
-#define HB_S       2.0f
+// 1.5, not 2. The hotbar is anchored to the bottom of the screen by
+// HUD_HOTBAR_TOP subtracting its height from a fixed HB_BOTTOM margin, so
+// shrinking it leaves the bottom edge where it was and moves the top edge
+// down -- and since the day meter, the status rows and the chat log are
+// all positioned upward from that top edge, the entire stack drops with
+// it. 44px of hotbar becomes 33px, and everything above it gains those
+// 11px back.
+//
+// 1.5 keeps the dimensions that matter whole: 240px bar, 30px slot pitch,
+// 24px icons, 36px selection frame. Only the 3px inner slot inset and the
+// 1px selection-frame offset land on half-pixels.
+//
+// This does not touch HUD_ST_S, which scales the hearts, hunger and armour
+// icons -- that is the separate knob if those want shrinking too.
+#define HB_S       1.5f
 
 #define HB_BOTTOM  18.0f
 #define HUD_HOTBAR_TOP (272.0f - 22.0f * HB_S - HB_BOTTOM)
@@ -56,6 +103,17 @@ extern bool    g_haveGuiBlocks;
 #define HUD_HINT_S  UI_HINT_S
 
 #define HUD_ST_S    2.0f
+
+// The day meter sits directly above the hotbar. In g_barOnTop mode the
+// health/armour rows stack upward from here rather than from the hotbar,
+// so they clear it.
+// Fixed at a clean 2x of the 5px source rather than scaling with HB_S,
+// which would put it on a half-pixel at 1.5. The bar is horizontal bands,
+// so stretching it vertically past its 1.5x width costs nothing visually
+// and keeps it readable at a glance.
+#define HUD_TIMEBAR_H   (HX_BAR_H * 2.0f)
+#define HUD_TIMEBAR_GAP 2.0f
+#define HUD_TIMEBAR_Y   (HUD_HOTBAR_TOP - HUD_TIMEBAR_H - HUD_TIMEBAR_GAP)
 #define HUD_HINTS_Y UI_HINTS_Y
 
 // Achievement toast: a single-slot banner, distinct from the chat log
@@ -186,6 +244,8 @@ static short guiBlockIcon(short id) {
         case BLOCK_BAMBOO: return 272;
         case BLOCK_VINE: return 273;
         case BLOCK_COCOA: return 274;
+        case BLOCK_BAMBOO_BLOCK: return 86;
+        case BLOCK_BAMBOO_PLANKS: return 87;
         default: return -1;
     }
 }
@@ -445,6 +505,7 @@ const char* getBlockName(short id, unsigned char data) {
                      : (data == BUCKET_MILK)          ? "Milk"
                                                       : "Bucket";
             case ITEM_CAKE: return "Cake";
+            case ITEM_COOKIE: return "Cookie";
             case ITEM_NETHER_BRICK: return "Nether Brick";
             case ITEM_NETHER_QUARTZ: return "Nether Quartz";
             case ITEM_ARROW: return "Arrow";
@@ -473,6 +534,9 @@ const char* getBlockName(short id, unsigned char data) {
                     case 35: return "Spawn Spider";
                     case 36: return "Spawn Zombie Pigman";
                     case 37: return "Spawn Strider";
+                    case 38: return "Spawn Ghast";
+                    case 39: return "Spawn Villager";
+                    case 40: return "Spawn Warped Spider";
                     default: return "Spawn Egg";
                 }
             case ITEM_BED_ITEM: return "Bed";
@@ -619,6 +683,8 @@ const char* getBlockName(short id, unsigned char data) {
         case BLOCK_LEAVES_DARK_OAK: return "Dark Oak Leaves";
         case BLOCK_MYCELIUM: return "Mycelium";
         case BLOCK_BONE_BLOCK: return "Bone Block";
+        case BLOCK_BAMBOO_BLOCK: return "Block of Bamboo";
+        case BLOCK_BAMBOO_PLANKS: return "Bamboo Planks";
         case BLOCK_HUGE_MUSHROOM_CAP:
             return (data & HUGE_MUSHROOM_RED_BIT) ? "Red Mushroom Block" : "Brown Mushroom Block";
         case BLOCK_HUGE_MUSHROOM_STEM: return "Mushroom Stem";
@@ -763,6 +829,7 @@ const char* getBlockDescription(short id, unsigned char data) {
             case ITEM_SUGAR: return "Used in the cake recipe.";
             case ITEM_BUCKET: return "Used to hold and transport water, lava and milk.";
             case ITEM_CAKE: return "Restores 1.5 Hearts. Can be used 6 times.";
+            case ITEM_COOKIE: return "A sweet snack. Restores 1 hunger.";
             case ITEM_NETHER_BRICK: return "Used to form blocks of Nether bricks.";
             case ITEM_NETHER_QUARTZ: return "Quartz from the Nether, used to create Blocks of Quartz.";
             case ITEM_ARROW: return "Used as ammunition for bows.";
@@ -846,6 +913,8 @@ const char* getBlockDescription(short id, unsigned char data) {
         case BLOCK_HUGE_MUSHROOM_CAP: case BLOCK_HUGE_MUSHROOM_STEM: return "Part of a huge mushroom. Grows naturally in mushroom and dark forest biomes.";
         case BLOCK_MYCELIUM: return "The ground of mushroom biomes. Drops dirt when mined, and cannot be tilled into farmland.";
         case BLOCK_BONE_BLOCK: return "A dense block of fused bone, found in fossil formations in the Soul Sand Valley.";
+        case BLOCK_BAMBOO_BLOCK: return "A compressed block of bamboo stalks. Can be milled into planks.";
+        case BLOCK_BAMBOO_PLANKS: return "Bamboo stalks milled into planks. Used to build a raft.";
         case BLOCK_FLOWER: case BLOCK_ROSE: return "Can be crafted into a dye.";
         case BLOCK_MUSHROOM_BROWN: case BLOCK_MUSHROOM_RED: return "Can be crafted with a bowl to make stew.";
         case BLOCK_SAPLING: return "Can be planted and it will eventually grow into a tree.";
@@ -974,26 +1043,40 @@ void hotbarDraw(MenuState& s) {
 
         const float armorW = 9.0f * step + hs;
         int armorVal = g_level.player->getArmorValue();
-        float hx0, hy, armorX, armorY, airX, airY;
+        // Hunger mirrors health across the screen, as it does in vanilla,
+        // which is what pushes armour (and with it air) down a row in the
+        // top layout -- armour used to hold the right-hand slot on row 1.
+        float hx0, hy, hungerX, hungerY, armorX, armorY, airX, airY;
         if (!g_barOnTop) {
-            hx0    = 2.0f * HUD_ST_S;                          hy     = 2.0f * HUD_ST_S;
-            armorX = 480.0f - 2.0f * HUD_ST_S - armorW;        armorY = hy;
-            airX   = armorX;                                   airY   = hy + 10.0f * HUD_ST_S;
+            hx0     = 2.0f * HUD_ST_S;                         hy      = 2.0f * HUD_ST_S;
+            hungerX = 480.0f - 2.0f * HUD_ST_S - armorW;       hungerY = hy;
+            armorX  = hungerX;                                 armorY  = hy + 10.0f * HUD_ST_S;
+            airX    = hungerX;                                 airY    = armorY + 10.0f * HUD_ST_S;
 
             if (armorVal <= 0) airY = armorY;
         } else {
-            const float barW = 20.0f * HUD_N * HB_S;
-            const float barX = (480.0f - barW) * 0.5f;
-            const float gap  = 2.0f;
-            float row1 = HUD_HOTBAR_TOP - hs - gap;
+            const float gap = 2.0f;
+            // Stacks up from the day meter, not from the hotbar, so row 1
+            // does not land on top of the bar.
+            float row1 = HUD_TIMEBAR_Y - hs - gap;
             float row2 = row1 - hs - gap;
 
-            const float POKE = 8.0f;
-            hx0    = barX - POKE;                              hy     = row1;
-            armorX = barX - POKE;                              armorY = row2;
+            // Anchored to the screen edges, not to the hotbar. These rows
+            // used to sit at the hotbar's edges plus an 8px overhang, which
+            // happened to land them symmetrically about the centre while
+            // the hotbar was 320 wide. At HB_S 1.5 it is 240, and two
+            // 162-wide status rows placed against its edges would overlap
+            // each other across the middle of the screen. Using the same
+            // 2 * HUD_ST_S margin the top layout uses keeps them clear and
+            // makes the two layouts line up vertically.
+            const float margin = 2.0f * HUD_ST_S;
+            hx0     = margin;                                  hy      = row1;
+            armorX  = margin;                                  armorY  = row2;
 
-            airX   = barX + barW - armorW + POKE;
-            airY   = (armorVal > 0) ? row2 : row1;
+            hungerX = 480.0f - margin - armorW;                hungerY = row1;
+            // Air always takes row 2 on the right now: row 1 is hunger's,
+            // whether or not any armour is worn.
+            airX    = hungerX;                                 airY    = row2;
         }
         textureBind(&s.guiAtlas);
         for (int i = 0; i < hearts; i++) {
@@ -1023,6 +1106,34 @@ void hotbarDraw(MenuState& s) {
             }
         }
 
+        if (g_haveHudExtra) {
+            int food = g_level.player->getFoodLevel();
+            if (food < 0) food = 0;
+            textureBind(&g_hudExtra);
+            for (int i = 0; i < 10; i++) {
+                // Right to left, so the bar empties towards the screen edge
+                // and stays a mirror image of the hearts opposite it.
+                float ax = hungerX + (9 - i) * step;
+
+                // Same shake the hearts use when health is low, on the same
+                // g_cloudTicks clock, so a starving bar reads as urgent
+                // rather than merely low.
+                float jit = 0.0f;
+                if (food <= 6) jit = (float)((((i * 7 + g_cloudTicks) * 1103515245) >> 16 & 1) - 1) * HUD_ST_S;
+                float ayj = hungerY + jit;
+
+                spriteDraw(&g_hudExtra, ax, ayj, hs, hs,
+                           HX_HUNGER_CONTAIN, HX_HUNGER_Y, 9, 9, HUD_WHITE);
+                if (food >= (i + 1) * 2)
+                    spriteDraw(&g_hudExtra, ax, ayj, hs, hs,
+                               HX_HUNGER_FULL, HX_HUNGER_Y, 9, 9, HUD_WHITE);
+                else if (food == i * 2 + 1)
+                    spriteDraw(&g_hudExtra, ax, ayj, hs, hs,
+                               HX_HUNGER_HALF, HX_HUNGER_Y, 9, 9, HUD_WHITE);
+            }
+            textureBind(&s.guiAtlas);
+        }
+
         if (g_level.player->airSupply < 300) {
             int air = g_level.player->airSupply; if (air < 0) air = 0;
             int full    = (int)ceilf((air - 2) * 10.0f / 300.0f); if (full < 0) full = 0;
@@ -1035,9 +1146,38 @@ void hotbarDraw(MenuState& s) {
         }
     }
 
+    // Day meter. Survival only, for the same reason the hearts above are:
+    // Creative pins World::dayTime to CREATIVE_STOP_TIME (see liquid.cpp),
+    // so the bar would sit frozen at a fixed fraction and read as broken
+    // rather than as "time does not pass here".
+    if (!overlayUp && !sleeping && g_haveHudExtra && g_level.player &&
+        !g_level.player->inventory->isCreative()) {
+        const float barW = 20.0f * HUD_N * HB_S;
+        const float barX = (480.0f - barW) * 0.5f;
+
+        // 0 at dawn, wrapping back to 0 at the next dawn. Deliberately the
+        // raw fraction of the day rather than worldTimeOfDay(), which
+        // applies a cosine ease for the sun's arc -- that would make the
+        // bar crawl at midday and race at dusk.
+        long dt = g_world.dayTime % TICKS_PER_DAY;
+        if (dt < 0) dt += TICKS_PER_DAY;
+        float frac = (float)dt / (float)TICKS_PER_DAY;
+        if (frac < 0.0f) frac = 0.0f;
+        if (frac > 1.0f) frac = 1.0f;
+
+        float fillSrcW = (float)(int)(HX_BAR_W * frac);
+
+        textureBind(&g_hudExtra);
+        spriteDraw(&g_hudExtra, barX, HUD_TIMEBAR_Y, HX_BAR_W * HB_S, HX_BAR_H * HB_S,
+                   0.0f, HX_BAR_BG_Y, HX_BAR_W, HX_BAR_H, HUD_WHITE);
+        if (fillSrcW > 0.0f)
+            spriteDraw(&g_hudExtra, barX, HUD_TIMEBAR_Y, fillSrcW * HB_S, HX_BAR_H * HB_S,
+                       0.0f, HX_BAR_FILL_Y, fillSrcW, HX_BAR_H, HUD_WHITE);
+    }
+
     if (!overlayUp && s.haveFont) {
         float now = gameSeconds();
-        float ly = HUD_HOTBAR_TOP - 14.0f;
+        float ly = HUD_TIMEBAR_Y - 14.0f;
         for (int i = CHAT_LINES - 1; i >= 0; i--) {
             if (s_chatTime[i] <= 0.0f) continue;
             float age = now - s_chatTime[i];

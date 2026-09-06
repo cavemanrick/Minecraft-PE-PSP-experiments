@@ -7,6 +7,23 @@
 #include "world/level/storage/worldlist.h"
 #include "world/level/storage/external_servers.h"
 
+// Master switch for the multiplayer front-end. Set to 1 to put it all
+// back; nothing has been deleted.
+//
+// At 0: the title screen drops its "Join Game" button and re-spaces the
+// two that remain, menuScreen() will not hand out the join or add-server
+// screens, and the pause screen's player list panel is not drawn. The
+// screens themselves (screen_join.cpp, screen_addserver.cpp) still build
+// and still live in the Makefile's OBJS -- they are simply unreachable, so
+// re-enabling is this one line and not a build change.
+//
+// SCREEN_JOIN and SCREEN_ADD_SERVER deliberately keep their places in this
+// enum either way. They are persisted nowhere, but removing enumerators
+// from the middle would renumber SCREEN_OPTIONS and SCREEN_GAME, and the
+// same silent-shift hazard that applies to AchievementId applies to any
+// value that gets compared or stored.
+#define MCPSP_MULTIPLAYER 0
+
 enum AppScreen { SCREEN_TITLE, SCREEN_WORLDS, SCREEN_DELETE, SCREEN_CREATE, SCREEN_JOIN, SCREEN_ADD_SERVER, SCREEN_OPTIONS, SCREEN_GAME };
 
 static const float UI_SCALE = 2.0f;

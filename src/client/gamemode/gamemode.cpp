@@ -267,6 +267,8 @@ static void breakTargetedBlock(const BlockHit& hit) {
         if (couldDestroy && brokenId == BLOCK_TOPSNOW && !g_gameMode->isCreative())
             Tile::popResource(hit.x, hit.y, hit.z, ItemInstance(ITEM_SNOWBALL, 1, 0));
 
+        if (!g_gameMode->isCreative()) g_level.player->addExhaustion(0.025f);
+
         if (!g_gameMode->isCreative() && sel && !sel->isNull()) {
             Item* tool = Item::items[sel->id];
             if (tool && tool->maxDamage > 0 &&
@@ -558,8 +560,10 @@ void GameMode::handleInput(unsigned int pressed, unsigned int held) {
         if (isFoodSel) {
             bool lHeld = (held & PSP_CTRL_LTRIGGER) != 0;
 
-            bool canEat = g_gameMode->isCreative() ||
-                          g_level.player->health < g_level.player->getMaxHealth();
+            // Gate on the hunger bar, not on health: a player at full
+            // health with a half-empty bar must still be able to top it up,
+            // which is the whole point of hunger being a separate resource.
+            bool canEat = g_gameMode->isCreative() || g_level.player->isHungry();
             if (lHeld && !s_eating && (pressed & PSP_CTRL_LTRIGGER) && canEat) {
                 s_eating = true; s_eatStart = sceKernelGetSystemTimeLow(); s_lastEmit = 0;
             }
@@ -580,7 +584,12 @@ void GameMode::handleInput(unsigned int pressed, unsigned int held) {
 
                     if (!g_gameMode->isCreative()) {
                         int nutrition = ((FoodItem*)sel->getItem())->getNutrition();
-                        g_level.player->heal(nutrition);
+                        // Food fills the hunger bar; health comes back from
+                        // Player::hungerTick's regeneration once the bar is
+                        // at REGEN_FOOD or above. The nutrition values in
+                        // item.cpp were already vanilla hunger points, so
+                        // they carry over unchanged.
+                        g_level.player->eat(nutrition);
                         g_level.playSound(g_level.player, "random.burp", 0.5f,
                                           (rand() / (float)RAND_MAX) * 0.1f + 0.9f);
 
@@ -590,8 +599,8 @@ void GameMode::handleInput(unsigned int pressed, unsigned int held) {
 
                         ItemInstance* next = g_level.player->inventory->getSelected();
                         bool moreFood = next && next->getItem() && next->getItem()->isFood();
-                        bool stillHurt = g_level.player->health < g_level.player->getMaxHealth();
-                        if (lHeld && moreFood && stillHurt) {
+                        bool stillHungry = g_level.player->isHungry();
+                        if (lHeld && moreFood && stillHungry) {
                             s_eatStart = sceKernelGetSystemTimeLow(); s_lastEmit = 0;
                             g_level.player->eatAnim = 0.0f;
                         } else {

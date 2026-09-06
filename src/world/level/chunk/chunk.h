@@ -151,6 +151,16 @@ enum { BLOCK_AIR = 0,
        // Mined and placed like stone, no special behavior otherwise.
        BLOCK_BASALT = 179,
 
+       // Crafted-only bamboo materials. Neither generates naturally --
+       // BLOCK_BAMBOO (159) is the existing decorative stalk decal grown
+       // in jungle groves; these are a separate compressed-storage block
+       // and its milled-plank form, following the same
+       // stalk -> block -> planks chain as logs -> planks. Simple
+       // top/bottom-vs-side cube, no rotation, same shape as
+       // BLOCK_BONE_BLOCK.
+       BLOCK_BAMBOO_BLOCK = 180,
+       BLOCK_BAMBOO_PLANKS = 181,
+
        BLOCK_STONECUTTER = 245, BLOCK_GLOWING_OBSIDIAN = 246, BLOCK_NETHER_REACTOR = 247,
 
        BLOCK_UPDATE1 = 248, BLOCK_UPDATE2 = 249 };

@@ -81,6 +81,7 @@ enum {
     ITEM_BONE           = 352,
     ITEM_SUGAR          = 353,
     ITEM_CAKE           = 354,
+    ITEM_COOKIE         = 357,
     ITEM_BED_ITEM       = 355,
     ITEM_SHEARS         = 359,
     ITEM_MELON          = 360,
@@ -97,7 +98,13 @@ enum {
     ITEM_FISH_RAW       = 349,
     ITEM_FISH_COOKED    = 350,
     ITEM_NETHER_QUARTZ  = 406,
-    ITEM_CAMERA         = 456
+    ITEM_CAMERA         = 456,
+
+    // Not a vanilla item id -- vanilla's boat occupies 333, which this
+    // codebase left unclaimed. Placed after camera instead of backfilled
+    // into the vanilla gap so it reads clearly as a custom addition, same
+    // as camera itself.
+    ITEM_BAMBOO_RAFT     = 457
 };
 
 enum { DYE_WHITE = 15 };

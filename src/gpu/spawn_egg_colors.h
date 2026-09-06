@@ -20,6 +20,14 @@ static inline bool spawnEggColors(short data, unsigned int* base, unsigned int* 
         case 35: c1 = 0x342d27; c2 = 0xa80e0e; break;
         case 36: c1 = 0xea9393; c2 = 0x4c7129; break;
         case 37: c1 = 0x9c3436; c2 = 0x4d494d; break; // strider (EntityTypes::IdStrider) -- real vanilla values
+        case 38: c1 = 0xf9f9f9; c2 = 0xbcbcbc; break; // ghast          -- real vanilla values
+        case 39: c1 = 0x563c33; c2 = 0xbd8b72; break; // villager       -- real vanilla values
+        // Warped spider is an MCPSP mob with no vanilla egg to copy. Cave
+        // spider's silhouette colours (0x0c424e / 0x7a1919) recoloured
+        // towards the warped palette its texture uses, so the egg reads as
+        // "spider, but warped" beside the plain spider's egg at data 35
+        // rather than as a second identical-looking spider egg.
+        case 40: c1 = 0x0c4e4a; c2 = 0x1a7b7b; break; // warped spider
         default: *base = *spot = 0xFFFFFFFFu; return false;
     }
     *base = eggAbgr(c1);

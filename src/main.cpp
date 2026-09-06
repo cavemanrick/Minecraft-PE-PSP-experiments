@@ -97,8 +97,11 @@ static bool loadTex16(Texture* out, const char* rel, int psm) {
 static bool screenNeedsTouchGui(int screen, bool worldLoaded) {
     if (screen == SCREEN_OPTIONS) return !worldLoaded;
     return screen == SCREEN_TITLE  || screen == SCREEN_WORLDS ||
-           screen == SCREEN_DELETE || screen == SCREEN_CREATE ||
-           screen == SCREEN_JOIN   || screen == SCREEN_ADD_SERVER;
+           screen == SCREEN_DELETE || screen == SCREEN_CREATE
+#if MCPSP_MULTIPLAYER
+           || screen == SCREEN_JOIN || screen == SCREEN_ADD_SERVER
+#endif
+           ;
 }
 
 static void touchGuiSetLoaded(MenuState& s, bool want) {
@@ -195,12 +198,14 @@ int main(int argc, char* argv[]) {
     s.worldSelected = 0;
     s.deleteSelected = 1;
     createFormReset(s);
+#if MCPSP_MULTIPLAYER
     joinListReset(s);
     addServerFormReset(s);
+#endif
     s.uiRow = 1;
     s.topSelected = 0;
     s.listScrollX = 0.0f;
-    s.selected = 1;
+    s.selected = titleDefaultSelection();
     s.optFocus = 1;
     s.optCategory = 0;
     s.optTabHighlight = 0;

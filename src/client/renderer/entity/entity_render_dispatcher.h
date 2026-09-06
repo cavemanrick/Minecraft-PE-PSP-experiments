@@ -25,10 +25,15 @@ private:
     // last entry (ER_FISHING_BOBBER_RENDERER) -- that value's own assign()
     // call in the constructor silently no-op'd (assign() bounds-checks
     // `id < MAX_RENDERERS`), so fishing bobbers likely never rendered.
-    // Pinned to the real last enumerator instead of a specific named one,
-    // so adding a new EntityRendererId after this point can't quietly
-    // reintroduce the same off-by-one.
-    static const int MAX_RENDERERS = ER_FISHING_BOBBER_RENDERER + 1;
+    //
+    // Pinning to a specific named enumerator turned out not to prevent a
+    // repeat of exactly this bug -- adding ER_RAFT_RENDERER after
+    // ER_FISHING_BOBBER_RENDERER reintroduced the identical off-by-one
+    // until this was caught. Using a trailing ER_RENDERER_COUNT sentinel
+    // instead: it always sits one past whatever the real last enumerator
+    // is, so appending further ids after it can't silently shrink this
+    // array again.
+    static const int MAX_RENDERERS = ER_RENDERER_COUNT;
     EntityRenderer* _renderers[MAX_RENDERERS];
 };
 

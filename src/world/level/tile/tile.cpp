@@ -374,6 +374,20 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
             // at distance even when the base atlas is correct.
             *col = 1; *row = 8;
             break;
+        case BLOCK_BAMBOO_BLOCK: {
+            // Same static top/bottom-vs-side split as BLOCK_BONE_BLOCK --
+            // this is a crafted compressed-storage block, never placed
+            // with player-chosen orientation, so no axis logic is needed.
+            // Deliberately NOT at (1,8)/(2,8) -- those cells are now
+            // BLOCK_LEAVES_DARK_OAK's base/opaque-sibling pair (see the
+            // case just above). Using (1,10)/(2,10) instead, verified
+            // free against the current atlas.
+            bool capFace = (f == F_TOP || f == F_DOWN);
+            if (capFace) { *col = 2; *row = 10; }
+            else         { *col = 1; *row = 10; }
+            break;
+        }
+        case BLOCK_BAMBOO_PLANKS: *col = 1; *row = 9; break;
         case BLOCK_MYCELIUM:
             // Same three-way face split as BLOCK_GRASS above, but with no
             // tint: the mycelium top texture at (14,4) is already coloured
@@ -1264,6 +1278,7 @@ static int rawSoundType(unsigned char id) {
         case BLOCK_MELON: case BLOCK_MELON_STEM:
         case BLOCK_FIRE:
         case BLOCK_WARPED_STEM: case BLOCK_WARPED_PLANKS:
+        case BLOCK_BAMBOO_BLOCK: case BLOCK_BAMBOO_PLANKS:
 
         case BLOCK_STAIRS_PLANKS:
 
@@ -1304,6 +1319,7 @@ static float rawDestroySpeed(int id) {
         case BLOCK_STAIRS_PLANKS: case BLOCK_STAIRS_COBBLESTONE:
         case BLOCK_STAIRS_BRICK: case BLOCK_STAIRS_NETHER_BRICK:
         case BLOCK_WARPED_STEM: case BLOCK_WARPED_PLANKS:
+        case BLOCK_BAMBOO_BLOCK: case BLOCK_BAMBOO_PLANKS:
             return 2.0f;
         case BLOCK_LEAVES: case BLOCK_LEAVES_DARK_OAK:
             return 0.2f;

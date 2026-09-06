@@ -14,6 +14,7 @@
 #include "world/item/bow_item.h"
 #include "world/item/fishing_rod_item.h"
 #include "world/item/spawn_egg_item.h"
+#include "world/item/bamboo_raft_item.h"
 #include "world/entity/entity_types.h"
 
 Item* Item::items[4096];
@@ -92,6 +93,9 @@ void Item::initItems() {
     new FoodItem(ITEM_BEEF_COOKED,     8, true,  ic(10, 6));
     new FoodItem(ITEM_CHICKEN_RAW,     2, true,  ic(9,  7));
     new FoodItem(ITEM_CHICKEN_COOKED,  6, true,  ic(10, 7));
+    // Nutrition 2 == vanilla. The ic() argument is dead (see the note
+    // below); the real icon is kItemIcon[ITEM_COOKIE - 256] = 148.
+    new FoodItem(ITEM_COOKIE,          2, false, ic(12, 5));
 
     // NOTE: the ic() value every item below passes is DEAD. Nothing calls
     // Item::getIcon(); all icon lookup goes through kItemIcon[] in
@@ -140,6 +144,9 @@ void Item::initItems() {
     new SimpleItem(ITEM_CAMERA,          ic(0, 14), 1);
     // Saddle uses a dedicated 16x16 texture rather than the shared GUI atlas.
     new SimpleItem(ITEM_SADDLE,          -1, 1);
+    // ic() value is dead here same as everywhere else in this function --
+    // real icon lookup is kItemIcon[201] in gpu/item_icons.h.
+    new BambooRaftItem(ITEM_BAMBOO_RAFT);
 
     new SeedItem(ITEM_SEEDS_WHEAT, BLOCK_WHEAT, ic(9, 0));
     new SeedItem(ITEM_SEEDS_MELON, BLOCK_MELON_STEM, ic(14, 3));
@@ -173,7 +180,7 @@ void Item::initItems() {
 
             { ITEM_APPLE, 4 }, { ITEM_BOWL, 4 }, { ITEM_MUSHROOM_STEW, 4 },
             { ITEM_WHEAT, 4 }, { ITEM_BREAD, 4 }, { ITEM_SUGAR, 4 }, { ITEM_REEDS, 4 },
-            { ITEM_CAKE, 4 },
+            { ITEM_CAKE, 4 }, { ITEM_COOKIE, 4 },
             { ITEM_SEEDS_WHEAT, 4 }, { ITEM_SEEDS_MELON, 4 }, { ITEM_MELON, 4 },
             { ITEM_PORKCHOP_RAW, 4 }, { ITEM_PORKCHOP_COOKED, 4 },
             { ITEM_HELMET_CLOTH, 4 }, { ITEM_CHESTPLATE_CLOTH, 4 }, { ITEM_LEGGINGS_CLOTH, 4 }, { ITEM_BOOTS_CLOTH, 4 },

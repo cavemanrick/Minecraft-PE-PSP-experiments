@@ -18,6 +18,7 @@
 #include "world/entity/monster/warped_spider.h"
 #include "world/entity/monster/pig_zombie.h"
 #include "world/entity/animal/strider.h"
+#include "world/entity/vehicle/raft.h"
 #include "world/entity/monster/ghast.h"
 #include "world/entity/villager.h"
 #include "world/entity/fireball.h"
@@ -38,6 +39,7 @@ Entity* createEntity(int typeId, Level* level) {
         case EntityTypes::IdWarpedSpider: return new WarpedSpider(level);
         case EntityTypes::IdPigZombie:return new PigZombie(level);
         case EntityTypes::IdStrider:   return new Strider(level);
+        case EntityTypes::IdBambooRaft: return new Raft(level);
         case EntityTypes::IdGhast:     return new Ghast(level);
         case EntityTypes::IdVillager:  return new Villager(level);
         case EntityTypes::IdFireball:  return new Fireball(level);

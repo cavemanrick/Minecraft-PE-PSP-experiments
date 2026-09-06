@@ -114,6 +114,11 @@ static CompoundTag* buildPlayerTag(World* w) {
     p->put("Rotation", floatList(g_level.player->yRot, g_level.player->xRot));
     p->putShort("Health", (short)g_level.player->health);
 
+    p->putInt("foodLevel", g_level.player->foodLevel);
+    p->putFloat("foodSaturationLevel", g_level.player->saturation);
+    p->putFloat("foodExhaustionLevel", g_level.player->exhaustion);
+    p->putInt("foodTickTimer", g_level.player->foodTimer);
+
     p->putBoolean("Sleeping", g_level.player->sleeping);
     p->putShort("SleepTimer", g_level.player->sleepCounter);
     p->putInt("BedPositionX", g_level.player->bedX);
@@ -322,6 +327,19 @@ static void loadLevelDat(World* w, const char* absDir, long* outSeed, int* outGa
                     }
                     if (rot->size() >= 2) { g_level.player->yRot = rot->getFloat(0); g_level.player->xRot = rot->getFloat(1); }
                     if (p->contains("Health")) g_level.player->health = p->getShort("Health");
+
+                    // A world saved before hunger existed has none of these
+                    // keys, so it loads with the constructor's full bar
+                    // rather than a starving player.
+                    if (p->contains("foodLevel")) {
+                        int fl = p->getInt("foodLevel");
+                        if (fl < 0) fl = 0;
+                        if (fl > Player::MAX_FOOD) fl = Player::MAX_FOOD;
+                        g_level.player->foodLevel  = fl;
+                        g_level.player->saturation = p->getFloat("foodSaturationLevel");
+                        g_level.player->exhaustion = p->getFloat("foodExhaustionLevel");
+                        g_level.player->foodTimer  = p->getInt("foodTickTimer");
+                    }
 
                     if (p->getBoolean("Sleeping")) {
                         g_level.player->sleeping = true;

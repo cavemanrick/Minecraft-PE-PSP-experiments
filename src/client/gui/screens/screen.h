@@ -27,6 +27,7 @@ Screen& deleteScreen();
 Screen& createScreen();
 
 void createFormReset(MenuState& s);
+int titleDefaultSelection();
 Screen& joinScreen();
 
 void joinListReset(MenuState& s);

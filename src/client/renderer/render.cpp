@@ -83,6 +83,13 @@ Texture g_fireAtlas;
 bool    g_haveFireAtlas = false;
 Texture g_saddleItem;
 bool    g_haveSaddleItem = false;
+// Hunger haunches and the day-meter bar, in one small sheet rather than in
+// gui_game.png: the packed GUI atlas has no free 161x10 run left for the
+// bar, and GA_ICONS only covers vanilla icons.png rows 0..26, which stops
+// short of the hunger row at y=27. Same dedicated-texture approach the
+// saddle icon above already uses.
+Texture g_hudExtra;
+bool    g_haveHudExtra = false;
 
 extern int g_cloudTicks;
 
@@ -1180,6 +1187,8 @@ void gameRender(MenuState& s) {
                 g_haveFireAtlas = loadTex(&g_fireAtlas, "data/images/fire_atlas.png");
             if (!g_haveSaddleItem)
                 g_haveSaddleItem = loadTex16(&g_saddleItem, "data/images/item/saddle.png", GU_PSM_5551);
+            if (!g_haveHudExtra)
+                g_haveHudExtra = loadTex16(&g_hudExtra, "data/images/gui/hud_extra.png", GU_PSM_5551);
 
             bool sel = (s.worldSelected >= 0 && s.worldSelected < s.worlds.count);
             long seedVal = sel ? s.worlds.seeds[s.worldSelected] : 0;

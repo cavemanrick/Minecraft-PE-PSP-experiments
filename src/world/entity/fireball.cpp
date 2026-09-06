@@ -18,6 +18,12 @@ static const float RAD = 180.0f / Mth::PI;
 // primed_tnt.cpp, creeper.cpp), so 1.0 keeps the same rough proportion
 // (about a quarter of TNT) rather than copying vanilla's raw number into
 // a differently-scaled r parameter.
+//
+// The explosion call below also passes causesFire=true, matching
+// vanilla's real Fireball behaviour: unlike TNT and creepers (which pass
+// the worldExplode default of false and never ignite anything), a ghast
+// fireball's blast has a chance to leave fire behind in the blocks it
+// destroys -- see the causesFire handling in explosion.cpp.
 static const float FIREBALL_EXPLOSION_POWER = 1.0f;
 
 void Fireball::configure() {
@@ -147,7 +153,7 @@ void Fireball::tick() {
         if (hitPlayer) level->player->hurt(this, 6);
         else if (hitEntity) hitEntity->hurt(this, 6);
 
-        worldExplode(level->w, x, y, z, FIREBALL_EXPLOSION_POWER);
+        worldExplode(level->w, x, y, z, FIREBALL_EXPLOSION_POWER, true);
 
         // A ghast caught in its own deflected fireball's blast dies to
         // it via the normal worldExplode entity-damage pass above (10 HP

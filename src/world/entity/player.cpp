@@ -19,7 +19,84 @@ Player::Player(Level* level)
       inPortalThisTick(false), portalLatched(false), portalForced(false),
       portalCharge(0), portalArrive(0),
       havePortalBlock(false), portalBlockX(0), portalBlockY(0), portalBlockZ(0),
-      score(0), vehicle(0) {}
+      score(0),
+      foodLevel(MAX_FOOD), saturation(5.0f), exhaustion(0.0f), foodTimer(0),
+      vehicle(0) {}
+
+const float Player::EXHAUSTION_PER_POINT = 4.0f;
+
+void Player::addExhaustion(float amount) {
+    if (g_gameMode && g_gameMode->isCreative()) return;
+    exhaustion += amount;
+    if (exhaustion > 40.0f) exhaustion = 40.0f;
+}
+
+void Player::eat(int nutrition) {
+    foodLevel += nutrition;
+    if (foodLevel > MAX_FOOD) foodLevel = MAX_FOOD;
+    // Vanilla's saturation gain is nutrition * saturationModifier * 2,
+    // clamped to the new food level. There is no per-item modifier here,
+    // so 0.6 (vanilla's "normal" food) is used for everything.
+    saturation += (float)nutrition * 0.6f * 2.0f;
+    if (saturation > (float)foodLevel) saturation = (float)foodLevel;
+}
+
+void Player::resetHunger() {
+    foodLevel  = MAX_FOOD;
+    saturation = 5.0f;
+    exhaustion = 0.0f;
+    foodTimer  = 0;
+}
+
+void Player::hungerTick() {
+    if (g_gameMode && g_gameMode->isCreative()) return;
+    if (health <= 0) return;
+
+    // Peaceful refills the bar the same way it already regenerates health
+    // (see LocalPlayer::aiStep), so hunger never becomes a difficulty in a
+    // mode chosen specifically to have none.
+    if (level->getDifficulty() == Difficulty::PEACEFUL) {
+        exhaustion = 0.0f;
+        if (foodLevel < MAX_FOOD) {
+            if (++foodTimer >= 10) { foodTimer = 0; foodLevel++; }
+        } else {
+            foodTimer = 0;
+        }
+        return;
+    }
+
+    while (exhaustion >= EXHAUSTION_PER_POINT) {
+        exhaustion -= EXHAUSTION_PER_POINT;
+        if (saturation > 0.0f) {
+            saturation -= 1.0f;
+            if (saturation < 0.0f) saturation = 0.0f;
+        } else if (foodLevel > 0) {
+            foodLevel--;
+        }
+    }
+
+    if (foodLevel >= REGEN_FOOD && health < getMaxHealth()) {
+        if (++foodTimer >= FOOD_TICK_PERIOD) {
+            foodTimer = 0;
+            heal(1);
+            // Healing is not free: it costs the same exhaustion vanilla
+            // charges, which is what stops a full bar from being an
+            // indefinite supply of health.
+            addExhaustion(3.0f);
+        }
+    } else if (foodLevel <= 0) {
+        if (++foodTimer >= FOOD_TICK_PERIOD) {
+            foodTimer = 0;
+            // Starvation. Passing a null source deliberately routes around
+            // Player::hurt's difficulty scaling, which only applies to
+            // damage from a hostile entity or an arrow.
+            if (health > 1 || level->getDifficulty() == Difficulty::HARD)
+                Mob::hurt(0, 1);
+        }
+    } else {
+        foodTimer = 0;
+    }
+}
 
 Player::~Player() { delete inventory; }
 
@@ -69,6 +146,10 @@ bool Player::hurt(Entity* source, int dmg) {
 
     }
     if (dmg == 0) return false;
+    // Charged before the hit resolves so it applies even if the hit is the
+    // one that kills; hungerTick() bails on a dead player anyway, so the
+    // stored exhaustion simply goes unused until resetHunger() clears it.
+    addExhaustion(0.3f);
     return Mob::hurt(source, dmg);
 }
 

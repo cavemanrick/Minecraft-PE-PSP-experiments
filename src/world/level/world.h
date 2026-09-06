@@ -500,6 +500,14 @@ void worldSetDataNoUpdate(World* w, int x, int y, int z, unsigned char data);
 
 void worldMarkDirty(World* w, int x, int y, int z);
 
+// Applies any dirty marks that were deferred while this chunk was not yet
+// settled (see the long comment on PendingDirty in dirty.cpp) -- must be
+// called right after a chunk transitions from generating to settled, or
+// cross-chunk-boundary writes made during generation (tree canopies,
+// river carving, any decoration reaching into a neighbouring chunk) can
+// permanently miss updating that neighbour's mesh.
+void worldFlushPendingDirty(World* w, int cx, int cz);
+
 void worldDrainPlayerEdits(World* w, int maxSections);
 
 int worldEditQueueDepth();
@@ -742,7 +750,7 @@ void worldNotifyNeighborsChanged(World* w, int x, int y, int z);
 
 bool worldSetTileUpdate(World* w, int x, int y, int z, unsigned char id, unsigned char data);
 
-void worldExplode(World* w, float x, float y, float z, float r);
+void worldExplode(World* w, float x, float y, float z, float r, bool causesFire = false);
 
 void worldPrimeTnt(World* w, int x, int y, int z, int fuseTicks, bool playFuse = true);
 

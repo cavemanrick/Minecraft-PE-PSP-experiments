@@ -64,6 +64,27 @@ static bool pendingVillager(int chunkX, int chunkZ) {
 }
 
 static void queueVillageVillager(int chunkX, int chunkZ, const unsigned char* uses) {
+    // Villagers temporarily disabled: known bugs in both spawn placement
+    // (spawns on the roof instead of inside the house -- villageHeight
+    // resolves to the wrong Y) and rendering (arms render as hollow
+    // tubes) haven't been fixed yet. Guarding here, at the single choke
+    // point both villageGenerateChunk (fresh generation) and
+    // villageChunkLoaded (restoring a previously saved villager) funnel
+    // through, rather than in spawnVillageVillager below: gating there
+    // instead would leave every request permanently stuck in
+    // s_pendingVillagers (villageTick's consumer loop only dequeues a
+    // request once findLoadedVillager confirms a real villager exists,
+    // which never happens if the spawn is silently skipped) -- unbounded
+    // per-tick churn for the rest of the session, and once
+    // MAX_PENDING_VILLAGERS (64) fills up, silently dropped requests for
+    // every village generated after that. Gating the enqueue instead
+    // means there is simply nothing to iterate: zero pending-list growth,
+    // zero per-tick cost, and a one-line revert once the two bugs above
+    // are fixed. Village structures themselves (houses, paths) are
+    // entirely untouched by this -- only the entity ever appearing is
+    // skipped.
+    return;
+
     if (pendingVillager(chunkX, chunkZ)) return;
     if (s_pendingVillagerCount >= MAX_PENDING_VILLAGERS) return;
     PendingVillager& p = s_pendingVillagers[s_pendingVillagerCount++];

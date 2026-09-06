@@ -13,6 +13,8 @@
 #include <pspctrl.h>
 #include "world/level/tile/nether_portal.h"
 #include "world/entity/animal/strider.h"
+#include "world/entity/vehicle/raft.h"
+#include "world/entity/animal/pig.h"
 #include "world/entity/entity_types.h"
 
 extern World g_world;
@@ -73,6 +75,12 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
             static int s_regenTick = 0;
             if (++s_regenTick >= 12 * 20) { s_regenTick = 0; heal(1); }
         }
+
+        // Runs here, in the block that executes on every tick, rather than
+        // down beside the movement exhaustion below: the riding branch
+        // returns early, and hunger should still drain and regenerate
+        // while the player is sat on a strider.
+        hungerTick();
     }
 
     if (btn & PSP_CTRL_SQUARE)   yRot += LOOK;
@@ -89,20 +97,66 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
     if (xs > -dz && xs < dz) xs = 0.0f;
     if (yf > -dz && yf < dz) yf = 0.0f;
 
-    // Mounted striders consume the analog movement input themselves. The
-    // player still owns camera look (face buttons), but normal player travel
-    // is skipped so the player cannot walk independently of the mount.
+    // Mounted striders, rafts, and pigs consume the analog movement input
+    // themselves. The player still owns camera look (face buttons), but
+    // normal player travel is skipped so the player cannot walk
+    // independently of the mount.
+    //
+    // This three-way (soon four-way) if/else-if chain repeats the same
+    // dozen lines per mount type with only the seat-height constant and
+    // cast changing. Flagging rather than refactoring silently: a small
+    // shared interface (e.g. a Rideable base with
+    // setRiderInput/seatHeight/getXd..Zd) would let this collapse to one
+    // branch, but that changes Strider/Raft/Pig's inheritance and is a
+    // bigger structural call than adding Pig's branch warranted on its
+    // own. Worth doing before a fourth mount makes this worse.
     if (isRiding()) {
         Entity* v = getVehicle();
-        if (!v || v->removed || !v->isEntityType(EntityTypes::IdStrider)) {
+        bool isStrider = v && v->isEntityType(EntityTypes::IdStrider);
+        bool isRaft    = v && v->isEntityType(EntityTypes::IdBambooRaft);
+        bool isPig     = v && v->isEntityType(EntityTypes::IdPig);
+        if (!v || v->removed || !(isStrider || isRaft || isPig)) {
             dismountVehicle();
-        } else {
+        } else if (isStrider) {
             Strider* s = (Strider*)v;
             s->setRiderInput(xs, yf);
             s->yRot = yRot;
             s->xRot = 0.0f;
             setPos(s->x, s->y + 1.15f, s->z);
             xd = s->xd; yd = s->yd; zd = s->zd;
+            walkDistO = walkDist;
+            yBodyRotO = yBodyRot;
+            walkAnimSpeedO = walkAnimSpeed;
+            walkAnimPosO = walkAnimPos;
+            netherPortalPlayerTick(&g_world, this);
+            return;
+        } else if (isRaft) {
+            Raft* r = (Raft*)v;
+            r->setRiderInput(xs, yf);
+            r->yRot = yRot;
+            r->xRot = 0.0f;
+            // Same seat-height constant Raft::syncRider() itself uses
+            // (0.35f above the raft's own feet-relative y) -- kept
+            // identical rather than reusing a shared constant because
+            // Strider's analogous 1.15f above is also duplicated here
+            // rather than shared, matching the existing pattern in this
+            // function instead of introducing a new one.
+            setPos(r->x, r->y + 0.35f, r->z);
+            xd = r->xd; yd = r->yd; zd = r->zd;
+            walkDistO = walkDist;
+            yBodyRotO = yBodyRot;
+            walkAnimSpeedO = walkAnimSpeed;
+            walkAnimPosO = walkAnimPos;
+            netherPortalPlayerTick(&g_world, this);
+            return;
+        } else {
+            Pig* pg = (Pig*)v;
+            pg->setRiderInput(xs, yf);
+            pg->yRot = yRot;
+            pg->xRot = 0.0f;
+            // Same 0.7f seat-height constant Pig::syncRider() uses.
+            setPos(pg->x, pg->y + 0.7f, pg->z);
+            xd = pg->xd; yd = pg->yd; zd = pg->zd;
             walkDistO = walkDist;
             yBodyRotO = yBodyRot;
             walkAnimSpeedO = walkAnimSpeed;
@@ -119,7 +173,8 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
         if (btn & PSP_CTRL_DOWN)  yd -= 0.05f;
     } else if (jumping) {
         if (isInWater() || isInLava()) yd += 0.04f;
-        else if (onGround)             yd = 0.42f;
+        else if (onGround)           { yd = 0.42f;
+                                       addExhaustion(sprinting && !sneaking ? 0.2f : 0.05f); }
         // Ladder/vine dismount boost. Without this, jump was a complete
         // no-op while climbing: onGround is false for the whole climb, so
         // neither branch above ever fired, and the ONLY upward motion came
@@ -193,6 +248,21 @@ void LocalPlayer::aiStep(unsigned int btn, unsigned char lx, unsigned char ly) {
 
     float wdx = x - wx0, wdz = z - wz0;
     float distSq = wdx * wdx + wdz * wdz;
+
+    // Movement exhaustion. This has to sit after travel(), on the same
+    // wx0/wz0 pair the limb animation uses -- xo/zo are reset to x/z at the
+    // top of aiStep, before any movement happens, so measuring against them
+    // here would read exactly zero every tick and the bar would never move.
+    //
+    // Charged on distance actually covered rather than on "was a direction
+    // held", so walking into a wall costs nothing. Vertical motion is
+    // excluded: falling is not exercise. Rates are vanilla's.
+    if (isAlive() && !flying && distSq > 0.0f) {
+        float dist = sqrtf(distSq);
+        if (isInWater())                       addExhaustion(0.015f * dist);
+        else if (sprinting && !sneaking)       addExhaustion(0.100f * dist);
+        else if (onGround)                     addExhaustion(0.010f * dist);
+    }
 
     {
         static std::vector<Entity*> nearby;

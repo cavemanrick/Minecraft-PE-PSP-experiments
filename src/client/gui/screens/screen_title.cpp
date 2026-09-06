@@ -17,13 +17,38 @@ static int s_splash = -1;
 
 static const float btnSizeV = 75.0f;
 static const float yBaseV   = 2.0f + VH / 3.0f;
-static const float spacingV = (VW - 3.0f * btnSizeV) / 4.0f;
+
+// All three buttons stay defined; which of them are shown, and in what
+// order, is kButtonIdx. x is filled in by titleLayoutButtons() below --
+// the spacing depends on how many are visible, so it cannot be baked into
+// this initialiser.
+enum { TBTN_JOIN = 0, TBTN_START = 1, TBTN_OPTIONS = 2 };
 static PocketButton buttons[3] = {
-    { (spacingV + 0 * (btnSizeV + spacingV)) * UI_SCALE, yBaseV * UI_SCALE, btnSizeV * UI_SCALE, 0.0f, 176.0f, 75.0f, "Join Game",  true },
-    { (spacingV + 1 * (btnSizeV + spacingV)) * UI_SCALE, yBaseV * UI_SCALE, btnSizeV * UI_SCALE, 0.0f, 101.0f, 75.0f, "Start Game", true },
-    { (spacingV + 2 * (btnSizeV + spacingV)) * UI_SCALE, yBaseV * UI_SCALE, btnSizeV * UI_SCALE, 0.0f,  26.0f, 75.0f, "Options",    true },
+    { 0.0f, yBaseV * UI_SCALE, btnSizeV * UI_SCALE, 0.0f, 176.0f, 75.0f, "Join Game",  true },
+    { 0.0f, yBaseV * UI_SCALE, btnSizeV * UI_SCALE, 0.0f, 101.0f, 75.0f, "Start Game", true },
+    { 0.0f, yBaseV * UI_SCALE, btnSizeV * UI_SCALE, 0.0f,  26.0f, 75.0f, "Options",    true },
 };
-static const int numButtons = 3;
+
+#if MCPSP_MULTIPLAYER
+static const int kButtonIdx[]   = { TBTN_JOIN, TBTN_START, TBTN_OPTIONS };
+static const int kDefaultSelect = 1;   // Start Game, the middle button
+#else
+static const int kButtonIdx[]   = { TBTN_START, TBTN_OPTIONS };
+static const int kDefaultSelect = 0;   // Start Game, now the first button
+#endif
+static const int numButtons = (int)(sizeof(kButtonIdx) / sizeof(kButtonIdx[0]));
+
+// s.selected indexes kButtonIdx, not buttons[], so main.cpp needs to be
+// told where "Start Game" ended up rather than assuming slot 1.
+int titleDefaultSelection() { return kDefaultSelect; }
+
+static void titleLayoutButtons() {
+    // Evenly spaced with a full gap at each end, so two buttons centre
+    // themselves instead of leaving a hole where Join Game used to be.
+    const float spacing = (VW - numButtons * btnSizeV) / (numButtons + 1);
+    for (int i = 0; i < numButtons; i++)
+        buttons[kButtonIdx[i]].x = (spacing + i * (btnSizeV + spacing)) * UI_SCALE;
+}
 struct TitleScreen : Screen {
     void renderContent(MenuState& s);
     void handleInput(MenuState& s, unsigned int pressed, unsigned int held);
@@ -40,15 +65,16 @@ void TitleScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int )
     int& optCategory = s.optCategory;
 
     if (pressed & PSP_CTRL_RIGHT)
-        selected = (selected < 0) ? 1 : (selected + 1) % numButtons;
+        selected = (selected < 0) ? kDefaultSelect : (selected + 1) % numButtons;
     if (pressed & PSP_CTRL_LEFT)
-        selected = (selected < 0) ? 1 : (selected + numButtons - 1) % numButtons;
+        selected = (selected < 0) ? kDefaultSelect : (selected + numButtons - 1) % numButtons;
 
-    if ((pressed & PSP_CTRL_CROSS) && selected >= 0) {
-        if (selected == 1) {
+    if ((pressed & PSP_CTRL_CROSS) && selected >= 0 && selected < numButtons) {
+        int which = kButtonIdx[selected];
+        if (which == TBTN_START) {
             screen = SCREEN_WORLDS;
             statusMsg[0] = '\0';
-        } else if (selected == 0) {
+        } else if (which == TBTN_JOIN) {
             joinListReset(s);
             screen = SCREEN_JOIN;
             statusMsg[0] = '\0';
@@ -108,9 +134,13 @@ void TitleScreen::renderContent(MenuState& s) {
     }
 
     if (haveGui && haveTouch && haveFont) {
+        static bool s_laid = false;
+        if (!s_laid) { titleLayoutButtons(); s_laid = true; }
+
         sceGuDisable(GU_DEPTH_TEST);
         for (int i = 0; i < numButtons; i++)
-            pocketButtonDraw(&font, &guiAtlas, &touchGui, &buttons[i], i == selected, UI_SCALE);
+            pocketButtonDraw(&font, &guiAtlas, &touchGui, &buttons[kButtonIdx[i]],
+                             i == selected, UI_SCALE);
         sceGuEnable(GU_DEPTH_TEST);
     }
 

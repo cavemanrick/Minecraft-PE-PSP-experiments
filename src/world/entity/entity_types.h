@@ -37,6 +37,12 @@ namespace EntityTypes {
     // ask for one by type id, only the rod can create one.
     const int IdFishingBobber = 84;
     const int IdFireball      = 85;
+
+    // Vehicle, not a mob: no AI, no health-driven death beyond breaking
+    // like a boat, no mob-spawner interaction. Placed here rather than
+    // beside the projectile ids since it is rideable like Strider (37),
+    // not thrown or fired.
+    const int IdBambooRaft    = 86;
 }
 
 #endif

@@ -184,8 +184,6 @@ static void spawnMonsters(Level* level) {
         int cx = pcx + s_rng.nextInt(2 * R + 1) - R;
         int cz = pcz + s_rng.nextInt(2 * R + 1) - R;
 
-        if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
-
         // This function is Overworld-only. Zombified piglins used to
         // spawn from here too, gated to Nether Wastes via a second table
         // (NETHER_WASTES_TABLE) -- moved out to their own spawnPigZombies
@@ -193,11 +191,27 @@ static void spawnMonsters(Level* level) {
         // leash, the same way striders already have their own spawn
         // function separate from this one rather than sharing the
         // Overworld monster pool and its proportional-weight cap math.
-        // MONSTER_TABLE below is therefore reached unconditionally now;
-        // if this function is ever called for a Nether chunk it should
-        // simply find no valid standable spot via probeStandableY's
-        // Overworld-shaped search and skip the attempt, not spawn
-        // Overworld mobs into the Nether.
+        //
+        // This exclusion is REQUIRED, not just documentation: an earlier
+        // version of this comment assumed probeStandableY would naturally
+        // fail to find a spot in the Nether and skip the attempt on its
+        // own. That's only true for probeStandableY's getTopSolidBlock
+        // branch (which hits the sealed bedrock roof -- see
+        // netherProbeStandableY's comment). Its OTHER branch picks a
+        // fully random Y across the whole world height and checks
+        // spawnOk there directly, with no biome awareness at all --
+        // spawnOk is satisfied by any solid-floor/clear-air-pocket/no-
+        // liquid spot, which ordinary Nether Wastes floor matches just
+        // fine. Without this check, roughly half of this function's
+        // attempts (SURFACE_PROBE_ODDS is 1-in-2) could and did land
+        // zombies/spiders/skeletons in the Nether. Same fix
+        // spawnCreatures already uses for the equivalent Overworld-
+        // animals-in-the-Nether problem, just below in this file.
+        if (worldChunkIsReserved(level->w, cx, cz) &&
+            worldChunkIsNether(level->w, cx, cz)) continue;
+
+        if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
+
         int xStart = cx * 16 + s_rng.nextInt(16);
         int zStart = cz * 16 + s_rng.nextInt(16);
         int yStart = probeStandableY(level, xStart, zStart);

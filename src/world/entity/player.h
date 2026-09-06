@@ -46,6 +46,42 @@ public:
 
     int score;
 
+    // --- Hunger ----------------------------------------------------------
+    // Survival-only. foodLevel is in half-shanks, 0..MAX_FOOD, so the 10
+    // haunches the HUD draws are two points each -- the same relationship
+    // health has to the ten hearts, which is why the nutrition values
+    // already in item.cpp (apple 4, bread 5, cooked porkchop 8, ...) work
+    // unchanged: they were already vanilla hunger points being spent as
+    // health.
+    //
+    // saturation is the hidden buffer that drains before foodLevel does,
+    // and is capped at foodLevel so a full bar of cheap food does not bank
+    // as much reserve as a full bar of steak. exhaustion accumulates from
+    // movement, mining and damage; every EXHAUSTION_PER_POINT of it spends
+    // one point of saturation, or one of foodLevel once saturation is
+    // gone.
+    //
+    // foodTimer drives both regeneration and starvation, which is why it
+    // is one counter and not two -- they are mutually exclusive states
+    // (foodLevel >= REGEN_FOOD vs foodLevel == 0) and vanilla ticks them
+    // off the same clock.
+    enum { MAX_FOOD = 20, REGEN_FOOD = 18, FOOD_TICK_PERIOD = 80 };
+    static const float EXHAUSTION_PER_POINT;
+
+    int   foodLevel;
+    float saturation;
+    float exhaustion;
+    int   foodTimer;
+
+    int   getFoodLevel() const { return foodLevel; }
+    bool  isHungry() const { return foodLevel < MAX_FOOD; }
+    void  addExhaustion(float amount);
+    void  eat(int nutrition);
+    void  resetHunger();
+    // Runs the drain/regen/starve step. Called once per tick from
+    // LocalPlayer::aiStep; a no-op in creative and while dead.
+    void  hungerTick();
+
 private:
     Entity* vehicle;
 

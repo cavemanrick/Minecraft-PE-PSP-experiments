@@ -104,6 +104,16 @@ static void finishBegin(World* w, int cx, int cz) {
     c->stage = ST_DECOR0;
     s_decorPhase = 0;
     s_pend = true; s_pendX = cx; s_pendZ = cz;
+
+    // This is the exact moment worldChunkSettled starts returning true
+    // for (cx, cz) (it checks isAt() && !generating). Any cross-chunk
+    // decoration write that landed here EARLIER -- from some other
+    // chunk's own 2x2 decoration group reaching into this one before it
+    // existed or while it was still generating -- was deferred rather
+    // than applied (see markSecDirty/queuePendingDirty in dirty.cpp).
+    // Flush those now so this chunk's very first mesh already reflects
+    // them, instead of silently rendering as if they never happened.
+    worldFlushPendingDirty(w, cx, cz);
 }
 
 bool worldStreamBusy() { return s_pend; }

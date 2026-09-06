@@ -30,7 +30,23 @@ enum EntityRendererId {
     ER_VILLAGER_RENDERER,
     ER_WARPED_SPIDER_RENDERER,
     ER_FALLINGTILE_RENDERER,
-    ER_FISHING_BOBBER_RENDERER
+    ER_FISHING_BOBBER_RENDERER,
+
+    // No RaftRenderer exists yet -- see raft.cpp's constructor comment.
+    // This slot is intentionally never assigned in
+    // EntityRenderDispatcher's init, so a raft is fully functional
+    // (rides, collides, breaks) but invisible until real art/mesh work
+    // gives it a renderer to assign here.
+    ER_RAFT_RENDERER,
+
+    // Sentinel, not a real renderer id -- always one past the last real
+    // entry above. entity_render_dispatcher.h sizes its renderer array off
+    // this instead of a named enumerator, so appending a new id here can
+    // never again silently shrink that array by one the way
+    // ER_FALLINGTILE_RENDERER + 1 (missing ER_FISHING_BOBBER_RENDERER) and
+    // then ER_FISHING_BOBBER_RENDERER + 1 (missing ER_RAFT_RENDERER) both
+    // did in turn. Must stay the last entry in this enum.
+    ER_RENDERER_COUNT
 };
 
 #endif

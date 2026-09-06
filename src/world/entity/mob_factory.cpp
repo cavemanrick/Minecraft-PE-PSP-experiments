@@ -14,6 +14,7 @@
 #include "world/entity/monster/spider.h"
 #include "world/entity/monster/warped_spider.h"
 #include "world/entity/monster/pig_zombie.h"
+#include "world/entity/villager.h"
 #include <cstdlib>
 
 namespace MobFactory {
@@ -41,6 +42,7 @@ typedef char assert_mob_fits_slot[
      sizeof(Chicken)   <= Entity::ENTITY_SLOT &&
      sizeof(Sheep)     <= Entity::ENTITY_SLOT &&
      sizeof(Strider)   <= Entity::ENTITY_SLOT &&
+     sizeof(Villager)  <= Entity::ENTITY_SLOT &&
      sizeof(Ghast)     <= Entity::ENTITY_SLOT) ? 1 : -1];
 
 static const int MOB_SLOT_RESERVE = 24;
@@ -61,6 +63,13 @@ Mob* createMob(int mobType, Level* level) {
         case EntityTypes::IdPigZombie:r = new PigZombie(level); break;
         case EntityTypes::IdStrider:   r = new Strider(level); break;
         case EntityTypes::IdGhast:     r = new Ghast(level); break;
+        // EntityFactory::createEntity has had this case since the villager
+        // was added; this one never did, so nothing could ask MobFactory
+        // for a villager by type id and the Creative spawn egg had no way
+        // to produce one. Note Villager::save() returns false, so a
+        // hand-spawned villager is deliberately not persisted across a
+        // save/load -- only the ones village generation places are.
+        case EntityTypes::IdVillager:  r = new Villager(level); break;
     }
     return r;
 }

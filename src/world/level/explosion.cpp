@@ -5,6 +5,7 @@
 #include "world/level/chunk/chunk.h"
 #include "world/level/level.h"
 #include "world/entity/primed_tnt.h"
+#include "world/level/tile/fire.h"
 #include "world/phys/aabb.h"
 #include "client/player/player_state.h"
 #include "client/renderer/particle.h"
@@ -56,7 +57,7 @@ static float seenPercent(World* w, float cx, float cy, float cz, const AABB& bb)
     return count ? hits / (float)count : 1.0f;
 }
 
-void worldExplode(World* w, float x, float y, float z, float r) {
+void worldExplode(World* w, float x, float y, float z, float r, bool causesFire) {
     const int cx = (int)floorf(x), cy = (int)floorf(y), cz = (int)floorf(z);
 
     const int R = 10, W = 2 * R + 1;
@@ -105,7 +106,23 @@ void worldExplode(World* w, float x, float y, float z, float r) {
 
             if (frand() < 0.3f)
                 worldSpawnResources(w, bx, by, bz, id, worldData(w, bx, by, bz));
-            worldSetBlockAndData(w, bx, by, bz, BLOCK_AIR, 0);
+            // Incendiary explosions (currently: only Fireball -- see its
+            // FIREBALL_EXPLOSION_POWER comment and call site) have a
+            // chance to leave fire in the crater instead of bare air,
+            // matching vanilla's real Explosion#causesFire behaviour.
+            // TNT and creeper explosions pass causesFire=false (the
+            // default) and are completely unaffected by this block --
+            // vanilla's own TNT/creeper explosions don't ignite anything
+            // either, so this isn't a shared "explosions make fire"
+            // behaviour, it's specific to the one caller that sets the
+            // flag. fireMayPlace is the same solid-ground-or-flammable-
+            // neighbour check natural fire spread already uses (see
+            // fire.cpp), so a blast crater only catches fire where real
+            // fire could actually exist, not on every destroyed block.
+            unsigned char next = BLOCK_AIR;
+            if (causesFire && frand() < 0.33f && fireMayPlace(w, bx, by, bz))
+                next = BLOCK_FIRE;
+            worldSetBlockAndData(w, bx, by, bz, next, 0);
             worldNotifyNeighborsChanged(w, bx, by, bz);
         }
     }

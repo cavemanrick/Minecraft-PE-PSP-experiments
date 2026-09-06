@@ -74,6 +74,7 @@ void playerRespawn() {
     p->health = p->getMaxHealth();
     p->deathTime = 0; p->hurtTime = 0; p->invulnerableTime = 0;
     p->onFire = 0;
+    p->resetHunger();
 
     g_level.validateSpawn();
     int sx = p->hasRespawnPosition() ? p->respawnX : g_level.spawnX;

@@ -238,8 +238,16 @@ Recipes::Recipes() {
             }
     }
 
+    // DYE_BROWN is no longer skipped. It was grouped with the four dyes
+    // that have no obtainable source in this build (black/ink sac needs
+    // squid; silver and gray need an ink sac to mix; white wool is the
+    // uncoloured base), but brown has always had one -- cocoa pods drop
+    // ITEM_BONEMEAL aux 3 (see CocoaTile::spawnResources, tile.cpp) and
+    // jungle trees generate them. clothData(DYE_BROWN) == 12, which
+    // kWoolTint (tile_wool.cpp) already renders as brown, so this needed
+    // no new block, data value or texture -- only the recipe.
     for (int i = 0; i < 16; ++i) {
-        if (i == DYE_BLACK || i == DYE_BROWN || i == DYE_SILVER || i == DYE_GRAY || i == DYE_WHITE)
+        if (i == DYE_BLACK || i == DYE_SILVER || i == DYE_GRAY || i == DYE_WHITE)
             continue;
         addShapelessRecipe(ItemInstance(BLOCK_WOOL, 1, clothData(i)),
             { ItemInstance(ITEM_BONEMEAL, 1, (short)i), ItemInstance(BLOCK_WOOL, 1, 0) });
@@ -355,8 +363,35 @@ Recipes::Recipes() {
     addShapedRecipe(ItemInstance(ITEM_SUGAR, 1, 0),
                     "#", { ITEM('#', ITEM_REEDS) });
 
+    // Cookies. Vanilla is a shaped wheat/cocoa/wheat row; this build takes
+    // sugar as the third ingredient instead of a second wheat, and is
+    // shapeless so the three do not have to be laid out in a particular
+    // order on the grid. Cocoa beans are ITEM_BONEMEAL aux DYE_BROWN --
+    // beans and brown dye are the same item, exactly as in vanilla.
+    addShapelessRecipe(ItemInstance(ITEM_COOKIE, 8, 0),
+        { ItemInstance(ITEM_WHEAT, 1, 0), ItemInstance(ITEM_BONEMEAL, 1, DYE_BROWN),
+          ItemInstance(ITEM_SUGAR, 1, 0) });
+
     addShapedRecipe(ItemInstance(BLOCK_PLANKS, 4, 0),
                     "#", { TILE('#', BLOCK_LOG) });
+
+    // Bamboo stalk -> Block of Bamboo -> Bamboo Planks -> Bamboo Raft.
+    // Neither BLOCK_BAMBOO_BLOCK nor BLOCK_BAMBOO_PLANKS generates
+    // naturally (see chunk.h) -- both only exist via this chain, mirroring
+    // log -> planks but starting one step further back since a bamboo
+    // stalk isn't itself a solid, stackable building material the way a
+    // log is.
+    addShapedRecipe(ItemInstance(BLOCK_BAMBOO_BLOCK, 1, 0),
+                    "###",
+                    "###",
+                    "###", { TILE('#', BLOCK_BAMBOO) });
+
+    addShapedRecipe(ItemInstance(BLOCK_BAMBOO_PLANKS, 2, 0),
+                    "#", { TILE('#', BLOCK_BAMBOO_BLOCK) });
+
+    addShapedRecipe(ItemInstance(ITEM_BAMBOO_RAFT, 1, 0),
+                    "# #",
+                    "###", { TILE('#', BLOCK_BAMBOO_PLANKS) });
 
     addShapedRecipe(ItemInstance(ITEM_STICK, 4, 0),
                     "#",

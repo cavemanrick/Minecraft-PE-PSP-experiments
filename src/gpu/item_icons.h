@@ -50,7 +50,22 @@
 // flat sprite is the cheap way in without drawing a cube.
 #define II_LEAVES_DARK_OAK          128
 
-// Remaining free flat slots: 129, 139-141, 147-159, plus 0,6,7,9,107,108.
+// Brown dye had no cell of its own: kItemIconDye[3] pointed at 146, which
+// is ALSO where guiBlockIcon puts BLOCK_COCOA (it returns 274 == 128 + 146,
+// and the block path subtracts 128 before indexing this same grid). So a
+// stack of brown dye rendered as a cocoa pod -- the identical collision
+// the bow/fishing-rod note above describes for cell 19. Brown dye now owns
+// 147 and cocoa keeps 146.
+#define II_DYE_BROWN                147
+#define II_COOKIE                   148
+
+// Flat GUI-atlas slot for the raft item, pasted into gui_blocks.png at
+// (col 2, row 31) i.e. index 130 -- verified free against the atlas
+// before use. Index 201 in this table is ITEM_BAMBOO_RAFT (457 - 256).
+#define II_BAMBOO_RAFT              130
+
+// Remaining free flat slots: 129, 139-141, 149-157, plus 0,6,7,9,107,108.
+// (130 is now the raft, see II_BAMBOO_RAFT above.)
 // Same convention throughout this atlas -- 16x16 at
 // column = index & 31, row = 27 + (index >> 5), binary (0/255) alpha, no
 // partial edge pixels, because the loader is GU_PSM_5551 (1-bit alpha).
@@ -68,7 +83,7 @@ static const short kItemIcon[256] = {
        -1,    -1,    -1,    -1,    98,    -1,    71,    -1,
        31,    30,    10,    96,    97,    -1,    -1,    -1,
       113,    -1, II_FISHING_ROD,    -1,    99, II_FISH_RAW,            II_FISH_COOKED,    -1,
-       95,   101,   120,     4,    -1,    -1,    -1,    56,
+       95,   101,   120,     4,    -1, II_COOKIE,    -1,    56,   // 357 = ITEM_COOKIE at index 101
        68,    -1,    15,    32,    33,    34,    35,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
@@ -81,7 +96,7 @@ static const short kItemIcon[256] = {
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
-      114,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
+      114, II_BAMBOO_RAFT,    -1,    -1,    -1,    -1,    -1,    -1,   // 456 = ITEM_CAMERA, 457 = ITEM_BAMBOO_RAFT
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
        -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
@@ -91,6 +106,6 @@ static const short kItemIcon[256] = {
 };
 
 static const short kItemIconCoal[16] = { 102, 23, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
-static const short kItemIconDye[16] = { -1, 24, 26, 146, 65, 87, 88, -1, -1, 89, 90, 91, 92, 93, 94, 16 };
+static const short kItemIconDye[16] = { -1, 24, 26, II_DYE_BROWN, 65, 87, 88, -1, -1, 89, 90, 91, 92, 93, 94, 16 };
 
 #endif

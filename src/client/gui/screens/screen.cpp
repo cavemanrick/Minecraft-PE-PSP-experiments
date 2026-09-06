@@ -34,8 +34,16 @@ Screen* menuScreen(AppScreen which) {
         case SCREEN_WORLDS:  return &worldsScreen();
         case SCREEN_DELETE:  return &deleteScreen();
         case SCREEN_CREATE:  return &createScreen();
+#if MCPSP_MULTIPLAYER
         case SCREEN_JOIN:    return &joinScreen();
         case SCREEN_ADD_SERVER: return &addServerScreen();
+#else
+        // Unreachable with the title button gone, but a stale saved value
+        // or a stray assignment would otherwise land on a null Screen*.
+        // Fall back to the title screen rather than crash.
+        case SCREEN_JOIN:
+        case SCREEN_ADD_SERVER: return &titleScreen();
+#endif
         case SCREEN_OPTIONS: return &optionsScreen();
         case SCREEN_GAME:    break;
     }

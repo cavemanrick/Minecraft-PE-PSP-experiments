@@ -44,18 +44,26 @@ static const short kPalette[] = {
     BLOCK_CACTUS, BLOCK_MELON, ITEM_REEDS, BLOCK_COBWEB,
     BLOCK_SAPLING, BLOCK_SAPLING, BLOCK_SAPLING, BLOCK_SAPLING,
     BLOCK_LEAVES, BLOCK_LEAVES, BLOCK_LEAVES, BLOCK_LEAVES, BLOCK_LEAVES_DARK_OAK,
-    BLOCK_VINE, BLOCK_BAMBOO,
+    BLOCK_VINE, BLOCK_BAMBOO, BLOCK_BAMBOO_BLOCK, BLOCK_BAMBOO_PLANKS,
 
     ITEM_SEEDS_WHEAT, ITEM_SEEDS_MELON, ITEM_BONEMEAL,
     ITEM_HOE_IRON,
     ITEM_CAKE, ITEM_EGG, ITEM_FISH_RAW, ITEM_FISH_COOKED,
     ITEM_SWORD_IRON, ITEM_BOW, ITEM_FISHING_ROD, ITEM_SIGN,
     ITEM_FLINT_AND_STEEL,
+    ITEM_SADDLE,
+    ITEM_COOKIE,
     ITEM_CAMERA,
 
     ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
     ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
     ITEM_SPAWN_EGG,
+    // Ghast / villager / warped spider. MobFactory::createMob already
+    // handled the ghast and the warped spider; the villager did not have a
+    // case there at all (only EntityFactory did) and has one now. Same
+    // "table not updated when the mob was added" gap the strider entry
+    // below already documents.
+    ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
 };
 static const unsigned char kPaletteData[] = {
 
@@ -82,12 +90,14 @@ static const unsigned char kPaletteData[] = {
     0, 0, 0, 0,                                 // cactus, melon, reeds, cobweb
     0, 1, 2, 3,                                 // oak/spruce/birch/jungle saplings
     0, 1, 2, 3, 0,                              // oak/spruce/birch/jungle leaves, then dark oak
-    0, 0,                                       // vine, bamboo
+    0, 0, 0, 0,                                 // vine, bamboo, bamboo block, bamboo planks
     0, 0, 15,
     0, 0, 0, 0, 0,                              // hoe, cake, egg, raw fish, cooked fish
     0, 0, 0, 0,                                 // sword, bow, fishing rod, sign
-    0,
-    0,
+    0,                                          // flint and steel
+    0,                                          // saddle
+    0,                                          // cookie
+    0,                                          // camera
     12, 11, 10, 13,
     32, 33, 34, 35, 36,
     37, // strider (EntityTypes::IdStrider) -- was never added when the
@@ -96,6 +106,7 @@ static const unsigned char kPaletteData[] = {
         // id 37 correctly. This is the same "table not updated when the
         // mob was added" gap spawnEggColors (spawn_egg_colors.h) has for
         // its cosmetic egg-color entry -- fixed alongside this one.
+    38, 39, 40, // ghast, villager, warped spider
 };
 static const int kPaletteCount = (int)(sizeof(kPalette) / sizeof(kPalette[0]));
 static_assert((sizeof(kPaletteData) / sizeof(kPaletteData[0])) == (sizeof(kPalette) / sizeof(kPalette[0])),

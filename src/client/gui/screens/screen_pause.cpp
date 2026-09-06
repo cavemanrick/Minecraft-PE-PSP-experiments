@@ -177,6 +177,14 @@ void PauseScreen::renderContent(MenuState& s) {
                             kPauseButtons[i], hover, true);
         }
 
+        // Player list. This is the in-world roster from MCPE's game menu,
+        // which is why it is sized for 16 rows; with the multiplayer
+        // front-end off there is never more than one name in it, so the
+        // panel is a mostly-empty box showing the PSP system nickname
+        // (which reads "PPSSPP" under the emulator, from
+        // sceUtilityGetSystemParamString above). Hidden until there is
+        // something to list.
+#if MCPSP_MULTIPLAYER
         const unsigned int LIST_EDGE = 0x69000000u;
         const unsigned int LIST_FILL = 0x452D2D2Du;
         drawRect(PAUSE_LIST_X * UI_SCALE, PAUSE_LIST_Y * UI_SCALE,
@@ -204,6 +212,7 @@ void PauseScreen::renderContent(MenuState& s) {
                                 (ry + PAUSE_NAME_Y) * UI_SCALE, names[i], col, UI_SCALE,
                                 PAUSE_LIST_W - PAUSE_NAME_X * 2.0f);
         }
+#endif
     }
 
     if (g_quitConfirm && haveGui && haveFont) {
