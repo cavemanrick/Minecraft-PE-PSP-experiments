@@ -193,6 +193,7 @@ void Item::initItems() {
             { ITEM_STICK, 1 }, { ITEM_BRICK, 1 }, { ITEM_DOOR_WOOD_ITEM, 1 },
             { ITEM_DOOR_IRON_ITEM, 1 }, { ITEM_BED_ITEM, 1 }, { ITEM_NETHER_BRICK, 1 },
             { BLOCK_STONE, 1 }, { BLOCK_PLANKS, 1 }, { BLOCK_COBBLESTONE, 1 },
+            { BLOCK_BAMBOO_BLOCK, 1 }, { BLOCK_BAMBOO_PLANKS, 1 },
             { BLOCK_SAND, 1 }, { BLOCK_SANDSTONE, 1 }, { BLOCK_WOOL, 1 }, { BLOCK_SLAB, 1 }, { BLOCK_WOOD_SLAB, 1 },
             { BLOCK_BRICKS, 1 }, { BLOCK_GLASS_PANE, 1 }, { BLOCK_FENCE, 1 },
             { BLOCK_FENCE_GATE, 1 }, { BLOCK_SNOW_BLOCK, 1 }, { BLOCK_CLAY, 1 },

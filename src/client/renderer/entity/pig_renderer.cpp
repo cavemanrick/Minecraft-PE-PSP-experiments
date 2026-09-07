@@ -2,6 +2,7 @@
 #include "client/renderer/entity/pig_renderer.h"
 #include "client/renderer/entity/mob_model.h"
 #include "world/entity/mob.h"
+#include "world/entity/animal/pig.h"
 #include "gpu/texture.h"
 #include <math.h>
 #include <pspgu.h>
@@ -13,6 +14,8 @@ static MobPart parts[P_COUNT];
 static bool    g_built = false;
 static Texture g_tex;
 static bool    g_have = false;
+static Texture g_saddleTex;
+static bool    g_haveSaddleTex = false;
 
 static void build() {
     if (g_built) return;
@@ -35,6 +38,13 @@ PigRenderer::PigRenderer() { shadowRadius = 0.5f; shadowStrength = 1.0f; }
 
 void PigRenderer::render(Entity* e, float x, float y, float z, float rot, float a) {
     if (!g_have) { g_have = textureLoad16("data/images/mob/pig.png", &g_tex, GU_PSM_5551); if (!g_have) return; }
+    Pig* pig = (Pig*)e;
+    Texture* activeTex = &g_tex;
+    if (pig->isSaddled()) {
+        if (!g_haveSaddleTex)
+            g_haveSaddleTex = textureLoad16("data/images/mob/pig_saddle.png", &g_saddleTex, GU_PSM_5551);
+        if (g_haveSaddleTex) activeTex = &g_saddleTex;
+    }
     build();
     Mob* mob = (Mob*)e;
 
@@ -49,5 +59,5 @@ void PigRenderer::render(Entity* e, float x, float y, float z, float rot, float 
     parts[P_LEG0].xRot =  pend; parts[P_LEG1].xRot = -pend; parts[P_LEG2].xRot = -pend; parts[P_LEG3].xRot = pend;
     for (int i = P_LEG0; i <= P_LEG3; i++) { parts[i].yRot = parts[i].zRot = 0; }
 
-    mobRenderParts(mob, parts, P_COUNT, &g_tex, x, y, z, ibody, a, 0xFFFFFFFFu, 4.0f, 4.0f);
+    mobRenderParts(mob, parts, P_COUNT, activeTex, x, y, z, ibody, a, 0xFFFFFFFFu, 4.0f, 4.0f);
 }

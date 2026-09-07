@@ -23,3 +23,12 @@ int  itemFlatIcon(short id, unsigned char data);
 void drawFlatIcon(int icon, float x, float y, float sizePx, unsigned int tint);
 
 void hudChatMessage(const char* msg);
+
+// Upper-right corner toast queue, shared by achievement unlocks and the
+// context-sensitive key-hint system (see gameHintsDraw in hud.cpp).
+// hudAchievementToast is exposed mainly for symmetry / potential direct
+// use elsewhere; achievement.cpp itself doesn't need to call it, since
+// hud.cpp already drains achievementsPollNotification() into the same
+// queue every frame.
+void hudAchievementToast(const char* name);
+void hudKeyHintToast(const char* button, const char* action);

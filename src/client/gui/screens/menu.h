@@ -86,6 +86,8 @@ struct MenuState {
     int   achvSelected;
     float achvScroll;
 
+    float ctrlScroll;
+
     char statusMsg[128];
 };
 
@@ -228,5 +230,8 @@ void signEditLine(int line);
 
 extern bool g_achievementsOpen;
 void achievementsOpen();
+
+extern bool g_controlsOpen;
+void controlsOpen();
 
 #endif

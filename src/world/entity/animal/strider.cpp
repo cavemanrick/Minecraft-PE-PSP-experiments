@@ -209,7 +209,15 @@ void Strider::travel(float xs, float yf) {
     // Direct surface movement. Entity::move still supplies block collision,
     // but there is no gravity/pathfinding and no expensive liquid swim AI.
     const bool lava = isInLava();
-    mobMoveRelative(xs, yf, rider ? 0.115f : 0.055f);
+    // 0.115f was ~5.8x the effective speed a ridden Pig gets through
+    // Mob::travel's ground-friction math (Pig has no travel() override,
+    // so it's damped by friction2 there; Strider bypasses that path
+    // entirely and this constant goes straight to mobMoveRelative,
+    // so the two were never on comparable scales to begin with).
+    // Reported as noticeably too fast; brought down to feel brisk but not
+    // wildly outpace a mounted Pig. Still an estimate, not a hardware-
+    // measured value -- may need another pass.
+    mobMoveRelative(xs, yf, rider ? 0.045f : 0.055f);
     if (lava) {
         move(xd, 0.0f, zd);
         yd = 0.0f;
@@ -219,6 +227,7 @@ void Strider::travel(float xs, float yf) {
         yd -= 0.08f;
         if (onGround && yd < 0.0f) yd = 0.0f;
         move(xd, yd, zd);
+        if (rider) mobRiderAutoJump();
     }
     xd *= lava ? 0.82f : 0.65f;
     zd *= lava ? 0.82f : 0.65f;

@@ -29,43 +29,66 @@ static bool haveTexShooting = false;
 
 // Bedrock geometry.ghast, tentacles_0..8: each cube's local box (relative
 // to its own pivot) is a uniform 2x2 cross-section hanging straight down
-// from the pivot by the tentacle's own height -- (-1,-h,-1) to (1,0,1).
-// Pivot itself is the one thing that varies per tentacle (arranged in a
-// 3x3 grid under the body) along with height. Values below are copied
-// directly from the shipped geometry.ghast bones (pivot x,y,z; height).
+// from the pivot by the tentacle's own height. Pivot X/Z and height are
+// copied directly from the shipped geometry.ghast bones; pivot Y is
+// converted from Bedrock's Y-up convention to this engine's own (see the
+// long comment in build() below on the -msY global scale flip) via
+// engineY = 16 - bedrockY, using the body's own height (16) as the
+// reference -- Bedrock's shared tentacle pivot.y=1.0 (near the body's
+// underside in ITS convention) becomes 15.0 here (also near the body's
+// underside, just expressed in a Y-down-from-top convention). Every
+// tentacle shares the same pivot Y in both conventions since Bedrock's
+// own data uses pivot.y=1.0 uniformly across all 9.
 struct TentacleSpec { float px, py, pz; float height; };
 static const TentacleSpec kTentacles[9] = {
-    { -3.8f, 1.0f, -5.0f,  9.0f },
-    {  1.3f, 1.0f, -5.0f, 11.0f },
-    {  6.3f, 1.0f, -5.0f,  8.0f },
-    { -6.3f, 1.0f,  0.0f,  9.0f },
-    { -1.3f, 1.0f,  0.0f, 13.0f },
-    {  3.8f, 1.0f,  0.0f, 11.0f },
-    { -3.8f, 1.0f,  5.0f, 12.0f },
-    {  1.3f, 1.0f,  5.0f, 12.0f },
-    {  6.3f, 1.0f,  5.0f, 13.0f },
+    { -3.8f, 15.0f, -5.0f,  9.0f },
+    {  1.3f, 15.0f, -5.0f, 11.0f },
+    {  6.3f, 15.0f, -5.0f,  8.0f },
+    { -6.3f, 15.0f,  0.0f,  9.0f },
+    { -1.3f, 15.0f,  0.0f, 13.0f },
+    {  3.8f, 15.0f,  0.0f, 11.0f },
+    { -3.8f, 15.0f,  5.0f, 12.0f },
+    {  1.3f, 15.0f,  5.0f, 12.0f },
+    {  6.3f, 15.0f,  5.0f, 13.0f },
 };
 
 static void build() {
     if (built) return;
-    // Body: origin (-8,0,-8) size (16,16,16) in Bedrock's own model space,
-    // pivot (0,1.5,0). Bedrock's "origin" is model-space, not pivot-
-    // relative like this codebase's box vertices are, so the local box
-    // here is origin-space unchanged (Bedrock's pivot only matters for
-    // rotation, and the body never rotates independently of the whole
-    // entity). The box geometry itself was already correct before this
-    // rewrite; only the tentacles and modelScale (see render() below)
-    // were missing/wrong.
-    mobBuildBox(parts[G_BODY].base, -8,-8,-8, 8,8,8, 0,0, 16,16,16, false, 0, 128.0f, 64.0f);
+    // Body texture: NOT tx=0,ty=0 as Bedrock's geometry.ghast JSON
+    // literally states. Bedrock's own renderer does not unwrap a cube
+    // into a Java-style 6-region box-cross the way mobBuildBox does, so
+    // feeding its raw uv:[0,0] through mobBuildBox samples the wrong
+    // pixels entirely -- verified directly against the actual shipped
+    // ghast.png: tx=0,ty=0 lands the front face on x=16-32,y=16-32, which
+    // is faint near-blank filler, while the real eyes/mouth art sits at
+    // x=32-64,y=32-64. tx=16,ty=16,w=32,h=32,d=16 (empirically measured
+    // against the real texture, not read from geometry.ghast) puts the
+    // front face exactly on that art, and every other face this produces
+    // lands on plausible, non-blank texture content too -- checked by
+    // cropping and eyeballing all six computed face rectangles.
+    mobBuildBox(parts[G_BODY].base, -8,-8,-8, 8,8,8, 16,16, 32,32,16, false, 0, 128.0f, 64.0f);
     parts[G_BODY].px = 0; parts[G_BODY].py = 8; parts[G_BODY].pz = 0;
 
     for (int i = 0; i < 9; i++) {
         const TentacleSpec& t = kTentacles[i];
         MobPart& p = parts[G_TENT0 + i];
-        // Local box: (-1,-height,-1) to (1,0,1) -- 2x2 cross-section,
-        // hanging down from the pivot. uv (0,0) same as every other part
-        // in this model.
-        mobBuildBox(p.base, -1.0f, -t.height, -1.0f, 1.0f, 0.0f, 1.0f,
+        // Local box: (-1,0,-1) to (1,height,1) -- 2x2 cross-section,
+        // extending AWAY from the pivot toward the ground.
+        //
+        // Local +Y is "toward the ground" in this codebase's convention,
+        // not "up": mobRenderParts applies a global (-msXZ, -msY, msXZ)
+        // scale to the whole model (see mob_model.cpp) before any
+        // per-part pivot translate, which flips the sign of local Y
+        // relative to naive "Bedrock Y-up" box coordinates. Confirmed by
+        // checking a mob that already renders correctly: Strider's leg
+        // has pivot py=8 (the SAME height as its own body's pivot) and a
+        // local box of y:0..16, i.e. growing in +Y away from hip height
+        // down to the foot -- so +Y is down here, not up. An earlier
+        // version of this file built the tentacle box as (-1,-height,-1)
+        // to (1,0,1), i.e. growing in -Y from the pivot, which put every
+        // tentacle above its pivot instead of hanging below it -- the
+        // direct cause of the ghast rendering upside down.
+        mobBuildBox(p.base, -1.0f, 0.0f, -1.0f, 1.0f, t.height, 1.0f,
                     0, 0, 2, (int)t.height, 2, false, 0, 128.0f, 64.0f);
         p.px = t.px; p.py = t.py; p.pz = t.pz;
     }

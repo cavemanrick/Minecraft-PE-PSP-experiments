@@ -100,6 +100,15 @@ protected:
     virtual void addAdditonalSaveData(CompoundTag* tag);
 
     void mobMoveRelative(float xs, float yf, float speed);
+
+    // Shared ridden-mount auto-jump, factored out so Strider and Pig don't
+    // each duplicate the player's own auto-jump block (local_player.cpp)
+    // -- riding bypasses the player's normal aiStep/travel entirely (see
+    // the mount dispatch in local_player.cpp), so a mounted player gets no
+    // auto-jump at all unless the mount itself does this. Call once per
+    // tick, right after travel()'s move() has updated horizontalCollision
+    // for this tick, only while a rider is actually present.
+    void mobRiderAutoJump();
     bool isFreeM(float dx, float dy, float dz);
     unsigned char bodyBlock();
     virtual bool onLadder();

@@ -24,6 +24,21 @@ public:
     virtual int  getMaxHealth() { return 10; }
     virtual bool canSpawn();
 
+    // Real ghasts do not despawn based on distance from the player --
+    // they're large, slow, and iconic specifically for being visible
+    // across long stretches of the Nether. Mob::removeWhenFarAway()
+    // defaults to true (correct for short-range mobs like zombies/
+    // spiders, where vanishing off-screen is invisible and expected);
+    // Ghast needs the same override Villager and the whole Animal base
+    // class already use for the same "shouldn't casually disappear"
+    // reason (see mob.h/villager.h/animal.h). Without this, Mob::
+    // updateAi()'s unconditional 96-block removal silently deletes the
+    // entity -- not a rendering/culling bug, an actual despawn, which is
+    // what "disappears after moving away more than a chunk or so" was:
+    // 96 blocks reads as "more than a chunk" easily enough at normal
+    // play speed and viewing distance for that to be the same bug.
+    virtual bool removeWhenFarAway() { return false; }
+
     virtual bool hurt(Entity* source, int damage);
     virtual void die(Entity* source);
     virtual int  getDeathLoot();

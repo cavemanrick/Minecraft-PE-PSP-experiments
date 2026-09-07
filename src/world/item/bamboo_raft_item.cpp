@@ -12,6 +12,17 @@ extern Level g_level;
 
 BambooRaftItem::BambooRaftItem(short id) : Item(id) {
     maxStackSize = 1; // matches vanilla: a raft/boat item never stacks
+
+    // Item::category defaults to -1 (see Item::Item in item.cpp). Both
+    // screen_craft.cpp's recipe list (`if (item->category < 0) continue`)
+    // and the Registry Categories-tab enumeration key off this field, not
+    // just whether a recipe/creative-palette entry exists -- leaving it
+    // at -1 meant the raft's own crafting recipe was silently invisible
+    // in the crafting UI even though Recipes::getInstance() had it
+    // registered correctly. Category 1 groups building/functional items
+    // (planks, bed, crafting table, chest) -- the closest existing
+    // grouping to a placeable vehicle item.
+    category = 1;
 }
 
 bool BambooRaftItem::useOn(ItemInstance* item, Player* player, World* world,

@@ -97,10 +97,14 @@ extern bool    g_haveGuiBlocks;
 // icons -- that is the separate knob if those want shrinking too.
 #define HB_S       1.5f
 
-#define HB_BOTTOM  18.0f
+// This is PSP-only hardware: there is no bottom button-hint bar and no
+// on-screen touch control cluster competing for the bottom edge (touchGui
+// is a leftover from the mobile original and is never loaded here -- see
+// screenNeedsTouchGui in main.cpp), so the hotbar only needs enough
+// clearance to keep its cap off the physical bezel, not the 18px that used
+// to reserve room for the hint bar underneath it.
+#define HB_BOTTOM  4.0f
 #define HUD_HOTBAR_TOP (272.0f - 22.0f * HB_S - HB_BOTTOM)
-
-#define HUD_HINT_S  UI_HINT_S
 
 #define HUD_ST_S    2.0f
 
@@ -114,68 +118,173 @@ extern bool    g_haveGuiBlocks;
 #define HUD_TIMEBAR_H   (HX_BAR_H * 2.0f)
 #define HUD_TIMEBAR_GAP 2.0f
 #define HUD_TIMEBAR_Y   (HUD_HOTBAR_TOP - HUD_TIMEBAR_H - HUD_TIMEBAR_GAP)
-#define HUD_HINTS_Y UI_HINTS_Y
 
-// Achievement toast: a single-slot banner, distinct from the chat log
-// below. Real achievement pop-ups are meant to read as a deliberate,
-// separate event rather than one more scrolling line, so this gets its
-// own fixed screen position (top-centre) and its own timer rather than
-// reusing s_chat's rotation. Only one shown at a time -- if a second
-// unlock arrives while one is still fading, achievementsPollNotification
-// is simply polled again once the current one's timer expires, so a
-// same-tick double unlock (e.g. mining a diamond triggers both Diamonds!
-// and Diamond Miner) is queued and shown in turn rather than lost.
-#define ACHV_TOAST_SHOW_S 3.0f
-static char  s_achvToastName[40] = "";
-static float s_achvToastStart = -1000.0f;
+// --- Corner notifications ----------------------------------------------
+//
+// A single upper-right toast stack replaces two things the mobile HUD used
+// to spread elsewhere: the achievement banner (previously top-centre) and
+// the context-sensitive button-hint bar (previously a full-width bottom
+// strip, always on screen -- see the removed gameHintsDraw body below).
+//
+// PSP's face/shoulder buttons never change position and there's no touch
+// layer to relabel, so a permanently-visible legend is mostly noise once a
+// player knows the game; what actually helps is being told when the
+// *meaning* of a button just changed (opened a chest, stood over a
+// villager, started sleeping). That is a toast, not a status bar, so it
+// lives here rather than as a redraw-every-frame HUD element.
+//
+// Both notification kinds share one small FIFO queue and one draw slot so
+// an achievement popping the instant a key-hint fades (or vice versa)
+// queues cleanly instead of the two overlapping in the same corner.
+enum ToastKind { TOAST_ACHIEVEMENT, TOAST_KEYHINT };
 
-static void achvToastTick() {
-    float now = gameSeconds();
-    if (s_achvToastStart < 0.0f || now - s_achvToastStart > ACHV_TOAST_SHOW_S) {
-        char name[40];
-        if (achievementsPollNotification(name, sizeof(name))) {
-            strncpy(s_achvToastName, name, sizeof(s_achvToastName) - 1);
-            s_achvToastName[sizeof(s_achvToastName) - 1] = '\0';
-            s_achvToastStart = now;
-            extendedSoundFXPlay("data/sound/achievement.raw"); // streamed from disk, not the RAM-resident sound pack
+struct ToastMsg {
+    ToastKind kind;
+    char      line1[40]; // achievement: "Achievement Unlocked!" / key-hint: the button, e.g. "Cross"
+    char      line2[40]; // achievement: the achievement name    / key-hint: the action, e.g. "Take"
+};
+
+#define TOAST_QUEUE_MAX 4
+static ToastMsg s_toastQueue[TOAST_QUEUE_MAX];
+static int      s_toastQueueHead = 0, s_toastQueueLen = 0;
+
+#define ACHV_TOAST_SHOW_S   3.0f
+#define KEYHINT_TOAST_SHOW_S 1.6f
+static ToastKind s_toastActiveKind = TOAST_ACHIEVEMENT;
+static char      s_toastLine1[40] = "";
+static char      s_toastLine2[40] = "";
+static float     s_toastStart = -1000.0f;
+
+static float toastShowDuration(ToastKind k) {
+    return (k == TOAST_ACHIEVEMENT) ? ACHV_TOAST_SHOW_S : KEYHINT_TOAST_SHOW_S;
+}
+
+static void toastPush(ToastKind kind, const char* line1, const char* line2) {
+    // A key-hint whose text exactly matches the currently-showing (or
+    // still-queued) hint is dropped rather than requeued -- otherwise
+    // standing still next to the same chest re-announces "Cross: Take"
+    // every time the context poll re-fires, instead of once per genuine
+    // change.
+    if (s_toastQueueLen > 0 || s_toastStart >= 0.0f) {
+        bool dupActive = (s_toastStart >= 0.0f && s_toastActiveKind == kind &&
+                          strcmp(s_toastLine1, line1) == 0 && strcmp(s_toastLine2, line2) == 0);
+        bool dupQueued = false;
+        for (int i = 0; i < s_toastQueueLen; i++) {
+            int idx = (s_toastQueueHead + i) % TOAST_QUEUE_MAX;
+            if (s_toastQueue[idx].kind == kind &&
+                strcmp(s_toastQueue[idx].line1, line1) == 0 &&
+                strcmp(s_toastQueue[idx].line2, line2) == 0) { dupQueued = true; break; }
         }
+        if (dupActive || dupQueued) return;
     }
+
+    if (s_toastQueueLen >= TOAST_QUEUE_MAX) return; // drop rather than overwrite; these are transient anyway
+
+    int idx = (s_toastQueueHead + s_toastQueueLen) % TOAST_QUEUE_MAX;
+    ToastMsg& m = s_toastQueue[idx];
+    m.kind = kind;
+    strncpy(m.line1, line1, sizeof(m.line1) - 1); m.line1[sizeof(m.line1) - 1] = '\0';
+    strncpy(m.line2, line2, sizeof(m.line2) - 1); m.line2[sizeof(m.line2) - 1] = '\0';
+    s_toastQueueLen++;
+}
+
+void hudAchievementToast(const char* name) {
+    toastPush(TOAST_ACHIEVEMENT, "Achievement Unlocked!", name);
+}
+
+// Called by the context-hint poller (see gameHintsDraw) whenever the
+// player's current interaction context changes -- one button/action pair
+// per call. A context with two live buttons (e.g. chest open: Cross to
+// take, Circle to exit) pushes two short-lived toasts back to back rather
+// than trying to cram both into one box; the queue keeps them readable in
+// sequence instead of overlapping.
+void hudKeyHintToast(const char* button, const char* action) {
+    toastPush(TOAST_KEYHINT, button, action);
 }
 
 // Ticking and drawing are separate calls (see the two calls near the
 // chat-log block further down in hotbarDraw): tick always runs so a
-// queued unlock's timer keeps advancing even while an overlay is up,
-// but draw is skipped whenever the overlay gate hides the rest of the
-// HUD, so a banner never renders on top of the pause menu or a chest
+// queued notification's timer keeps advancing even while an overlay is
+// up, but draw is skipped whenever the overlay gate hides the rest of the
+// HUD, so a toast never renders on top of the pause menu or a chest
 // screen.
-static void achvToastDraw(MenuState& s) {
-    if (s_achvToastStart < 0.0f || !s.haveFont) return;
-    float age = gameSeconds() - s_achvToastStart;
-    if (age > ACHV_TOAST_SHOW_S) return;
+static void toastTick() {
+    float now = gameSeconds();
+    if (s_toastStart < 0.0f || now - s_toastStart > toastShowDuration(s_toastActiveKind)) {
+        if (s_toastQueueLen > 0) {
+            ToastMsg& m = s_toastQueue[s_toastQueueHead];
+            s_toastQueueHead = (s_toastQueueHead + 1) % TOAST_QUEUE_MAX;
+            s_toastQueueLen--;
 
-    // Quick fade in, hold, quick fade out -- 0.3s each tail, matching the
-    // chat log's own one-second fade-out feel without a separate curve.
+            s_toastActiveKind = m.kind;
+            strncpy(s_toastLine1, m.line1, sizeof(s_toastLine1) - 1); s_toastLine1[sizeof(s_toastLine1) - 1] = '\0';
+            strncpy(s_toastLine2, m.line2, sizeof(s_toastLine2) - 1); s_toastLine2[sizeof(s_toastLine2) - 1] = '\0';
+            s_toastStart = now;
+
+            if (m.kind == TOAST_ACHIEVEMENT)
+                extendedSoundFXPlay("data/sound/achievement.raw"); // streamed from disk, not the RAM-resident sound pack
+        } else {
+            s_toastStart = -1000.0f;
+        }
+    }
+}
+
+// Achievement unlocks still arrive from achievementsPollNotification on
+// its own schedule (achievement.cpp has no reason to know this queue
+// exists), so each tick also drains that poll into the same queue
+// key-hints use. Polled here rather than at the unlock site itself so a
+// same-tick double unlock (e.g. mining a diamond triggers both Diamonds!
+// and Diamond Miner) queues both instead of losing the second.
+static void achvPollIntoQueue() {
+    char name[40];
+    if (achievementsPollNotification(name, sizeof(name)))
+        hudAchievementToast(name);
+}
+
+#define TOAST_S      HUD_S
+#define TOAST_MARGIN (6.0f * TOAST_S)
+
+static void toastDraw(MenuState& s) {
+    if (s_toastStart < 0.0f || !s.haveFont) return;
+    float age = gameSeconds() - s_toastStart;
+    float dur = toastShowDuration(s_toastActiveKind);
+    if (age > dur) return;
+
+    // Quick fade in, hold, quick fade out -- 0.3s/0.2s tails so the short
+    // key-hint toasts still get a visible hold instead of being almost
+    // all fade.
+    float fadeTail = (s_toastActiveKind == TOAST_ACHIEVEMENT) ? 0.3f : 0.2f;
     float alphaF = 1.0f;
-    if (age < 0.3f) alphaF = age / 0.3f;
-    else if (age > ACHV_TOAST_SHOW_S - 0.3f) alphaF = (ACHV_TOAST_SHOW_S - age) / 0.3f;
+    if (age < fadeTail) alphaF = age / fadeTail;
+    else if (age > dur - fadeTail) alphaF = (dur - age) / fadeTail;
     if (alphaF < 0.0f) alphaF = 0.0f; if (alphaF > 1.0f) alphaF = 1.0f;
     int alpha = (int)(255.0f * alphaF);
 
-    char line1[] = "Achievement Unlocked!";
-    float tw1 = fontTextWidth(&s.font, line1) * HUD_S;
-    float tw2 = fontTextWidth(&s.font, s_achvToastName) * HUD_S;
-    float boxW = (tw1 > tw2 ? tw1 : tw2) + 16.0f * HUD_S;
-    float boxH = 22.0f * HUD_S;
-    float boxX = 240.0f - boxW / 2.0f;
-    float boxY = 14.0f * HUD_S;
+    bool isAchv = (s_toastActiveKind == TOAST_ACHIEVEMENT);
+    float tw1 = fontTextWidth(&s.font, s_toastLine1) * TOAST_S;
+    float tw2 = fontTextWidth(&s.font, s_toastLine2) * TOAST_S;
+    float boxW = (tw1 > tw2 ? tw1 : tw2) + 16.0f * TOAST_S;
+    float boxH = 22.0f * TOAST_S;
+    float boxX = 480.0f - TOAST_MARGIN - boxW;
+    float boxY = TOAST_MARGIN;
 
     guiFill(boxX, boxY, boxW, boxH, (unsigned int)((alpha / 2) << 24));
-    fontDrawTextShadow(&s.font, boxX + (boxW - tw1) / 2.0f, boxY + 2.0f * HUD_S,
-                       line1, 0x00FFD700u | ((unsigned int)alpha << 24), HUD_S);
-    fontDrawTextShadow(&s.font, boxX + (boxW - tw2) / 2.0f, boxY + 12.0f * HUD_S,
-                       s_achvToastName, 0x00FFFFFFu | ((unsigned int)alpha << 24), HUD_S);
+    unsigned int col1 = (isAchv ? 0x00FFD700u : 0x00A0FFFFu) | ((unsigned int)alpha << 24);
+    unsigned int col2 = 0x00FFFFFFu | ((unsigned int)alpha << 24);
+    fontDrawTextShadow(&s.font, boxX + (boxW - tw1) / 2.0f, boxY + 2.0f * TOAST_S,
+                       s_toastLine1, col1, TOAST_S);
+    fontDrawTextShadow(&s.font, boxX + (boxW - tw2) / 2.0f, boxY + 12.0f * TOAST_S,
+                       s_toastLine2, col2, TOAST_S);
 }
 
+// Always 0 on PSP: the "bar on top" layout existed to lift the health/
+// hunger/armour rows clear of a bottom-of-screen touch control cluster on
+// the mobile original. PSP has no touch controls to dodge, so the bottom-
+// anchored layout below is the only one ever selected -- the option row
+// itself has been removed from screen_options.cpp. Left as a real branch
+// rather than deleted so the alternate layout code isn't lost if this
+// port ever needs a top-anchored HUD for some other reason (e.g. a future
+// widescreen or split-screen mode).
 int g_barOnTop = 0;
 static const unsigned int HUD_WHITE = 0xFFFFFFFFu;
 
@@ -1196,13 +1305,15 @@ void hotbarDraw(MenuState& s) {
         }
     }
 
-    // Achievement toast is always ticked (so a queued unlock's timer keeps
-    // advancing even while an overlay is up) but only drawn when nothing
-    // is covering the HUD, matching the chat log's own overlayUp gate just
-    // above -- an achievement banner popping up over the pause menu or a
-    // chest screen would look like a rendering bug, not a celebration.
-    achvToastTick();
-    if (!overlayUp) achvToastDraw(s);
+    // Corner toast (achievements + key-hints) is always ticked (so a
+    // queued notification's timer keeps advancing even while an overlay
+    // is up) but only drawn when nothing is covering the HUD, matching
+    // the chat log's own overlayUp gate just above -- a toast popping up
+    // over the pause menu or a chest screen would look like a rendering
+    // bug, not a deliberate notification.
+    achvPollIntoQueue();
+    toastTick();
+    if (!overlayUp) toastDraw(s);
 
     if (!g_invOpen && s.haveGui) {
         sceGuBlendFunc(GU_ADD, GU_ONE_MINUS_OTHER_COLOR, GU_ONE_MINUS_OTHER_COLOR, 0, 0);
@@ -1297,27 +1408,52 @@ void guiFillGradient(float x, float y, float w, float h,
 #include "world/level/tile/entity/furnace_tile_entity.h"
 #include "gpu/gui_atlas.h"
 
+// Button names for the key-hint toast. gameHintsDraw below only ever
+// produces hints for these six buttons (face buttons, L/R, and D-pad Up
+// for the third-person toggle), so this doesn't need to cover the whole
+// ButtonIcon enum -- just enough to label whichever ones show up here.
+static const char* toastButtonName(ButtonIcon icon) {
+    switch (icon) {
+        case BTN_ICON_CROSS:    return "Cross";
+        case BTN_ICON_CIRCLE:   return "Circle";
+        case BTN_ICON_SQUARE:   return "Square";
+        case BTN_ICON_TRIANGLE: return "Triangle";
+        case BTN_ICON_L:        return "L";
+        case BTN_ICON_R:        return "R";
+        case BTN_ICON_UP:       return "D-Pad Up";
+        default:                return "?";
+    }
+}
+
+// gameHintsDraw no longer draws anything itself -- PSP's buttons don't
+// move and don't need a permanently-visible legend once a player knows
+// the controls (see the "Controls" page under Options/Pause for the full
+// reference instead). What it still does is exactly what it always did:
+// work out which buttons currently do something and what, in every
+// interaction context the game has (chest, furnace, crafting, etc.) --
+// only now, instead of handing that list to buttonHintsDraw for a bottom
+// bar, it diffs the list against last frame's and announces just the
+// *changes* as brief upper-right toasts. Standing still at a chest stops
+// announcing after the first "Cross: Take" / "Circle: Exit" pair; opening
+// the furnace instead announces its own new pair.
 void gameHintsDraw(MenuState& s) {
 
     extern bool g_photoPending;
     if (g_photoPending) return;
-    extern bool g_paused, g_deadScreen, g_optionsOpen, g_achievementsOpen;
-    if (g_paused || g_deadScreen || g_signEditing || g_achievementsOpen) return;
+    extern bool g_paused, g_deadScreen, g_optionsOpen, g_achievementsOpen, g_controlsOpen;
+    if (g_paused || g_deadScreen || g_signEditing || g_achievementsOpen || g_controlsOpen) return;
 
+    // The options screen (reachable mid-game via the pause menu) still
+    // gets its own menu-style hint bar -- see menuHintsDraw -- since that
+    // scope of this change is the gameplay HUD only.
     if (g_optionsOpen) { menuHintsDraw(s); return; }
 
     ButtonHint h[4];
     int n = 0;
 
-    float hintsY = HUD_HINTS_Y;
-
     if (g_level.player && g_level.player->isSleeping()) {
         h[n++] = (ButtonHint){ BTN_ICON_L, PSP_CTRL_LTRIGGER, "Wake Up" };
-        buttonHintsDraw(s, h, n, hintsY, HUD_HINT_S);
-        return;
-    }
-
-    if (g_furnaceOpen) {
+    } else if (g_furnaceOpen) {
         if (furnaceFocusIsSlots()) {
             h[n++] = (ButtonHint){ BTN_ICON_CROSS,    PSP_CTRL_CROSS,    "Take" };
             h[n++] = (ButtonHint){ BTN_ICON_TRIANGLE, PSP_CTRL_TRIANGLE, "Quick Move" };
@@ -1351,10 +1487,8 @@ void gameHintsDraw(MenuState& s) {
     } else if (g_craftOpen) {
         h[n++] = (ButtonHint){ BTN_ICON_CROSS,  PSP_CTRL_CROSS,  "Create" };
         h[n++] = (ButtonHint){ BTN_ICON_CIRCLE, PSP_CTRL_CIRCLE, "Exit" };
-        if (craftHasCategories()) {
-            h[n++] = (ButtonHint){ BTN_ICON_L, PSP_CTRL_LTRIGGER, "" };
+        if (craftHasCategories())
             h[n++] = (ButtonHint){ BTN_ICON_R, PSP_CTRL_RTRIGGER, "Change Group" };
-        }
     } else if (g_invOpen) {
         h[n++] = (ButtonHint){ BTN_ICON_CROSS,  PSP_CTRL_CROSS,
                                g_invHeaderSel >= 0 ? "Press" : "Take" };
@@ -1379,5 +1513,32 @@ void gameHintsDraw(MenuState& s) {
         if (t.breakLabel) h[n++] = (ButtonHint){ BTN_ICON_R, PSP_CTRL_RTRIGGER, t.breakLabel };
     }
 
-    if (n) buttonHintsDraw(s, h, n, hintsY, HUD_HINT_S);
+    // Diff against last frame's hint set. Icon + label is enough to key
+    // on -- two different contexts that happen to want the same button
+    // doing the same thing (e.g. Circle/"Exit" in both the chest and the
+    // furnace) are not worth re-announcing as if something changed.
+    static ButtonIcon s_lastIcon[4];
+    static char       s_lastLabel[4][24];
+    static int         s_lastN = -1; // -1 forces an announce on the very first frame with any hint
+
+    bool changed = (n != s_lastN);
+    if (!changed) {
+        for (int i = 0; i < n; i++) {
+            if (h[i].icon != s_lastIcon[i] || strcmp(h[i].label, s_lastLabel[i]) != 0) {
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    if (changed) {
+        for (int i = 0; i < n; i++)
+            if (h[i].label[0]) hudKeyHintToast(toastButtonName(h[i].icon), h[i].label);
+        for (int i = 0; i < n && i < 4; i++) {
+            s_lastIcon[i] = h[i].icon;
+            strncpy(s_lastLabel[i], h[i].label, sizeof(s_lastLabel[i]) - 1);
+            s_lastLabel[i][sizeof(s_lastLabel[i]) - 1] = '\0';
+        }
+        s_lastN = n;
+    }
 }

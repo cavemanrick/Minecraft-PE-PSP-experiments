@@ -31,6 +31,7 @@ OBJS = \
 	src/client/gui/screens/screen_options.o \
 	src/client/gui/screens/screen_pause.o \
 	src/client/gui/screens/screen_achievements.o \
+	src/client/gui/screens/screen_controls.o \
 	src/client/gui/screens/screen_dead.o \
 	src/client/gui/screens/screen_inbed.o \
 	src/world/entity/tripod_camera.o \

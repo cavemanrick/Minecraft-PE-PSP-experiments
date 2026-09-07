@@ -38,8 +38,12 @@ static const OptionRowDef g_optionRows[OPT_CATEGORIES][OPT_MAX_ROWS] = {
         { 0,      "Third Person", {"Off", "On", 0, 0}, 2, 0 },
 
         { 0,      "Autosave",     {"Off", "15 min", "20 min", "30 min"}, 4, 1 },
-        { "Interface", "Bar On Top", {"Off", "On", 0, 0}, 2, 0 },
-        { 0,           "Show FPS",   {"Off", "On", 0, 0}, 2, 0 },
+        // "Bar On Top" used to live here: a mobile-only setting that moved
+        // the health/hunger/armour rows up to clear an on-screen touch
+        // control cluster at the bottom of the screen. There is no touch
+        // cluster on PSP hardware, so the row is gone -- see g_barOnTop in
+        // hud.cpp, permanently pinned to 0.
+        { "Interface", "Show FPS",   {"Off", "On", 0, 0}, 2, 0 },
     },
     {
 
@@ -75,7 +79,7 @@ static const OptionRowDef g_optionRows[OPT_CATEGORIES][OPT_MAX_ROWS] = {
         { 0,       "Music Volume", {0, 0, 0, 0}, 11, 10, true, 0, 10 },
     },
 };
-static const int g_optionRowCount[OPT_CATEGORIES] = { 5, 6, 10, 2 };
+static const int g_optionRowCount[OPT_CATEGORIES] = { 4, 6, 10, 2 };
 static const char* g_optionCategoryNames[OPT_CATEGORIES] = { "Game", "Controls", "Graphics", "Audio" };
 static int g_optionValueIdx[OPT_CATEGORIES][OPT_MAX_ROWS];
 
@@ -91,7 +95,6 @@ extern int   g_difficulty;
 extern int   g_autosave;
 extern int   g_blockOutline;
 extern int   g_autoJump;
-extern int   g_barOnTop;
 extern float g_sensitivity;
 extern bool  g_thirdPerson;
 extern int   g_invertY;
@@ -134,8 +137,7 @@ static int renderDistChoices() { return g_lowMemPsp ? 2 : 4; }
 #define ROW_DIFFICULTY  0
 #define ROW_THIRDPERSON 1
 #define ROW_AUTOSAVE    2
-#define ROW_BARONTOP    3
-#define ROW_SHOWFPS     4
+#define ROW_SHOWFPS     3
 
 #define CAT_AUDIO       3
 #define ROW_SOUNDVOL    0
@@ -166,7 +168,6 @@ static void optionsApply() {
     g_noMipmap    = (g_optionValueIdx[CAT_GRAPHICS][ROW_MIPMAP] == 1) ? 0 : 1;
     g_showFps     = g_optionValueIdx[CAT_GAME][ROW_SHOWFPS];
     g_showCoords  = g_optionValueIdx[CAT_CONTROLS][ROW_SHOWCOORDS];
-    g_barOnTop    = g_optionValueIdx[CAT_GAME][ROW_BARONTOP];
     int ai = g_optionValueIdx[CAT_GAME][ROW_AUTOSAVE];
     if (ai < 0) ai = 0; else if (ai > 3) ai = 3;
     g_autosave    = kAutosaveTicks[ai];

@@ -54,6 +54,7 @@ static const short kPalette[] = {
     ITEM_SADDLE,
     ITEM_COOKIE,
     ITEM_CAMERA,
+    ITEM_BAMBOO_RAFT,
 
     ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
     ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG, ITEM_SPAWN_EGG,
@@ -98,6 +99,7 @@ static const unsigned char kPaletteData[] = {
     0,                                          // saddle
     0,                                          // cookie
     0,                                          // camera
+    0,                                          // bamboo raft
     12, 11, 10, 13,
     32, 33, 34, 35, 36,
     37, // strider (EntityTypes::IdStrider) -- was never added when the

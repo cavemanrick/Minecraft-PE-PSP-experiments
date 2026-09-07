@@ -74,6 +74,29 @@ void Mob::mobMoveRelative(float xs, float yf, float speed) {
     zd += yf * cy - xs * sy;
 }
 
+void Mob::mobRiderAutoJump() {
+    // Same shape as the player's own auto-jump (local_player.cpp), which
+    // never runs for a mounted player because riding replaces the
+    // player's normal aiStep/travel with direct control of the mount --
+    // so without this, a ridden strider or pig simply stops dead at any
+    // one-block ledge instead of stepping up onto it. Simplified from the
+    // player's version: a mount's own xxa/yya already point straight
+    // ahead/behind along its own yRot (there is no independent strafe
+    // direction the way the player's controller stick has), so the probe
+    // point is just "one block in front", not a blended stick-direction
+    // vector.
+    if (!onGround || !horizontalCollision) return;
+    float sy = sinf(yRot * 3.14159265f / 180.0f), cy = cosf(yRot * 3.14159265f / 180.0f);
+    int ax = ifloor(x + sy);
+    int az = ifloor(z + cy);
+    int stepY = ifloor(bb.y0 + 0.05f);
+    unsigned char step = worldBlock(&g_world, ax, stepY, az);
+    if (isSolidPhys(step) && !isFence(step) && !isFenceGate(step) && !isSlab(step)
+        && !isSolidPhys(worldBlock(&g_world, ax, stepY + 1, az))
+        && !isSolidPhys(worldBlock(&g_world, ax, stepY + 2, az)))
+        yd = 0.42f;
+}
+
 unsigned char Mob::bodyBlock() {
     return worldBlock(&g_world, ifloor(x), ifloor(y - heightOffset + 0.4f), ifloor(z));
 }
