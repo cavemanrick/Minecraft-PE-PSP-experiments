@@ -7,6 +7,31 @@
 #include "world/level/chunk/chunk.h"
 #include "world/level/tile/entity/tile_entity.h"
 #include "world/entity/entity_types.h"
+#include "world/entity/entity.h"
+#include "world/entity/mob_factory.h"
+#include "world/entity/monster/pig_zombie.h"
+
+// IMPORTANT: chunk generation may run on the streaming worker thread (same
+// rule village_gen.cpp documents for its own villager spawns). Never
+// construct an Entity from netherFortressGenerateChunk directly -- queue a
+// lightweight request here instead, and let netherFortressTick() (called
+// from the main thread, see nether_fortress_gen.h) turn it into real
+// pig-zombie entities once the chunk is actually resident.
+#define FORTRESS_PIGZOMBIE_COUNT 6
+#define MAX_PENDING_FORTRESSES 16
+struct PendingFortress {
+    int deckX, deckY, deckZ; // world coords of the fortress's central deck tile
+};
+static PendingFortress s_pendingFortresses[MAX_PENDING_FORTRESSES];
+static int s_pendingFortressCount = 0;
+
+static void queueFortressPigZombies(int deckX, int deckY, int deckZ) {
+    if (s_pendingFortressCount >= MAX_PENDING_FORTRESSES) return;
+    PendingFortress& p = s_pendingFortresses[s_pendingFortressCount++];
+    p.deckX = deckX;
+    p.deckY = deckY;
+    p.deckZ = deckZ;
+}
 
 static unsigned int fortressHash(long seed, int cx, int cz) {
     unsigned int h = (unsigned int)seed;
@@ -23,19 +48,6 @@ static unsigned int fortressHash(long seed, int cx, int cz) {
 static void put(World* w, int x, int y, int z, unsigned char id, unsigned char data = 0) {
     if (y < 0 || y >= WORLD_H || !worldReady(w, x, z)) return;
     worldSetBlockAndData(w, x, y, z, id, data);
-}
-
-static void placeSpawner(World* w, int x, int y, int z, int mobType, int delayMin, int delayMax) {
-    put(w, x, y, z, BLOCK_MOB_SPAWNER);
-    MobSpawnerTileEntity* te = new MobSpawnerTileEntity();
-    te->mobType = mobType;
-    te->spawnDelay = delayMin;
-    te->minSpawnDelay = delayMin;
-    te->maxSpawnDelay = delayMax;
-    te->spawnCount = 3;
-    te->maxNearbyEntities = 6;
-    te->spawnRange = 4;
-    g_level.setTileEntity(x, y, z, te);
 }
 
 static void placeChest(World* w, int x, int y, int z, Random& rng) {
@@ -231,21 +243,84 @@ void netherFortressGenerateChunk(World* w, long worldSeed, int chunkX, int chunk
     if (rng.nextInt(3) == 0)
         placeChest(w, xo + 12, deckY + 1, zo + 3, rng);
 
-    // Until a Blaze entity exists in the engine, the fortress uses the
-    // existing Nether pig-zombie mob set plus WarpedSpider (a Nether-native
-    // spider variant -- see warped_spider.h) in place of an ordinary
-    // Skeleton. These are real persistent mob spawners, not
-    // generation-time one-shot entities: the fortress is a fixed landmark,
-    // so a spawner tied to it reads as the spiders "haunting" the
-    // structure rather than a roaming population.
-    placeSpawner(w, xo + 7, deckY + 1, zo + 8,
-                 EntityTypes::IdWarpedSpider, 20 * 7, 20 * 14);
-    if (rng.nextInt(2) == 0)
-        placeSpawner(w, xo + 8, deckY + 1, zo + 8,
-                     EntityTypes::IdPigZombie, 20 * 8, 20 * 16);
+    // Until a Blaze entity exists in the engine, the fortress is guarded by
+    // a fixed garrison of 6 zombie pig-men rather than a persistent mob
+    // spawner block. WarpedSpider no longer spawns here at all -- it has
+    // moved to its own Warped Forest ambient population (see
+    // spawnWarpedSpiders in mob_spawner.cpp), matching where it actually
+    // lives biome-wise instead of haunting the fortress. The 6-count
+    // garrison is queued now and turned into real entities later by
+    // netherFortressTick, since chunk generation may run off the main
+    // thread (see queueFortressPigZombies above).
+    queueFortressPigZombies(xo + 7, deckY + 1, zo + 8);
 
     // A small Nether-brick stair marker at the centre makes the fortress
     // entrance readable from a distance without relying on new textures.
     put(w, xo + 7, deckY + 1, zo + 7, BLOCK_STAIRS_NETHER_BRICK, 0);
     put(w, xo + 8, deckY + 1, zo + 7, BLOCK_STAIRS_NETHER_BRICK, 0);
+}
+
+// --- Deferred fortress garrison spawn -----------------------------------
+//
+// This is the only place allowed to turn a queued fortress request into
+// real pig-zombie entities. Mirrors villageTick's own comment/contract in
+// village_gen.cpp: called from Level::tickEntities() on the main thread,
+// never from the chunk-generation worker.
+//
+// This garrison is entirely separate from the ambient Nether Wastes
+// pig-zombie population in mob_spawner.cpp (spawnPigZombies) and its
+// PIGZOMBIE_MAX_PER_LEVEL wander-spawn cap -- that cap governs wandering
+// Wastes spawns only and is untouched here. The fortress always gets its
+// fixed 6-strong garrison regardless of how close the ambient population
+// is to its own limit, the same way the fortress's loot chests are not
+// affected by any other loot budget.
+void netherFortressTick(World* w) {
+    extern Level g_level;
+    if (!w || g_level.w != w) return;
+
+    int i = 0;
+    while (i < s_pendingFortressCount) {
+        PendingFortress p = s_pendingFortresses[i];
+
+        int cx = p.deckX >> 4;
+        int cz = p.deckZ >> 4;
+        if (!worldChunkInBounds(w, cx, cz) || !worldChunkReady(w, cx, cz)) {
+            ++i;
+            continue;
+        }
+
+        for (int n = 0; n < FORTRESS_PIGZOMBIE_COUNT; ++n) {
+            if (!Entity::hasFreeSlot()) break;
+
+            // Small deterministic ring around the deck's centre point so
+            // the garrison reads as spread across the structure rather
+            // than stacked on one tile. Nether-brick deck is solid on all
+            // sides here (see clearBox/deck fill above), so no per-spot
+            // standable-floor probe is needed -- the deck itself is the
+            // floor.
+            static const int offX[FORTRESS_PIGZOMBIE_COUNT] = { 0, 2, -2, 1, -1, 0 };
+            static const int offZ[FORTRESS_PIGZOMBIE_COUNT] = { 0, 1, 1, -2, -2, 3 };
+            int sx = p.deckX + offX[n];
+            int sz = p.deckZ + offZ[n];
+
+            PigZombie* pz = (PigZombie*)MobFactory::createMob(EntityTypes::IdPigZombie, &g_level);
+            if (!pz) break;
+            pz->moveTo((float)sx + 0.5f, (float)p.deckY, (float)sz + 0.5f, 0.0f, 0.0f);
+            if (!pz->canSpawn()) {
+                delete pz;
+                continue;
+            }
+            // Keeps the garrison anchored to the fortress instead of
+            // wandering off into the Wastes over time, same reasoning
+            // spawnPigZombies' own setHome call uses for ambient groups.
+            pz->setHome((float)sx + 0.5f, (float)p.deckY, (float)sz + 0.5f);
+            g_level.addEntity(pz);
+        }
+
+        // One-shot: remove this request whether or not every zombie in
+        // the garrison actually placed (e.g. entity pool pressure). A
+        // fortress that ends up slightly under-garrisoned is a fine
+        // outcome; retrying indefinitely is not.
+        s_pendingFortresses[i] = s_pendingFortresses[--s_pendingFortressCount];
+    }
 }

@@ -15,6 +15,16 @@
 #include "gpu/font.h"
 #include "platform/path.h"
 #include "util/prof.h"
+#include "platform/time.h"
+
+// Audio underrun logging. PROF builds get these numbers in prof.txt, but
+// PROF is off by default and the whole point of the counter is to be
+// readable on an ordinary build -- on PPSSPP this lands in the log window.
+// Silent unless the count actually moves, so an underrun-free run prints
+// nothing at all. Set to 0 to compile out.
+#ifndef AUDIO_UNDERRUN_LOG
+#define AUDIO_UNDERRUN_LOG 1
+#endif
 #include "platform/audio/sound.h"
 #include "platform/audio/music.h"
 #include "platform/audio/extended_sound_fx.h"
@@ -314,6 +324,24 @@ int main(int argc, char* argv[]) {
         musicUpdate(s.screen != SCREEN_GAME,
                     s.screen == SCREEN_GAME && g_worldBuilt);
 
+#if AUDIO_UNDERRUN_LOG
+        {
+            static float        s_nextAudioLog = 0.0f;
+            static unsigned int s_lastUnder    = 0;
+            float nowAudio = nowSeconds();
+            if (nowAudio >= s_nextAudioLog) {
+                s_nextAudioLog = nowAudio + 10.0f;
+                unsigned int under = 0, blocks = 0;
+                musicStats(&under, &blocks);
+                if (under != s_lastUnder) {
+                    printf("[music] underruns %u (+%u in last 10s) / %u blocks\n",
+                           under, under - s_lastUnder, blocks);
+                    s_lastUnder = under;
+                }
+            }
+        }
+#endif
+
         if (pressed && (screenBefore != SCREEN_GAME || g_optionsOpen || g_achievementsOpen || g_controlsOpen) &&
             (!navOnly || menuSelectionSig(s) != sigBefore))
             soundPlay("random.click", 1.0f, 1.0f);
@@ -438,7 +466,21 @@ int main(int argc, char* argv[]) {
 
             if (Screen* over = overlayScreen()) over->render(s);
 
-            gameHintsDraw(s);
+            // gameHintsDraw (hud.cpp) is disabled: it worked out the
+            // active interaction context every frame (chest, furnace,
+            // crafting, etc.) and toasted a "Button: Action" reminder in
+            // the upper-right corner whenever that context changed. In
+            // practice that fired constantly for routine actions (opening
+            // a chest, swapping hotbar slots) that a player doesn't need
+            // repeated reminders for -- the corner toast is meant for
+            // achievements and other one-off, noteworthy moments, not a
+            // running commentary on basic controls. The full reference
+            // for what every button currently does still lives in the
+            // Controls screen under Options/Pause. gameHintsDraw itself
+            // is left in place rather than deleted: the per-context
+            // detection it already does is exactly what a future
+            // in-game tutorial would need to know when to prompt.
+            // gameHintsDraw(s);
 
             // Nether-portal crossing fade. Drawn last of everything in the
             // game frame so it covers the HUD, hints and debug text as

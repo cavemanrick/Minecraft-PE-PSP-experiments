@@ -123,6 +123,8 @@ void lootFillChest(int x, int y, int z, LootTableId table, Random& rng) {
     bool rareUsed[64];
     for (int i = 0; i < 64; ++i) rareUsed[i] = false;
 
+    int nextSlot = 0; // fill consecutively from slot 0 so players don't have to scroll/hunt
+
     for (int r = 0; r < rolls; ++r) {
         const LootEntry& e = pickEntry(t, rng, sumWeight);
 
@@ -141,21 +143,24 @@ void lootFillChest(int x, int y, int z, LootTableId table, Random& rng) {
         int count = e.minCount + (span > 0 ? rng.nextInt(span + 1) : 0);
         if (count <= 0) continue;
 
-        // Random empty slot rather than sequential fill, so chests read as
-        // hand-placed rather than machine-stamped. Bounded to a handful of
-        // tries: an almost-full chest simply keeps whatever it already has
-        // rather than spending unbounded time hunting for the last slot.
+        // Fill consecutively starting at slot 0, so all loot is visible
+        // without scrolling the chest UI. Skip any slot that's already
+        // occupied (e.g. a paired/existing chest with prior contents).
         bool placed = false;
-        for (int tries = 0; tries < 8 && !placed; ++tries) {
-            int slot = rng.nextInt(size);
-            if (chest->getItem(slot) != 0) continue;
+        while (nextSlot < size) {
+            if (chest->getItem(nextSlot) != 0) {
+                ++nextSlot;
+                continue;
+            }
             // Container storage caps at 254 per FillingContainer, but a
             // realistic single-stack loot count never approaches that, so
             // no extra clamp is needed here beyond each entry's own max.
-            chest->container.setItem(slot, new ItemInstance((short)e.id, (short)count, (short)e.data));
+            chest->container.setItem(nextSlot, new ItemInstance((short)e.id, (short)count, (short)e.data));
+            ++nextSlot;
             placed = true;
+            break;
         }
-        // If no empty slot was found within the try budget, the roll is
-        // simply dropped -- the chest is presumably already well-stocked.
+        // If the chest is already full (nextSlot reached size), the roll
+        // is simply dropped -- there's nowhere left to put it.
     }
 }

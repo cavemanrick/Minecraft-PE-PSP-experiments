@@ -4,6 +4,8 @@
 #include <pspthreadman.h>
 #include <stdio.h>
 #include "platform/path.h"
+#include "platform/audio/music.h"
+#include "platform/audio/extended_sound_fx.h"
 
 extern bool g_worldBuilt;
 
@@ -75,13 +77,21 @@ void profFrameEnd(void) {
         if (!s_fp) s_fp = fopen("ms0:/prof.txt", "w");
         if (s_fp) g_profLines = 0;
     }
+    // Cumulative since boot, deliberately NOT divided by frame count:
+    // underruns are rare discrete events, and what matters is whether the
+    // total is climbing and which second it climbed in.
+    unsigned int bgmUnder = 0, bgmBlocks = 0, fxUnder = 0, fxBlocks = 0;
+    musicStats(&bgmUnder, &bgmBlocks);
+    extendedSoundFXStats(&fxUnder, &fxBlocks);
+
     FILE* fp = s_fp;
     if (fp) {
         ++g_profLines;
         fprintf(fp, "fps %.1f frame %u max %u list %u lmin %u | tick %u (plr %u wtick %u [rand %u pend %u] ent %u te %u part %u) "
                     "world %u (stream %u [gen %u dec %u lit %u disk %u evict %u misc %u] light %u rebuild %u [scan %u build %u (emit %u pack %u [alloc %u conv %u])] cull %u) "
                     "sky %u ent %u water %u part %u hud %u gesync %u vblank %u | other %d "
-                    "| n(part %.0f sect %.1f pend %.0f strm %.2f live %.2f fb %u vert %.0f mark %.1f)\n",
+                    "| n(part %.0f sect %.1f pend %.0f strm %.2f live %.2f fb %u vert %.0f mark %.1f)"
+                    " | bgm(under %u / %u blk) extfx(under %u / %u blk)\n",
                 f * 1000000.0f / (float)elapsed, frame, s_maxFrame, s_maxList, s_minList,
                 avg[PROF_TICK], avg[PROF_TPLAYER], avg[PROF_TWORLD],
                 avg[PROF_TRAND], avg[PROF_TPEND], avg[PROF_TENT],
@@ -96,7 +106,8 @@ void profFrameEnd(void) {
                 (int)frame - accounted,
                 s_cnt[PROFC_PARTICLES] / f, s_cnt[PROFC_SECTIONS] / f, s_cnt[PROFC_PENDLIST] / f,
                 s_cnt[PROFC_STREAMIN] / f, s_cnt[PROFC_DRAWLIVE] / f, g_meshFallbacks,
-                s_cnt[PROFC_PACKVERTS] / f, s_cnt[PROFC_MARKED] / f);
+                s_cnt[PROFC_PACKVERTS] / f, s_cnt[PROFC_MARKED] / f,
+                bgmUnder, bgmBlocks, fxUnder, fxBlocks);
         fflush(fp);
     }
 

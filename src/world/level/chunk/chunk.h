@@ -184,6 +184,14 @@ enum { SS_DEFAULT = 0, SS_CHISELED = 1, SS_SMOOTH = 2 };
 
 enum { TG_DEAD_SHRUB = 0, TG_TALL_GRASS = 1, TG_FERN = 3 };
 enum { COCOA_DIR_MASK = 3, COCOA_AGE_SHIFT = 2, COCOA_AGE_MASK = 3 };
+// Bamboo packs its 0-3 grow-tick age counter into bits 0-1 (same range and
+// purpose as reed/cactus's plain age byte -- see bambooGrow). Bit 2 is a
+// separate leafy-top flag: set on whichever segment is currently the top
+// of its stalk (nothing planted above it yet), cleared the moment a new
+// segment sprouts above it. getTexture reads this bit to pick the leafy
+// sprout texture for the tip and the plain stem texture for the body,
+// matching real bamboo only leafing out near its growing end.
+enum { BAMBOO_AGE_MASK = 3, BAMBOO_LEAFY = 4 };
 enum { QZ_DEFAULT = 0, QZ_CHISELED = 1, QZ_PILLAR = 2 };
 enum { SB_NORMAL = 0, SB_MOSSY = 1, SB_CRACKED = 2 };
 

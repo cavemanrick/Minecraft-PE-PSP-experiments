@@ -35,4 +35,11 @@ void musicSetFormat(unsigned int sampleRate, int channels);
 // leaves whatever's currently playing alone.
 void musicUpdate(bool inMainMenu, bool inGameplay);
 
+// Cumulative playback diagnostics since boot. `underruns` counts blocks the
+// output thread had to synthesise because the ring was empty while a track
+// was still playing -- i.e. the reader was starved by scheduling or by a
+// Memory Stick stall. `blocks` is the total handed to the hardware. Either
+// pointer may be NULL. Cheap enough to poll every frame.
+void musicStats(unsigned int* underruns, unsigned int* blocks);
+
 #endif

@@ -234,8 +234,24 @@ Layout layout(MenuState& s) {
     // right-hand column (createY == modeY), matching the old advanced
     // layout's pairing rather than the old collapsed layout's separately
     // bottom-pinned button.
-    L.sizeY   = L.panelY + L.panelH * 0.34f;
-    L.modeY   = L.panelY + L.panelH * 0.52f;
+    //
+    // sizeY/modeY used to be fixed fractions of panelH (0.34/0.52), which
+    // was fine back when the right-hand column (Seed field + toggles)
+    // was short enough to always finish above them. With four toggles
+    // stacked one-per-row that column ran lower than the fixed 0.34 mark,
+    // so World Size -- and, worse, Create World! at the fixed 0.52 mark
+    // -- ended up overlapping the last one or two toggle rows instead of
+    // sitting below them. Two fixes together: the toggles are now drawn
+    // two-per-row (see renderContent) instead of one-per-row, roughly
+    // halving this column's height, and sizeY/modeY are derived from the
+    // real bottom of that column instead of a guessed fraction of
+    // panelH, so neither can silently start overlapping the toggles
+    // again if a fifth one is ever added.
+    const int togGridRows = (GEN_FEATURE_COUNT + 1) / 2; // ceil(count / 2)
+    float toggleColumnBottom = L.formY + ROW_LABEL_H + ROW_BOX_H + 6.0f * PX
+                             + togGridRows * TOG_ROW;
+    L.sizeY   = toggleColumnBottom + 6.0f * PX;
+    L.modeY   = L.sizeY + L.pillH + 8.0f * PX;
     L.createY = L.modeY;
     L.formH   = L.sizeY - LABEL_GAP / UI_SCALE - 4.0f * PX - L.formY;
 
@@ -436,20 +452,37 @@ void CreateScreen::renderContent(MenuState& s) {
     drawTextField(s, L.descX, L.formY + ROW_LABEL_H, L.boxW, ROW_BOX_H,
                   s.newWorldSeed, kFieldRows[ROW_SEED].placeholder, sel == ROW_SEED, TEXT_S);
 
+    // Laid out 2-per-row (reading order: Caves/Villages on top, Dungeons/
+    // Nether Fortresses below) rather than one long single-file column.
+    // Four toggles stacked one-per-row needed more vertical space than
+    // this panel has -- World Size and Create World! ended up drawn on
+    // top of the last toggle row or two. Only the draw position changes
+    // here: Up/Down still walks all four in the same 0..3 index order via
+    // toggleStep in handleInput, so a player moving through the list with
+    // the D-pad sees the same order top-row-left, top-row-right, then
+    // bottom-row-left, bottom-row-right -- Left/Right are simply not
+    // wired to jump between the two columns, so there is no new
+    // navigation behaviour to get wrong here.
     {
+        const float togColW = (L.descW - 2.0f * PX) / 2.0f;
+        const float togColX[2] = { L.descX, L.descX + togColW + 2.0f * PX };
         float togRowY = L.formY + ROW_LABEL_H + ROW_BOX_H + 6.0f * PX;
-        for (int i = FIELD_COUNT; i < ROW_COUNT; i++, togRowY += TOG_ROW) {
+        for (int i = FIELD_COUNT; i < ROW_COUNT; i++) {
+            const int gi = i - FIELD_COUNT;
+            const float colX = togColX[gi % 2];
+            const float rowY = togRowY + (gi / 2) * TOG_ROW;
+
             const bool rowUsable = toggleRowUsable(s, i);
             const bool on = rowUsable && genFeatureEnabled(s.newWorldGenMask, rowFeature(i));
 
-            fontDrawTextClipped(&font, L.descX * UI_SCALE,
-                                (togRowY + (ROW_BOX_H - 8.0f * TEXT_S) / 2.0f) * UI_SCALE,
+            fontDrawTextClipped(&font, colX * UI_SCALE,
+                                (rowY + (ROW_BOX_H - 8.0f * TEXT_S) / 2.0f) * UI_SCALE,
                                 rowLabel(i),
                                 !rowUsable ? GUI_DISABLED
                                            : (sel == i ? 0xFFFFFFFFu : 0xFFE0E0E0u), TEXT_S,
-                                (L.boxW - TOG_W - 2.0f) * UI_SCALE / TEXT_S);
-            guiOptionSwitch(s, L.descX + L.boxW - TOG_W,
-                            togRowY + (ROW_BOX_H - TOG_H) / 2.0f, TOG_W, TOG_H,
+                                (togColW - TOG_W - 2.0f) * UI_SCALE / TEXT_S);
+            guiOptionSwitch(s, colX + togColW - TOG_W,
+                            rowY + (ROW_BOX_H - TOG_H) / 2.0f, TOG_W, TOG_H,
                             on, sel == i, !rowUsable ? GUI_DISABLED : 0xFFFFFFFFu);
         }
     }

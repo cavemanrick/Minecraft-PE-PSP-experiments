@@ -37,6 +37,52 @@ static int           g_channel    = -1;   // own PSP hw channel, separate from S
 
 static unsigned int ringFilled(void) { return g_ringWritten - g_ringRead; }
 
+// Same parking / concealment / hardware-volume treatment as music.cpp;
+// see the commentary there for the reasoning. This subsystem is idle
+// almost all of the time (it exists to play one-shot stingers), so the
+// polling it used to do was pure waste: ~333 reader wakeups per second
+// plus ~43 silence blocks per second pushed through the hardware, forever,
+// to play nothing.
+static SceUID g_readerSema = -1;
+static SceUID g_outputSema = -1;
+
+static bool sfxWantsBlocks(void) { return g_playing != 0 || g_pendingSwap != 0; }
+
+static void sfxKick(void) {
+    if (g_readerSema >= 0) sceKernelSignalSema(g_readerSema, 1);
+    if (g_outputSema >= 0) sceKernelSignalSema(g_outputSema, 1);
+}
+
+static volatile unsigned int g_underruns = 0;
+static volatile unsigned int g_blocksOut = 0;
+
+#define UNDERRUN_RAMP 256   // samples (~5.8ms at 44100Hz)
+
+static short g_underrunBuf[SFX_SAMPLE_COUNT * 2];
+static short g_lastL = 0, g_lastR = 0;
+static int   g_needFadeIn = 0;
+
+static void buildUnderrunBlock(short* out) {
+    int l = g_lastL, r = g_lastR;
+    for (int i = 0; i < SFX_SAMPLE_COUNT; i++) {
+        if (i < UNDERRUN_RAMP) {
+            int g = UNDERRUN_RAMP - i;
+            out[i * 2]     = (short)((l * g) / UNDERRUN_RAMP);
+            out[i * 2 + 1] = (short)((r * g) / UNDERRUN_RAMP);
+        } else {
+            out[i * 2] = out[i * 2 + 1] = 0;
+        }
+    }
+    g_lastL = g_lastR = 0;
+}
+
+static void fadeInBlock(short* buf) {
+    for (int i = 0; i < UNDERRUN_RAMP; i++) {
+        buf[i * 2]     = (short)((buf[i * 2]     * i) / UNDERRUN_RAMP);
+        buf[i * 2 + 1] = (short)((buf[i * 2 + 1] * i) / UNDERRUN_RAMP);
+    }
+}
+
 static void closeTrack(void) {
     if (g_file) { fclose(g_file); g_file = NULL; }
     g_playing = 0;
@@ -72,40 +118,53 @@ static void sfxFillBlock(short* out) {
         closeTrack();
     }
 
-    int vol256 = (int)(g_volume * 256.0f);
-    if (vol256 > 256) vol256 = 256;
-    if (vol256 < 0)   vol256 = 0;
-    if (vol256 != 256) {
-        for (int i = 0; i < SFX_SAMPLE_COUNT * 2; i++) {
-            out[i] = (short)((out[i] * vol256) >> 8);
-        }
-    }
+    // Volume is applied by the audio hardware from the leftvol/rightvol
+    // arguments of sceAudioOutputPannedBlocking, not per-sample here.
 }
 
 static int sfxReaderThread(SceSize, void*) {
     for (;;) {
-        while (ringFilled() >= RING_BLOCKS) {
-            sceKernelDelayThread(3000); // 3ms; ring full, idle until consumed or replayed
+        while (!sfxWantsBlocks() || ringFilled() >= RING_BLOCKS) {
+            if (g_readerSema >= 0) sceKernelWaitSema(g_readerSema, 1, 0);
+            else                   sceKernelDelayThread(3000);
         }
         sfxFillBlock(g_ring[g_ringWritten % RING_BLOCKS].samples);
         g_ringWritten++; // published only after the slot is fully written
+        if (g_outputSema >= 0) sceKernelSignalSema(g_outputSema, 1);
     }
     return 0;
 }
 
 static int sfxOutputThread(SceSize, void*) {
-    static short silence[SFX_SAMPLE_COUNT * 2];
-    memset(silence, 0, sizeof(silence));
-
     for (;;) {
-        int vol = PSP_AUDIO_VOLUME_MAX; // per-sample volume already applied in sfxFillBlock
-        if (ringFilled() > 0) {
-            sceAudioOutputPannedBlocking(g_channel, vol, vol,
-                                          g_ring[g_ringRead % RING_BLOCKS].samples);
-            g_ringRead++;
-        } else {
-            sceAudioOutputPannedBlocking(g_channel, vol, vol, silence);
+        int vol = (int)(g_volume * (float)PSP_AUDIO_VOLUME_MAX);
+        if (vol < 0)                    vol = 0;
+        if (vol > PSP_AUDIO_VOLUME_MAX) vol = PSP_AUDIO_VOLUME_MAX;
+
+        if (ringFilled() == 0) {
+            if (!sfxWantsBlocks()) {
+                g_needFadeIn = 1;
+                if (g_outputSema >= 0) sceKernelWaitSema(g_outputSema, 1, 0);
+                else                   sceKernelDelayThread(5000);
+                continue;
+            }
+            g_underruns++;
+            g_needFadeIn = 1;
+            buildUnderrunBlock(g_underrunBuf);
+            sceAudioOutputPannedBlocking(g_channel, vol, vol, g_underrunBuf);
+            g_blocksOut++;
+            continue;
         }
+
+        short* slot = g_ring[g_ringRead % RING_BLOCKS].samples;
+        if (g_needFadeIn) { fadeInBlock(slot); g_needFadeIn = 0; }
+        g_lastL = slot[(SFX_SAMPLE_COUNT - 1) * 2];
+        g_lastR = slot[(SFX_SAMPLE_COUNT - 1) * 2 + 1];
+
+        sceAudioOutputPannedBlocking(g_channel, vol, vol, slot);
+        g_ringRead++;
+        g_blocksOut++;
+        if (g_readerSema >= 0) sceKernelSignalSema(g_readerSema, 1);
     }
     return 0;
 }
@@ -115,15 +174,23 @@ void extendedSoundFXInit(void) {
                                    PSP_AUDIO_FORMAT_STEREO);
     if (g_channel < 0) return;
 
-    // Priority matches music.cpp's threads (below the main thread, so
-    // gameplay is never starved buffering a stinger that isn't even
-    // playing most of the time).
+    g_readerSema = sceKernelCreateSema("extfx_reader", 0, 0, RING_BLOCKS + 2, 0);
+    g_outputSema = sceKernelCreateSema("extfx_output", 0, 0, RING_BLOCKS + 2, 0);
+    if (g_readerSema < 0 || g_outputSema < 0) {
+        printf("[extfx] semaphore creation failed, falling back to polling\n");
+    }
+
+    // Split by cost, matching music.cpp: the output thread does one
+    // already-filled blocking call and must hit a 23.22ms deadline, so it
+    // sits above the main thread's 0x20 (just under music's 0x13 and
+    // sound_thread's 0x12). The reader does Memory Stick I/O and is
+    // latency-tolerant, so it sits well below at 0x30.
     int readerThid = sceKernelCreateThread("extfx_reader_thread", sfxReaderThread,
-                                           0x26, 0x10000, PSP_THREAD_ATTR_USER, 0);
+                                           0x30, 0x10000, PSP_THREAD_ATTR_USER, 0);
     if (readerThid < 0) { g_channel = -1; return; }
 
     int outputThid = sceKernelCreateThread("extfx_output_thread", sfxOutputThread,
-                                           0x25, 0x10000, PSP_THREAD_ATTR_USER, 0);
+                                           0x14, 0x10000, PSP_THREAD_ATTR_USER, 0);
     if (outputThid < 0) { g_channel = -1; return; }
 
     sceKernelStartThread(readerThid, 0, 0);
@@ -135,8 +202,14 @@ void extendedSoundFXPlay(const char* path) {
     strncpy(g_pendingPath, path, PENDING_PATH_LEN - 1);
     g_pendingPath[PENDING_PATH_LEN - 1] = '\0';
     g_pendingSwap = 1; // applied on the reader thread at the next block boundary
+    sfxKick();         // both threads may be parked
 }
 
 void extendedSoundFXSetVolume(float volume) {
     g_volume = volume < 0.0f ? 0.0f : (volume > 1.0f ? 1.0f : volume);
+}
+
+void extendedSoundFXStats(unsigned int* underruns, unsigned int* blocks) {
+    if (underruns) *underruns = g_underruns;
+    if (blocks)    *blocks    = g_blocksOut;
 }

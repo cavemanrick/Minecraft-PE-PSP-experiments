@@ -460,6 +460,10 @@ bool Entity::shouldRenderAtSqrDistance(float distance) {
     float size = bb.getSize() * 64.0f * viewScale;
     return distance < size * size;
 }
+float Entity::getRenderSqrDistanceLimit() {
+    float size = bb.getSize() * 64.0f * viewScale;
+    return size * size;
+}
 
 bool  Entity::isCreativeModeAllowed() { return false; }
 float Entity::getShadowHeightOffs() { return bbHeight / 2; }

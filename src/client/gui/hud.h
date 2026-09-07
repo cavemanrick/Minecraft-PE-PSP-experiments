@@ -24,11 +24,24 @@ void drawFlatIcon(int icon, float x, float y, float sizePx, unsigned int tint);
 
 void hudChatMessage(const char* msg);
 
-// Upper-right corner toast queue, shared by achievement unlocks and the
-// context-sensitive key-hint system (see gameHintsDraw in hud.cpp).
-// hudAchievementToast is exposed mainly for symmetry / potential direct
-// use elsewhere; achievement.cpp itself doesn't need to call it, since
-// hud.cpp already drains achievementsPollNotification() into the same
-// queue every frame.
+// Upper-right corner toast queue. hudAchievementToast is exposed mainly
+// for symmetry / potential direct use elsewhere; achievement.cpp itself
+// doesn't need to call it, since hud.cpp already drains
+// achievementsPollNotification() into the same queue every frame.
+//
+// hudKeyHintToast currently has no caller: it drove a context-sensitive
+// "Button: Action" toast (see gameHintsDraw in hud.cpp) that has been
+// switched off for reading as constant reminders of basic controls
+// rather than genuine notifications -- see the comment above ToastKind
+// in hud.cpp. Left declared and implemented for a possible future
+// tutorial system to reuse rather than removed.
 void hudAchievementToast(const char* name);
 void hudKeyHintToast(const char* button, const char* action);
+
+// A single witty line announcing a biome the player just entered (e.g.
+// "Welcome to the jungle"). Called from gamemode.cpp's existing periodic
+// biome poll -- see the comment at that call site for how "just entered"
+// is detected. line should be a complete sentence/phrase; it draws as
+// the toast's only line, styled distinctly from achievements/key-hints
+// (see toastDraw in hud.cpp).
+void hudBiomeToast(const char* line);

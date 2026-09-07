@@ -402,6 +402,33 @@ static unsigned int autoRepeatClicks(unsigned int pressed, unsigned int held) {
     return out;
 }
 
+// One witty line per overworld biome, indexed by BiomeId (biome.h) --
+// order must track that enum exactly, same convention as kRenderDist and
+// similar fixed-index tables elsewhere in this codebase (no named-field
+// struct here since there is nothing per-biome except the one string).
+static const char* kBiomeToastLine[13] = {
+    "Bundle up -- tundra ahead",           // B_TUNDRA
+    "Entering a savanna",                  // B_SAVANNA
+    "Entering a desert",                   // B_DESERT
+    "Watch your step -- swamp",            // B_SWAMP
+    "Entering a taiga",                    // B_TAIGA
+    "Entering scrubland",                  // B_SHRUB
+    "Entering a forest",                   // B_FOREST
+    "Entering a prairie",                  // B_PLAINS
+    "Entering a seasonal forest",          // B_SEASONAL
+    "Entering a rainforest",               // B_RAIN
+    "Welcome to the jungle",               // B_JUNGLE
+    "You've found a mushroom island!",     // B_MUSHROOM
+    "Entering a dark forest",              // B_DARK_FOREST
+};
+
+// One line per Nether biome, indexed by NetherBiomeId (nether_biome.h).
+static const char* kNetherBiomeToastLine[3] = {
+    "The Nether Wastes stretch on",        // NB_WASTES
+    "Entering a soul sand valley",         // NB_SOUL_SAND_VALLEY
+    "Entering a warped forest",            // NB_WARPED_FOREST
+};
+
 void GameMode::handleInput(unsigned int pressed, unsigned int held) {
 
     if (g_worldBuilt) pressed |= autoRepeatClicks(pressed, held);
@@ -424,13 +451,47 @@ void GameMode::handleInput(unsigned int pressed, unsigned int held) {
             int pz = (int)floorf(g_level.player->z);
             int pcx = px >> 4, pcz = pz >> 4;
 
-            if (worldChunkIsReserved(&g_world, pcx, pcz) && worldChunkIsNether(&g_world, pcx, pcz)) {
+            // "Just crossed into a new biome" toast. Separate from the
+            // achievement tracking just below -- achvOnBiomeEntered/
+            // achvOnNetherBiomeEntered record "ever visited" in a
+            // persistent bitmask (biomesVisitedMask) for the Adventurer/
+            // Explorer achievements, which is the wrong dedup for a
+            // toast: it would only fire once per biome ever, not once
+            // per crossing. This tracks the single most-recently-seen
+            // biome instead, and only announces when it actually changes
+            // between polls. Both consumers now share one classification
+            // call per domain rather than each calling classifyNetherBiome/
+            // classifyBiomeSpatial separately.
+            //
+            // isNether is folded into the same "last id" comparison as an
+            // offset on the stored value rather than a second static
+            // variable: overworld and Nether biome ids both start at 0,
+            // so without some way to tell the domains apart, stepping
+            // through a portal into Nether biome 0 right after leaving
+            // overworld biome 0 would look like no change at all and
+            // silently skip the toast.
+            static int s_lastBiomeToastKey = -1000; // impossible for either domain, forces the first poll to announce
+            bool isNether = worldChunkIsReserved(&g_world, pcx, pcz) && worldChunkIsNether(&g_world, pcx, pcz);
+            int biomeKey;
+            const char* biomeLine;
+            if (isNether) {
                 NetherBiomeId nb = classifyNetherBiome(LevelStorage::getActiveSeed(), &g_world, px, pz);
+                biomeKey  = 100 + (int)nb; // offset well clear of overworld's 0..12 range
+                biomeLine = kNetherBiomeToastLine[(int)nb];
                 achvOnNetherBiomeEntered((int)nb);
             } else {
                 BiomeId b = classifyBiomeSpatial(LevelStorage::getActiveSeed(), &g_world, px, pz);
+                biomeKey  = (int)b;
+                biomeLine = kBiomeToastLine[(int)b];
                 achvOnBiomeEntered((int)b);
             }
+            // Skip the very first poll of a session/world load: without
+            // this, spawning in would immediately toast whatever biome
+            // spawn happened to be in, which reads as a notification
+            // about nothing the player did.
+            if (s_lastBiomeToastKey != -1000 && biomeKey != s_lastBiomeToastKey)
+                hudBiomeToast(biomeLine);
+            s_lastBiomeToastKey = biomeKey;
 
             if (villageChunkHasVillage(pcx, pcz)) achvOnVillageDiscovered();
         }

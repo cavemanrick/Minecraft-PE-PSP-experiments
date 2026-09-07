@@ -810,10 +810,18 @@ bool McpeGen::postProcessPhase(World* w, int chunkX, int chunkZ, int phase) {
             // Most clusters are freshly sprouted; some are already fully grown
             // when the world starts, so bamboo groves don't all look brand new.
             int stalkHeight = (random.nextInt(3) == 0) ? (8 + random.nextInt(5)) : 1;
+            int placed = 0, lastHH = -1;
             for (int hh = 0; hh < stalkHeight; hh++) {
                 if (worldBlock(w, x, y + hh, z) != BLOCK_AIR) break;
+                // Every segment sprouts as a plain stem; the loop below
+                // upgrades only the true top of the finished stalk to
+                // leafy, same as a naturally-grown tip.
                 setBlock(w, x, y + hh, z, BLOCK_BAMBOO, 0);
+                lastHH = hh;
+                placed++;
             }
+            if (placed > 0)
+                worldSetDataNoUpdate(w, x, y + lastHH, z, BAMBOO_LEAFY);
         }
     }
 

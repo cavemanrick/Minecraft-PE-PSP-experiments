@@ -11,12 +11,12 @@
 // at all are the handful of things that are genuinely different about the
 // Nether variant.
 //
-// Replaces the ordinary Skeleton that used to spawn from the Nether
-// fortress's monster spawner block (see the placeSpawner call in
-// nether_fortress_gen.cpp) -- see WarpedSpider::getVoicePitch below for the
-// one other behavioral difference (a lower ambient/hurt/death sound pitch,
-// reusing Spider's existing sound names rather than needing new sound
-// assets).
+// Ambient Warped Forest population (see spawnWarpedSpiders in
+// mob_spawner.cpp) rather than a Nether fortress spawner block -- it no
+// longer has anything to do with the fortress. See
+// WarpedSpider::getVoicePitch below for the one other behavioral
+// difference (a lower ambient/hurt/death sound pitch, reusing Spider's
+// existing sound names rather than needing new sound assets).
 class WarpedSpider : public Spider {
 public:
     WarpedSpider(Level* level);

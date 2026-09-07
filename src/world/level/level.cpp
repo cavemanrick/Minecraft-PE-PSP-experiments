@@ -1,5 +1,6 @@
 #include "world/level/level.h"
 #include "world/level/levelgen/village_gen.h"
+#include "world/level/levelgen/nether_fortress_gen.h"
 #include "world/entity/path_finder_mob.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
@@ -308,6 +309,11 @@ void Level::tickEntities() {
     // its lightweight spawn requests into real entities here, on the main
     // gameplay thread, after streaming has made the chunk resident.
     villageTick(w);
+
+    // Same rule and same reason as villageTick above: Nether fortress
+    // generation may also run on the chunk worker, so its queued
+    // pig-zombie garrison is likewise converted to real entities here.
+    netherFortressTick(w);
 
     // Refill the shared A* budget before any mob AI runs this tick. Has to
     // be here rather than inside PathfinderMob: the budget is global, so

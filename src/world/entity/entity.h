@@ -103,6 +103,15 @@ public:
     virtual bool shouldRender(float cx, float cy, float cz);
     virtual bool shouldRenderAtSqrDistance(float distance);
 
+    // The squared distance at which shouldRenderAtSqrDistance itself would
+    // start returning false, i.e. this entity's own size-based visibility
+    // range. Exposed so callers doing a coarse distance pre-filter (see
+    // EntityRenderDispatcher::renderAll) can size that filter to at least
+    // this large, instead of applying a flat cutoff sized for ordinary
+    // mobs ahead of the real, per-entity check and silently overriding it
+    // for large entities like Ghast.
+    virtual float getRenderSqrDistanceLimit();
+
     virtual bool hurt(Entity* source, int damage);
     virtual void animateHurt();
     virtual void handleEntityEvent(char eventId) {}

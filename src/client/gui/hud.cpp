@@ -108,6 +108,17 @@ extern bool    g_haveGuiBlocks;
 
 #define HUD_ST_S    2.0f
 
+// How far the hearts/hunger rows sit from screen-centre on their own
+// side, used only in the bottom-anchored (non g_barOnTop) layout below.
+// Previously these rows sat flush against the left/right screen edges --
+// fine on a wide mobile screen, but a wide dead gap on PSP's narrower
+// field of view. 22px leaves a visible gap between the two rows (162px
+// wide each) without crowding them into the crosshair/centre of the
+// screen; the rows sit near the top of the screen and don't compete
+// with the hotbar, which is well below them, so this is purely a
+// legibility choice rather than a clearance requirement.
+#define HUD_CENTER_GAP 22.0f
+
 // The day meter sits directly above the hotbar. In g_barOnTop mode the
 // health/armour rows stack upward from here rather than from the hotbar,
 // so they clear it.
@@ -121,42 +132,53 @@ extern bool    g_haveGuiBlocks;
 
 // --- Corner notifications ----------------------------------------------
 //
-// A single upper-right toast stack replaces two things the mobile HUD used
-// to spread elsewhere: the achievement banner (previously top-centre) and
-// the context-sensitive button-hint bar (previously a full-width bottom
-// strip, always on screen -- see the removed gameHintsDraw body below).
+// A single upper-right toast stack replaces where the achievement banner
+// used to live (previously top-centre).
 //
-// PSP's face/shoulder buttons never change position and there's no touch
-// layer to relabel, so a permanently-visible legend is mostly noise once a
-// player knows the game; what actually helps is being told when the
-// *meaning* of a button just changed (opened a chest, stood over a
-// villager, started sleeping). That is a toast, not a status bar, so it
-// lives here rather than as a redraw-every-frame HUD element.
+// This queue was originally built to carry two kinds of notification:
+// achievement unlocks, and a brief "Button: Action" toast whenever the
+// player's interaction context changed (opened a chest, stood over a
+// villager, started sleeping), replacing the old always-on bottom hint
+// bar (see gameHintsDraw, now disconnected in main.cpp). In practice the
+// context toast fired for routine, already-known actions too often to be
+// useful -- it read as constant hand-holding rather than a genuine
+// notification -- so it has been turned off; see main.cpp for where that
+// call is commented out and hudKeyHintToast below, which nothing calls
+// any more. The full button reference lives in the Controls screen under
+// Options/Pause instead, and a proper tutorial system (this queue's
+// TOAST_KEYHINT plumbing is a reasonable starting point for that) is
+// planned separately.
 //
-// Both notification kinds share one small FIFO queue and one draw slot so
-// an achievement popping the instant a key-hint fades (or vice versa)
-// queues cleanly instead of the two overlapping in the same corner.
-enum ToastKind { TOAST_ACHIEVEMENT, TOAST_KEYHINT };
+// TOAST_ACHIEVEMENT and TOAST_BIOME are reachable; TOAST_KEYHINT and its
+// queue/draw/dedup handling are left in place rather than deleted, both
+// because they cost nothing sitting idle and because they're the shape a
+// future "special hint" would reuse.
+enum ToastKind { TOAST_ACHIEVEMENT, TOAST_KEYHINT, TOAST_BIOME };
 
 struct ToastMsg {
     ToastKind kind;
-    char      line1[40]; // achievement: "Achievement Unlocked!" / key-hint: the button, e.g. "Cross"
-    char      line2[40]; // achievement: the achievement name    / key-hint: the action, e.g. "Take"
+    char      line1[40]; // achievement: "Achievement Unlocked!" / key-hint: the button / biome: the witty line itself
+    char      line2[40]; // achievement: the achievement name    / key-hint: the action  / biome: unused, always empty
 };
 
 #define TOAST_QUEUE_MAX 4
 static ToastMsg s_toastQueue[TOAST_QUEUE_MAX];
 static int      s_toastQueueHead = 0, s_toastQueueLen = 0;
 
-#define ACHV_TOAST_SHOW_S   3.0f
+#define ACHV_TOAST_SHOW_S    3.0f
 #define KEYHINT_TOAST_SHOW_S 1.6f
+#define BIOME_TOAST_SHOW_S   2.5f
 static ToastKind s_toastActiveKind = TOAST_ACHIEVEMENT;
 static char      s_toastLine1[40] = "";
 static char      s_toastLine2[40] = "";
 static float     s_toastStart = -1000.0f;
 
 static float toastShowDuration(ToastKind k) {
-    return (k == TOAST_ACHIEVEMENT) ? ACHV_TOAST_SHOW_S : KEYHINT_TOAST_SHOW_S;
+    switch (k) {
+        case TOAST_ACHIEVEMENT: return ACHV_TOAST_SHOW_S;
+        case TOAST_BIOME:       return BIOME_TOAST_SHOW_S;
+        default:                return KEYHINT_TOAST_SHOW_S;
+    }
 }
 
 static void toastPush(ToastKind kind, const char* line1, const char* line2) {
@@ -200,6 +222,17 @@ void hudAchievementToast(const char* name) {
 // sequence instead of overlapping.
 void hudKeyHintToast(const char* button, const char* action) {
     toastPush(TOAST_KEYHINT, button, action);
+}
+
+// A single witty line announcing the biome the player just walked into
+// (see achvOnBiomeEntered's call site in gamemode.cpp for where the
+// actual crossing is detected). Reuses the two-line ToastMsg slot with
+// line2 left empty rather than adding a separate one-line message type --
+// toastDraw already treats an empty line2 as zero-width and simply
+// doesn't draw it, so the box sizes itself to line1 alone with no special
+// casing needed there.
+void hudBiomeToast(const char* line) {
+    toastPush(TOAST_BIOME, line, "");
 }
 
 // Ticking and drawing are separate calls (see the two calls near the
@@ -250,9 +283,9 @@ static void toastDraw(MenuState& s) {
     float dur = toastShowDuration(s_toastActiveKind);
     if (age > dur) return;
 
-    // Quick fade in, hold, quick fade out -- 0.3s/0.2s tails so the short
-    // key-hint toasts still get a visible hold instead of being almost
-    // all fade.
+    // Quick fade in, hold, quick fade out -- 0.3s for the achievement
+    // banner's longer hold, 0.2s for the shorter key-hint/biome toasts so
+    // they still get a visible hold instead of being almost all fade.
     float fadeTail = (s_toastActiveKind == TOAST_ACHIEVEMENT) ? 0.3f : 0.2f;
     float alphaF = 1.0f;
     if (age < fadeTail) alphaF = age / fadeTail;
@@ -260,7 +293,16 @@ static void toastDraw(MenuState& s) {
     if (alphaF < 0.0f) alphaF = 0.0f; if (alphaF > 1.0f) alphaF = 1.0f;
     int alpha = (int)(255.0f * alphaF);
 
-    bool isAchv = (s_toastActiveKind == TOAST_ACHIEVEMENT);
+    // Gold for achievements, cyan for key-hints (unreachable right now --
+    // see the ToastKind comment above), a soft green for biome toasts so
+    // the three read as distinct categories of notification at a glance
+    // rather than all looking like the same generic popup.
+    unsigned int titleRGB;
+    switch (s_toastActiveKind) {
+        case TOAST_ACHIEVEMENT: titleRGB = 0x00FFD700u; break;
+        case TOAST_BIOME:       titleRGB = 0x0090EE90u; break;
+        default:                titleRGB = 0x00A0FFFFu; break;
+    }
     float tw1 = fontTextWidth(&s.font, s_toastLine1) * TOAST_S;
     float tw2 = fontTextWidth(&s.font, s_toastLine2) * TOAST_S;
     float boxW = (tw1 > tw2 ? tw1 : tw2) + 16.0f * TOAST_S;
@@ -269,7 +311,7 @@ static void toastDraw(MenuState& s) {
     float boxY = TOAST_MARGIN;
 
     guiFill(boxX, boxY, boxW, boxH, (unsigned int)((alpha / 2) << 24));
-    unsigned int col1 = (isAchv ? 0x00FFD700u : 0x00A0FFFFu) | ((unsigned int)alpha << 24);
+    unsigned int col1 = titleRGB | ((unsigned int)alpha << 24);
     unsigned int col2 = 0x00FFFFFFu | ((unsigned int)alpha << 24);
     fontDrawTextShadow(&s.font, boxX + (boxW - tw1) / 2.0f, boxY + 2.0f * TOAST_S,
                        s_toastLine1, col1, TOAST_S);
@@ -652,6 +694,7 @@ const char* getBlockName(short id, unsigned char data) {
             case ITEM_REEDS: return "Sugar Cane";
             case ITEM_DOOR_WOOD_ITEM: return "Wooden Door";
             case ITEM_DOOR_IRON_ITEM: return "Iron Door";
+            case ITEM_BAMBOO_RAFT: return "Bamboo Raft";
             default: return "Item";
         }
     }
@@ -1157,12 +1200,36 @@ void hotbarDraw(MenuState& s) {
         // top layout -- armour used to hold the right-hand slot on row 1.
         float hx0, hy, hungerX, hungerY, armorX, armorY, airX, airY;
         if (!g_barOnTop) {
-            hx0     = 2.0f * HUD_ST_S;                         hy      = 2.0f * HUD_ST_S;
-            hungerX = 480.0f - 2.0f * HUD_ST_S - armorW;       hungerY = hy;
-            armorX  = hungerX;                                 armorY  = hy + 10.0f * HUD_ST_S;
-            airX    = hungerX;                                 airY    = armorY + 10.0f * HUD_ST_S;
+            // Hearts and hunger used to sit flush against the left/right
+            // screen edges (480px apart at their nearest icons), which
+            // reads fine on a wide mobile screen but leaves a huge dead
+            // gap in the middle of PSP's much narrower field of view.
+            // Pulled in to a fixed gap straddling centre instead: each
+            // row is armorW wide (10 icons at the same pitch as hearts),
+            // so armorW/2 + HUD_CENTER_GAP places the row's near edge
+            // that far out from the screen's midpoint on its own side.
+            const float centerGap = HUD_CENTER_GAP;
 
-            if (armorVal <= 0) airY = armorY;
+            // Also moved from the top of the screen down to just above
+            // the day/time meter (which itself sits directly above the
+            // hotbar), stacking upward the same way the g_barOnTop branch
+            // below always has -- these rows belong with the rest of the
+            // player-status cluster at the bottom of the screen, not
+            // pinned to the top edge on their own.
+            const float gap = 2.0f;
+            float row1 = HUD_TIMEBAR_Y - hs - gap;
+            float row2 = row1 - hs - gap;
+
+            hx0     = 240.0f - centerGap - armorW;             hy      = row1;
+            hungerX = 240.0f + centerGap;                      hungerY = row1;
+            armorX  = hx0;                                     armorY  = row2;
+            // Air always takes row 2 alongside armour now, whether or not
+            // any armour is worn -- there's no longer a third row for it
+            // to collapse up into when armour is empty (see the
+            // g_barOnTop branch below, which settled on the same
+            // two-row layout for the same reason).
+            airX    = hungerX;                                 airY    = row2;
+
         } else {
             const float gap = 2.0f;
             // Stacks up from the day meter, not from the hotbar, so row 1

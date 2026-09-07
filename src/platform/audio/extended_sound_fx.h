@@ -33,4 +33,9 @@ void extendedSoundFXPlay(const char* path);
 // plays next through extendedSoundFXPlay(), not retroactively.
 void extendedSoundFXSetVolume(float volume);
 
+
+// Cumulative diagnostics since boot; see musicStats() in music.h. Either
+// pointer may be NULL.
+void extendedSoundFXStats(unsigned int* underruns, unsigned int* blocks);
+
 #endif

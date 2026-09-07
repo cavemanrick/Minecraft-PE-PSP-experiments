@@ -93,8 +93,8 @@ void EntityRenderDispatcher::renderAll(Level* level, float a) {
     if (!level) return;
 
     extern float g_viewDist;
-    const float entDist = (g_viewDist <= 16.0f) ? 16.0f : 32.0f;
-    float entDist2 = entDist * entDist;
+    const float baseEntDist = (g_viewDist <= 16.0f) ? 16.0f : 32.0f;
+    float baseEntDist2 = baseEntDist * baseEntDist;
     for (size_t i = 0; i < level->entities.size(); i++) {
         Entity* e = level->entities[i];
         if (!e || e->removed || e->invisible) continue;
@@ -104,7 +104,24 @@ void EntityRenderDispatcher::renderAll(Level* level, float a) {
         if (!worldColumnDrawn(&g_world, e->x, e->z)) continue;
         if (level->player) {
             float dx = e->x - level->player->x, dy = e->y - level->player->y, dz = e->z - level->player->z;
-            if (dx * dx + dy * dy + dz * dz > entDist2) continue;
+            float distSqr = dx * dx + dy * dy + dz * dz;
+
+            // This flat per-viewDist cutoff (16 or 32 blocks) is sized for
+            // ordinary human/animal-scale mobs. shouldRenderAtSqrDistance
+            // is the authoritative, size-aware check (it scales with the
+            // entity's own bounding box -- see entity.cpp), and large
+            // entities like Ghast (4x4x4, meant to be seen across a
+            // couple hundred blocks of open Nether per vanilla) rely on
+            // it computing a much bigger allowance than baseEntDist2.
+            // Clamping everything to baseEntDist2 first, before
+            // shouldRender ever runs, silently overrode that -- a ghast
+            // got culled at 32 blocks while its AI/attack logic (which
+            // doesn't go through this function) kept running fine,
+            // reading as "invisible but still shooting fireballs." Use
+            // whichever cutoff is larger instead of always the flat one.
+            float ownDist2 = e->getRenderSqrDistanceLimit();
+            float cutoff2 = (ownDist2 > baseEntDist2) ? ownDist2 : baseEntDist2;
+            if (distSqr > cutoff2) continue;
             if (!e->shouldRender(level->player->x, level->player->y, level->player->z)) continue;
         }
         render(e, a);

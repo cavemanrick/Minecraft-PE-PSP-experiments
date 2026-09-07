@@ -12,6 +12,7 @@
 #include "world/entity/animal/strider.h"
 #include "world/entity/monster/ghast.h"
 #include "world/entity/monster/pig_zombie.h"
+#include "world/entity/monster/warped_spider.h"
 #include "world/entity/monster/monster.h"
 #include "world/difficulty.h"
 #include "world/level/levelgen/Random.h"
@@ -460,6 +461,85 @@ static void spawnStriders(Level* level) {
     }
 }
 
+// Warped spiders: their own dedicated population budget and Warped Forest
+// biome gate, same pattern spawnPigZombies already uses for Nether Wastes
+// and spawnStriders uses for its own Warped Forest population. Previously
+// these came from a fixed spawner block placed by nether_fortress_gen.cpp;
+// that spawner is gone (see the fortress gen comment for why) and this is
+// now the only source of WarpedSpider entities.
+static const int WARPED_SPIDER_MAX_PER_LEVEL = 6;
+static const int WARPED_SPIDER_SPAWN_ATTEMPTS = 4;
+static const int WARPED_SPIDER_MIN_SPAWN_DISTANCE = 24;
+
+static void spawnWarpedSpiders(Level* level) {
+    LocalPlayer* p = level->player;
+    if (!p) return;
+    if (level->getDifficulty() == Difficulty::PEACEFUL) return;
+
+    int count = level->countInstanceOfType(EntityTypes::IdWarpedSpider);
+    if (count >= WARPED_SPIDER_MAX_PER_LEVEL) return;
+
+    int pcx = (int)floorf(p->x / 16.0f);
+    int pcz = (int)floorf(p->z / 16.0f);
+    const int R = 128 / 16;
+
+    for (int attempt = 0; attempt < WARPED_SPIDER_SPAWN_ATTEMPTS; ++attempt) {
+        if (count >= WARPED_SPIDER_MAX_PER_LEVEL) return;
+
+        int cx = pcx + s_rng.nextInt(2 * R + 1) - R;
+        int cz = pcz + s_rng.nextInt(2 * R + 1) - R;
+        if (!worldChunkIsReserved(level->w, cx, cz) ||
+            !worldChunkIsNether(level->w, cx, cz)) continue;
+        if (!level->hasChunksAt(cx * 16, 0, cz * 16, cx * 16 + 15, 0, cz * 16 + 15)) continue;
+
+        int xStart = cx * 16 + s_rng.nextInt(16);
+        int zStart = cz * 16 + s_rng.nextInt(16);
+
+        // Biome-gated to Warped Forest, checked before the standable-floor
+        // probe -- same ordering spawnPigZombies uses for its own
+        // Wastes-only gate.
+        if (classifyNetherBiome(worldGenSeed(), level->w, xStart, zStart) != NB_WARPED_FOREST) continue;
+
+        int yStart = netherProbeStandableY(level, xStart, zStart);
+        if (yStart < 0) continue;
+
+        float dx = xStart + 0.5f - p->x;
+        float dy = yStart - p->y;
+        float dz = zStart + 0.5f - p->z;
+        if (dx * dx + dy * dy + dz * dz <
+            (float)(WARPED_SPIDER_MIN_SPAWN_DISTANCE * WARPED_SPIDER_MIN_SPAWN_DISTANCE)) continue;
+
+        if (level->isSolidBlockingTile(xStart, yStart, zStart)) continue;
+        if (level->getTile(xStart, yStart, zStart) != BLOCK_AIR) continue;
+
+        int cluster = 1 + s_rng.nextInt(2); // 1-2, spiders are less clustered than pig zombies
+        if (cluster > WARPED_SPIDER_MAX_PER_LEVEL - count)
+            cluster = WARPED_SPIDER_MAX_PER_LEVEL - count;
+
+        for (int i = 0; i < cluster; ++i) {
+            int x = xStart + s_rng.nextInt(6) - s_rng.nextInt(6);
+            int z = zStart + s_rng.nextInt(6) - s_rng.nextInt(6);
+            if (!spawnOk(level, x, yStart, z)) continue;
+            // Re-check biome per cluster member: same reasoning
+            // spawnPigZombies/spawnStriders already use -- a jitter can
+            // walk off Warped Forest onto neighbouring Wastes/Soul Sand
+            // Valley ground.
+            if (classifyNetherBiome(worldGenSeed(), level->w, x, z) != NB_WARPED_FOREST) continue;
+
+            WarpedSpider* ws = (WarpedSpider*)MobFactory::createMob(EntityTypes::IdWarpedSpider, level);
+            if (!ws) return;
+            ws->moveTo(x + 0.5f, (float)yStart, z + 0.5f,
+                       s_rng.nextFloat() * 360.0f, 0.0f);
+            if (!ws->canSpawn()) {
+                delete ws;
+                continue;
+            }
+            level->addEntity(ws);
+            ++count;
+        }
+    }
+}
+
 static const int GHAST_MAX_PER_LEVEL = 3;
 static const int GHAST_SPAWN_ATTEMPTS = 6;
 static const int GHAST_MIN_SPAWN_DISTANCE = 24;
@@ -599,6 +679,7 @@ void tick(Level* level, bool spawnEnemies, bool spawnFriendlies) {
         spawnMonsters(level);
         if ((level->w->time % 40) == 0) spawnStriders(level);
         if ((level->w->time % 40) == 0) spawnPigZombies(level);
+        if ((level->w->time % 40) == 0) spawnWarpedSpiders(level);
         if ((level->w->time % 60) == 0) spawnGhasts(level);
     }
 }

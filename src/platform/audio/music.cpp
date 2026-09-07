@@ -80,6 +80,80 @@ static volatile unsigned int g_ringRead    = 0; // output thread only
 
 static unsigned int ringFilled(void) { return g_ringWritten - g_ringRead; }
 
+// ---- thread parking -------------------------------------------------------
+//
+// Both threads used to spin: the reader polled sceKernelDelayThread(3000)
+// (~333 wakeups/sec) whenever the ring was full, and the output thread
+// pushed silence blocks through the hardware forever whether or not
+// anything was playing. Between music and extended_sound_fx that was
+// several hundred context switches per second to produce nothing.
+//
+// Semaphores rather than sceKernelSleepThread/sceKernelWakeupThread: the
+// PSP's sleep/wakeup pair is documented as counted (hence
+// sceKernelCancelWakeupThread), but the counting behaviour isn't spelled
+// out in the SDK docs and a lost wakeup here parks the audio permanently.
+// A counting semaphore has unambiguous semantics, sound.cpp already
+// depends on one working correctly, and a stale count only ever costs a
+// few immediate-return spins because the wait is inside a condition loop.
+static SceUID g_readerSema = -1;  // signalled when a slot frees or work is queued
+static SceUID g_outputSema = -1;  // signalled when a block is published or work is queued
+
+static bool musicWantsBlocks(void) { return g_playing != 0 || g_pendingSwap != 0; }
+
+static void musicKick(void) {
+    if (g_readerSema >= 0) sceKernelSignalSema(g_readerSema, 1);
+    if (g_outputSema >= 0) sceKernelSignalSema(g_outputSema, 1);
+}
+
+// ---- diagnostics ----------------------------------------------------------
+//
+// g_underruns counts blocks the output thread had to synthesise because
+// the ring was empty while a track was still playing -- i.e. the reader
+// was starved or the Memory Stick stalled. This is the number to watch:
+// if popping correlates with it rising, the cause is upstream scheduling
+// or I/O, not the mixer.
+static volatile unsigned int g_underruns = 0;
+static volatile unsigned int g_blocksOut = 0;
+
+// ---- underrun concealment -------------------------------------------------
+//
+// The old underrun path pushed a block of digital zeroes. That is a step
+// discontinuity from wherever the waveform happened to be straight to 0,
+// and another step back when audio resumes -- two clicks per underrun,
+// which is exactly what a hard cut sounds like. Ramping over ~5.8ms
+// instead costs 256 multiplies and turns an audible pop into a short dip.
+// This is concealment, not a fix: the fix is not to underrun.
+#define UNDERRUN_RAMP 256   // samples (~5.8ms at 44100Hz)
+
+static short g_underrunBuf[MUSIC_SAMPLE_COUNT * 2];
+static short g_lastL = 0, g_lastR = 0;  // last sample handed to the hardware
+static int   g_needFadeIn = 0;          // ramp the next real block up from zero
+
+static void buildUnderrunBlock(short* out) {
+    int l = g_lastL, r = g_lastR;
+    for (int i = 0; i < MUSIC_SAMPLE_COUNT; i++) {
+        if (i < UNDERRUN_RAMP) {
+            int g = UNDERRUN_RAMP - i;  // UNDERRUN_RAMP .. 1
+            out[i * 2]     = (short)((l * g) / UNDERRUN_RAMP);
+            out[i * 2 + 1] = (short)((r * g) / UNDERRUN_RAMP);
+        } else {
+            out[i * 2] = out[i * 2 + 1] = 0;
+        }
+    }
+    // A second consecutive underrun block is then pure silence rather
+    // than a repeated ramp from a stale sample.
+    g_lastL = g_lastR = 0;
+}
+
+// Safe to mutate the slot in place: the output thread owns it until it
+// increments g_ringRead, and the reader is RING_BLOCKS ahead.
+static void fadeInBlock(short* buf) {
+    for (int i = 0; i < UNDERRUN_RAMP; i++) {
+        buf[i * 2]     = (short)((buf[i * 2]     * i) / UNDERRUN_RAMP);
+        buf[i * 2 + 1] = (short)((buf[i * 2 + 1] * i) / UNDERRUN_RAMP);
+    }
+}
+
 static void closeTrack(void) {
     if (g_file) { fclose(g_file); g_file = NULL; }
     g_playing  = 0;
@@ -116,41 +190,44 @@ static void musicFillBlock(short* out) {
         return;
     }
 
-    static short raw[MUSIC_SAMPLE_COUNT * 2];
+    // Stereo sources read straight into the ring slot: no staging buffer,
+    // no copy loop. The old code read into a static raw[] and then ran
+    // 2048 multiply-shifts per block to apply g_volume in software --
+    // ~88k operations/second to do something the hardware does for free
+    // via the leftvol/rightvol arguments of sceAudioOutputPannedBlocking.
+    // Volume is now applied on the output thread; see musicOutputThread.
+    //
+    // Mono sources still need a staging buffer because the block has to
+    // be expanded to interleaved stereo, but that path is currently
+    // unreachable: nothing calls musicSetFormat().
+    static short mono[MUSIC_SAMPLE_COUNT];
+    short* dst = (g_channels == 2) ? out : mono;
+
     size_t wantBytes = (size_t)MUSIC_SAMPLE_COUNT * g_channels * sizeof(short);
-    size_t got        = fread(raw, 1, wantBytes, g_file);
+    size_t got        = fread(dst, 1, wantBytes, g_file);
 
     if (got < wantBytes) {
         if (g_loop && got == 0) {
             // Clean EOF: rewind and refill this block from the start.
             fseek(g_file, 0, SEEK_SET);
-            got = fread(raw, 1, wantBytes, g_file);
+            got = fread(dst, 1, wantBytes, g_file);
         } else if (g_loop && got > 0) {
             // Partial block at EOF: fill remainder from the start so the
             // loop point doesn't leave a silent gap.
             fseek(g_file, 0, SEEK_SET);
             size_t remain = wantBytes - got;
-            size_t more   = fread((char*)raw + got, 1, remain, g_file);
+            size_t more   = fread((char*)dst + got, 1, remain, g_file);
             got += more;
         } else {
             // Non-looping track finished.
-            memset((char*)raw + got, 0, wantBytes - got);
+            memset((char*)dst + got, 0, wantBytes - got);
             closeTrack();
         }
     }
 
-    int vol256 = (int)(g_volume * 256.0f);
-    if (vol256 > 256) vol256 = 256;
-    if (vol256 < 0)   vol256 = 0;
-
-    if (g_channels == 2) {
-        for (int i = 0; i < MUSIC_SAMPLE_COUNT; i++) {
-            out[i * 2]     = (short)((raw[i * 2]     * vol256) >> 8);
-            out[i * 2 + 1] = (short)((raw[i * 2 + 1] * vol256) >> 8);
-        }
-    } else {
-        for (int i = 0; i < MUSIC_SAMPLE_COUNT; i++) {
-            short s = (short)((raw[i] * vol256) >> 8);
+    if (g_channels == 1) {
+        for (int i = MUSIC_SAMPLE_COUNT - 1; i >= 0; i--) {
+            short s = mono[i];
             out[i * 2] = out[i * 2 + 1] = s;
         }
     }
@@ -160,11 +237,17 @@ static void musicFillBlock(short* out) {
 // it doesn't spin the CPU. This is the only thread that touches disk.
 static int musicReaderThread(SceSize, void*) {
     for (;;) {
-        while (ringFilled() >= RING_BLOCKS) {
-            sceKernelDelayThread(3000); // 3ms; ring is full, nothing to do yet
+        // Two reasons to have nothing to do: the ring is full, or nothing
+        // is playing at all. The old loop only handled the first, and
+        // handled it by polling; the second it didn't handle at all, so
+        // it kept manufacturing silence blocks forever. Park on both.
+        while (!musicWantsBlocks() || ringFilled() >= RING_BLOCKS) {
+            if (g_readerSema >= 0) sceKernelWaitSema(g_readerSema, 1, 0);
+            else                   sceKernelDelayThread(3000); // sema creation failed
         }
         musicFillBlock(g_ring[g_ringWritten % RING_BLOCKS].samples);
         g_ringWritten++;   // published only after the slot is fully written
+        if (g_outputSema >= 0) sceKernelSignalSema(g_outputSema, 1);
     }
     return 0;
 }
@@ -174,20 +257,44 @@ static int musicReaderThread(SceSize, void*) {
 // ring underruns (reader fell behind), plays silence for that block
 // rather than blocking here to wait.
 static int musicOutputThread(SceSize, void*) {
-    static short silence[MUSIC_SAMPLE_COUNT * 2];
-    memset(silence, 0, sizeof(silence));
-
     for (;;) {
-        int vol = PSP_AUDIO_VOLUME_MAX; // per-sample volume already applied in musicFillBlock
-        if (ringFilled() > 0) {
-            sceAudioOutputPannedBlocking(g_channel, vol, vol,
-                                          g_ring[g_ringRead % RING_BLOCKS].samples);
-            g_ringRead++;  // released only after the slot has been consumed
-        } else {
-            // Underrun: reader hasn't kept up. Play silence for one block
-            // instead of stalling the output thread on a blocking read.
-            sceAudioOutputPannedBlocking(g_channel, vol, vol, silence);
+        // Hardware volume. sceAudioOutputPannedBlocking scales the block
+        // in the audio hardware from these two arguments, so there is no
+        // reason to have burned CPU doing it per-sample on the way in.
+        int vol = (int)(g_volume * (float)PSP_AUDIO_VOLUME_MAX);
+        if (vol < 0)                    vol = 0;
+        if (vol > PSP_AUDIO_VOLUME_MAX) vol = PSP_AUDIO_VOLUME_MAX;
+
+        if (ringFilled() == 0) {
+            if (!musicWantsBlocks()) {
+                // Genuinely idle -- nothing playing, nothing queued. Stop
+                // feeding the hardware entirely and park. A reserved but
+                // unfed channel simply outputs silence; it costs nothing.
+                g_needFadeIn = 1; // ramp the first block back up on resume
+                if (g_outputSema >= 0) sceKernelWaitSema(g_outputSema, 1, 0);
+                else                   sceKernelDelayThread(5000);
+                continue;
+            }
+            // Real underrun: a track is playing but the reader hasn't kept
+            // up. Count it -- this is the number that should correlate
+            // with audible popping -- and conceal rather than hard-cut.
+            g_underruns++;
+            g_needFadeIn = 1;
+            buildUnderrunBlock(g_underrunBuf);
+            sceAudioOutputPannedBlocking(g_channel, vol, vol, g_underrunBuf);
+            g_blocksOut++;
+            continue;
         }
+
+        short* slot = g_ring[g_ringRead % RING_BLOCKS].samples;
+        if (g_needFadeIn) { fadeInBlock(slot); g_needFadeIn = 0; }
+        g_lastL = slot[(MUSIC_SAMPLE_COUNT - 1) * 2];
+        g_lastR = slot[(MUSIC_SAMPLE_COUNT - 1) * 2 + 1];
+
+        sceAudioOutputPannedBlocking(g_channel, vol, vol, slot);
+        g_ringRead++;  // released only after the slot has been consumed
+        g_blocksOut++;
+        if (g_readerSema >= 0) sceKernelSignalSema(g_readerSema, 1);
     }
     return 0;
 }
@@ -312,24 +419,48 @@ void musicInit(void) {
                                    PSP_AUDIO_FORMAT_STEREO);
     if (g_channel < 0) return;
 
-    // Priority: PSPSDK gives the main thread a default priority of 32
-    // (0x20) unless PSP_MAIN_THREAD_PRIORITY overrides it, which this
-    // project doesn't set. Lower priority NUMBER wins pre-emption on PSP,
-    // so a music thread at 0x13/0x14 -- as this was originally set --
-    // runs at *higher* priority than the game loop, meaning it can
-    // pre-empt rendering/gameplay logic on every ~23ms block boundary.
-    // With the output thread looping tightly on
-    // sceAudioOutputPannedBlocking(), that adds up to a measurable frame
-    // hit. 0x25/0x26 keep both music threads below the main thread's
-    // priority (and below sound_thread's 0x12, which predates this and
-    // isn't implicated), so they only run when the main thread isn't
-    // ready -- gameplay is not starved for the sake of buffering ahead.
+    // maxCount is RING_BLOCKS + 2 so a burst of signals can't overflow in
+    // normal operation; a signal past max is rejected but harmless,
+    // because it only ever means the target thread is already awake.
+    g_readerSema = sceKernelCreateSema("music_reader", 0, 0, RING_BLOCKS + 2, 0);
+    g_outputSema = sceKernelCreateSema("music_output", 0, 0, RING_BLOCKS + 2, 0);
+    if (g_readerSema < 0 || g_outputSema < 0) {
+        // Not fatal: both wait sites fall back to a short delay poll, i.e.
+        // the old behaviour. Losing the idle parking is better than losing
+        // music entirely.
+        printf("[music] semaphore creation failed, falling back to polling\n");
+    }
+
+    // Priority. PSPSDK gives the main thread a default priority of 32
+    // (0x20); this project doesn't set PSP_MAIN_THREAD_PRIORITY. Lower
+    // NUMBER wins pre-emption on PSP, and the scheduler has no aging, so
+    // a thread numerically above 32 runs ONLY when the main thread is
+    // blocked.
+    //
+    // The previous 0x25/0x26 put both threads below the main thread to
+    // stop them stealing frame time. That fixed the wrong half of the
+    // problem: the main thread blocks on sceDisplayWaitVblankStart() and
+    // sceGuSync() each frame, which is the only reason music played at
+    // all, and any frame that overran vblank -- chunk gen, mesh build,
+    // region save -- made the output thread miss its 23.22ms deadline and
+    // underrun. Demoting the deadline-critical thread trades frame hitches
+    // for popping.
+    //
+    // The right split is by *cost*, not by name:
+    //   output thread -- one sceAudioOutputPannedBlocking call on a buffer
+    //     that is already filled. Microseconds of CPU per block, and it
+    //     spends essentially all its time blocked. Safe above the main
+    //     thread, and it must be there to hit the deadline. 0x13, just
+    //     under sound_thread's 0x12.
+    //   reader thread -- fread from the Memory Stick plus any format
+    //     conversion. Expensive and latency-tolerant, with RING_BLOCKS of
+    //     slack behind it. Belongs well below the main thread at 0x30.
     int readerThid = sceKernelCreateThread("music_reader_thread", musicReaderThread,
-                                           0x26, 0x10000, PSP_THREAD_ATTR_USER, 0);
+                                           0x30, 0x10000, PSP_THREAD_ATTR_USER, 0);
     if (readerThid < 0) { g_channel = -1; return; }
 
     int outputThid = sceKernelCreateThread("music_output_thread", musicOutputThread,
-                                           0x25, 0x10000, PSP_THREAD_ATTR_USER, 0);
+                                           0x13, 0x10000, PSP_THREAD_ATTR_USER, 0);
     if (outputThid < 0) { g_channel = -1; return; }
 
     sceKernelStartThread(readerThid, 0, 0);
@@ -351,17 +482,29 @@ void musicPlay(const char* path, bool loop) {
     g_pendingFile = f;
     g_pendingLoop = loop ? 1 : 0;
     g_pendingSwap = 1;
+
+    // Both threads may be parked. Signalling after g_pendingSwap is set is
+    // race-free in the direction that matters: if a thread checked the
+    // condition just before the store and is about to wait, the semaphore
+    // count is already 1 and its wait returns immediately.
+    musicKick();
 }
 
 void musicStop(void) {
     if (g_pendingFile) { fclose(g_pendingFile); g_pendingFile = NULL; }
     g_pendingFile = NULL;
     g_pendingLoop = 0;
-    g_pendingSwap = 1; // swaps in a NULL file -> silence, applied on mixer thread
+    g_pendingSwap = 1; // swaps in a NULL file -> silence, applied on reader thread
+    musicKick();       // the reader has to wake to consume the stop
 }
 
 void musicSetVolume(float volume) {
     g_volume = volume < 0.0f ? 0.0f : (volume > 1.0f ? 1.0f : volume);
+}
+
+void musicStats(unsigned int* underruns, unsigned int* blocks) {
+    if (underruns) *underruns = g_underruns;
+    if (blocks)    *blocks    = g_blocksOut;
 }
 
 void musicUpdate(bool inMainMenu, bool inGameplay) {

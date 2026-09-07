@@ -123,6 +123,25 @@ void Ghast::aiStep() {
     }
 
     travel(moveDirX, moveDirZ); // yya unused by Ghast::travel; see below
+
+    // Face the player, not the direction of travel. Vanilla ghasts drift
+    // and strafe independent of which way they're looking -- the wiki's
+    // "does not attempt to draw closer" note is about movement, not aim
+    // -- and the fireball spawned in tick() already aims straight at the
+    // player regardless of yRot. Deriving yRot from flight velocity
+    // instead (the previous behaviour) meant the model could visibly
+    // face sideways or backwards relative to the player while a shot
+    // launched correctly at the player from off to the side/behind, which
+    // is the "shoots fireballs while facing away" symptom. With no
+    // player alive/present, hold whatever heading travel() last left it
+    // at (previously velocity-derived) rather than snapping to something
+    // arbitrary.
+    if (level->player && level->player->isAlive()) {
+        float dx = level->player->x - x;
+        float dz = level->player->z - z;
+        if (dx * dx + dz * dz > 1e-6f)
+            yRot = atan2f(dx, dz) * (180.0f / Mth::PI);
+    }
 }
 
 void Ghast::travel(float xs, float /*yf*/) {
@@ -145,7 +164,11 @@ void Ghast::travel(float xs, float /*yf*/) {
     // entirely rather than calling into.
     move(xd, yd, zd);
 
-    yRot = atan2f(xd, zd) * (180.0f / Mth::PI);
+    // yRot is NOT derived from velocity here -- see the facing override
+    // in aiStep(), which runs immediately after this call and points the
+    // model at the player instead. Setting it from xd/zd was the original
+    // bug: a ghast's flight heading and its aim have nothing to do with
+    // each other in vanilla.
 }
 
 void Ghast::tick() {

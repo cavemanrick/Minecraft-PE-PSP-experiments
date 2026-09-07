@@ -49,15 +49,54 @@ static int pauseButtonCount() {
     return debugNetherEntryAvailable() ? PAUSE_BUTTONS_MAX : PAUSE_BUTTONS_BASE;
 }
 
+// Two columns instead of one long vertical stack. With up to 7 buttons
+// (the debug Nether entry pushes a normally-6-button menu to 7) a single
+// column at the old 25-unit pitch ran to y=194 on a 136-unit-tall screen
+// -- more than the bottom third of the menu was drawn off the visible
+// area entirely, with no scrolling to reach it. Splitting into two
+// columns of up to 4 rows each keeps the tallest case within y=119,
+// comfortably on screen.
+//
+// Left column gets the extra button when the count is odd, same
+// convention as optionColumnSplit in screen_options.cpp and the create-
+// world toggle grid in screen_create.cpp, so this stays correct
+// automatically if a button is ever added or removed rather than
+// depending on a hand-picked split index that could go stale.
+static int pauseColumnSplit() {
+    return (pauseButtonCount() + 1) / 2;
+}
+static bool pauseButtonInRightColumn(int i) {
+    return i >= pauseColumnSplit();
+}
+
 static const float PAUSE_V2    = VW / 20.0f;
-static const float PAUSE_BTN_W = 8.0f * PAUSE_V2;
-static const float PAUSE_BTN_H = 20.0f;
-static const float PAUSE_PITCH = 25.0f;
-static const float PAUSE_BTN_Y = 24.0f;
+
+// MCPSP_MULTIPLAYER is 0 in this build (see menu.h), so the player-list
+// panel below is compiled out and the button grid can use the screen's
+// full width. If multiplayer is ever turned on, PAUSE_LIST_X/W still
+// carve out the same right-hand strip they always have, and the two
+// button columns need to fit to the left of it instead -- avail below
+// picks the correct span for whichever configuration is compiled.
+#if MCPSP_MULTIPLAYER
 static const float PAUSE_LIST_W = 8.0f * PAUSE_V2;
 static const float PAUSE_LIST_X = VW - PAUSE_LIST_W - PAUSE_V2;
+static const float PAUSE_GRID_AVAIL_W = PAUSE_LIST_X - PAUSE_V2;
+#else
+static const float PAUSE_GRID_AVAIL_W = VW - 2.0f * PAUSE_V2;
+#endif
+
+static const float PAUSE_COL_GAP = PAUSE_V2;
+static const float PAUSE_BTN_W  = (PAUSE_GRID_AVAIL_W - PAUSE_COL_GAP) / 2.0f;
+static const float PAUSE_BTN_H  = 20.0f;
+static const float PAUSE_PITCH  = 25.0f;
+static const float PAUSE_BTN_Y  = 24.0f;
+static const float PAUSE_COL0_X = PAUSE_V2;
+static const float PAUSE_COL1_X = PAUSE_COL0_X + PAUSE_BTN_W + PAUSE_COL_GAP;
+
+#if MCPSP_MULTIPLAYER
 static const float PAUSE_LIST_Y = VH / 10.0f;
 static const float PAUSE_LIST_H = 8.0f * (VH / 10.0f);
+#endif
 
 static const float PAUSE_ROW_H   = 15.0f;
 static const float PAUSE_ROW_Y0  = 2.0f;
@@ -105,8 +144,34 @@ void PauseScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int )
     }
 
     const int selBefore = g_pauseSel;
-    if ((pressed & PSP_CTRL_UP)   && g_pauseSel > 0)                  g_pauseSel--;
-    if ((pressed & PSP_CTRL_DOWN) && g_pauseSel < pauseButtonCount() - 1)  g_pauseSel++;
+    int split = pauseColumnSplit();
+    int count = pauseButtonCount();
+    bool inRight = pauseButtonInRightColumn(g_pauseSel);
+    int colStart = inRight ? split : 0;
+    int colEnd   = inRight ? count : split; // exclusive
+    int rowInCol = g_pauseSel - colStart;
+
+    if ((pressed & PSP_CTRL_UP)   && g_pauseSel > colStart) g_pauseSel--;
+    if ((pressed & PSP_CTRL_DOWN) && g_pauseSel < colEnd - 1) g_pauseSel++;
+
+    // Left/Right hop to the same row in the other column. The right
+    // column can be one shorter than the left (split favours the left
+    // column on an odd count -- see pauseColumnSplit), so jumping to a
+    // row that doesn't exist over there clamps to that column's last
+    // row instead of landing past its end.
+    if (pressed & PSP_CTRL_RIGHT) {
+        if (!inRight) {
+            int target = split + rowInCol;
+            g_pauseSel = (target < count) ? target : count - 1;
+        }
+    }
+    if (pressed & PSP_CTRL_LEFT) {
+        if (inRight) {
+            int target = rowInCol; // left column always has >= right column's row count
+            g_pauseSel = target;
+        }
+    }
+
     if (g_pauseSel != selBefore) soundPlay("random.click", 1.0f, 1.0f);
 
     if (pressed & (PSP_CTRL_CIRCLE | PSP_CTRL_SELECT)) {
@@ -169,15 +234,23 @@ void PauseScreen::renderContent(MenuState& s) {
 
         const char* title = "Game menu";
         float tw = fontTextWidth(&font, title) * UI_SCALE;
+        // Centred over the whole two-column grid (from PAUSE_COL0_X to
+        // the right edge of the right column) rather than just the left
+        // column's width, now that there are two columns to span.
+        float gridSpan = (PAUSE_COL1_X + PAUSE_BTN_W) - PAUSE_COL0_X;
         fontDrawTextShadow(&font,
-                           (PAUSE_V2 + PAUSE_BTN_W / 2.0f) * UI_SCALE - tw / 2.0f,
+                           (PAUSE_COL0_X + gridSpan / 2.0f) * UI_SCALE - tw / 2.0f,
                            (PAUSE_BTN_Y - 11.0f) * UI_SCALE, title, 0xFFFFFFFFu, UI_SCALE);
 
+        int split = pauseColumnSplit();
         for (int i = 0; i < pauseButtonCount(); i++) {
             bool hover = (g_pauseSel == i);
-            float by = PAUSE_BTN_Y + i * PAUSE_PITCH;
-            guiTButton(s, PAUSE_V2, by, PAUSE_BTN_W, PAUSE_BTN_H, hover);
-            guiTButtonLabel(s, PAUSE_V2, by, PAUSE_BTN_W, PAUSE_BTN_H,
+            bool rightCol = pauseButtonInRightColumn(i);
+            int rowInCol = rightCol ? (i - split) : i;
+            float bx = rightCol ? PAUSE_COL1_X : PAUSE_COL0_X;
+            float by = PAUSE_BTN_Y + rowInCol * PAUSE_PITCH;
+            guiTButton(s, bx, by, PAUSE_BTN_W, PAUSE_BTN_H, hover);
+            guiTButtonLabel(s, bx, by, PAUSE_BTN_W, PAUSE_BTN_H,
                             kPauseButtons[i], hover, true);
         }
 

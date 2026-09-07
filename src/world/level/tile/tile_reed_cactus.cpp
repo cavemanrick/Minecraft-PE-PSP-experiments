@@ -69,12 +69,19 @@ void bambooGrow(World* w, int x, int y, int z, int ageThreshold, int maxHeight) 
     int height = 1;
     while (worldBlock(w, x, y - height, z) == BLOCK_BAMBOO) height++;
     if (height >= maxHeight) return;
-    int age = worldData(w, x, y, z);
+    int data = worldData(w, x, y, z);
+    int age = data & BAMBOO_AGE_MASK;
     if (age >= ageThreshold) {
-        worldSetTileUpdate(w, x, y + 1, z, BLOCK_BAMBOO, 0);
+        // The new segment becomes the leafy tip; this segment now has
+        // something above it, so it loses the leafy flag (if it ever had
+        // one -- freshly grown mid-stalk segments never do) and reverts
+        // to a plain stem age-0 count.
+        worldSetTileUpdate(w, x, y + 1, z, BLOCK_BAMBOO, BAMBOO_LEAFY);
         worldSetDataNoUpdate(w, x, y, z, 0);
     } else {
-        worldSetDataNoUpdate(w, x, y, z, (unsigned char)(age + 1));
+        // Preserve the leafy flag while ticking the age counter up --
+        // an ungrown tip stays leafy while it waits to sprout.
+        worldSetDataNoUpdate(w, x, y, z, (unsigned char)((age + 1) | (data & BAMBOO_LEAFY)));
     }
 }
 

@@ -9,4 +9,11 @@ class World;
 // neighbours.
 void netherFortressGenerateChunk(World* w, long worldSeed, int chunkX, int chunkZ);
 
+// Drains pending fortress-guard spawn requests queued by
+// netherFortressGenerateChunk into real entities. Must be called from the
+// main gameplay thread only (see netherFortressGenerateChunk's comment on
+// why entity creation can't happen from the chunk-generation worker) --
+// same pattern and same call site as villageTick(w) in Level::tickEntities.
+void netherFortressTick(World* w);
+
 #endif

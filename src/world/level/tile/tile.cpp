@@ -409,7 +409,15 @@ void Tile::getTexture(unsigned char data, int f, int* col, int* row, unsigned in
                 default:            *col = 7; *row = 3; break;
             }
             break;
-        case BLOCK_BAMBOO:         *col = 10; *row = 10; break;
+        case BLOCK_BAMBOO:
+            // The leafy tip (BAMBOO_LEAFY, see chunk.h) gets its own sprig
+            // texture at the free cell (2,9), right beside bamboo planks;
+            // every other segment along the stalk uses the plain tileable
+            // stem at (10,10). Matches real bamboo only leafing out near
+            // its growing end instead of along the whole cane.
+            if (data & BAMBOO_LEAFY) { *col = 2;  *row = 9;  }
+            else                     { *col = 10; *row = 10; }
+            break;
         case BLOCK_COCOA: {
             int age = (data >> COCOA_AGE_SHIFT) & COCOA_AGE_MASK;
             if (age > 2) age = 2;
