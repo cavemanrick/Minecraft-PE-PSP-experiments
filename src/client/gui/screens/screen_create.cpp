@@ -15,6 +15,16 @@
 #include "world/level/storage/worldlist.h"
 #include "world/level/world.h"
 
+// This screen used to open in a collapsed/basic mode (Name + Game Mode
+// only) with a header "Advanced" button to reveal Seed, World Size, and
+// the four generation toggles. "New" now always goes straight into what
+// used to be the advanced view -- see createFormReset -- so that
+// collapsed mode, the Advanced button, and the World Type pill row (Old
+// vs Flat; Flat has been UI-disabled for a while, see level_source.cpp)
+// are all gone from this screen. Flat itself still exists as a
+// LevelSource for anything that reaches it another way (a saved world,
+// or the "debug" seed hatch below) -- only the create-a-new-world path
+// through this screen no longer offers it.
 struct CreateScreen : Screen {
     void renderContent(MenuState& s);
     void handleInput(MenuState& s, unsigned int pressed, unsigned int held);
@@ -51,10 +61,9 @@ const char* rowLabel(int row) {
     return rowIsToggle(row) ? kGenFeatures[rowFeature(row)].label : kFieldRows[row].label;
 }
 
-enum { FOCUS_TYPE_OLD = ROW_COUNT, FOCUS_TYPE_FLAT,
-       FOCUS_SIZE_512, FOCUS_SIZE_1024, FOCUS_SIZE_INFINITE,
+enum { FOCUS_SIZE_512 = ROW_COUNT, FOCUS_SIZE_1024, FOCUS_SIZE_INFINITE,
        FOCUS_SURVIVAL, FOCUS_CREATIVE, FOCUS_CREATE,
-       FOCUS_BACK, FOCUS_ADVANCED, FOCUS_COUNT };
+       FOCUS_BACK, FOCUS_COUNT };
 
 // World size presets shown in the advanced panel. Values here are the
 // actual chunk-count sizeX/sizeZ passed to worldInitTerrain/worldListCreate
@@ -112,21 +121,17 @@ float rowHeight() {
     return ROW_LABEL_H + ROW_BOX_H + 13.0f * PX;
 }
 
-bool s_advanced = false;
-
-// Flat worlds are disabled for now. Kept as a single named constant
-// (checked from both handleInput and renderContent, hence file scope
-// rather than a local in either function) so re-enabling this later is a
-// one-line change, same shape as toggleRowUsable's per-row gate above.
-const bool kFlatDisabled = true;
-
-int  s_lastHeader = FOCUS_BACK;
-
 char* rowText(MenuState& s, int row) {
     return (row == ROW_NAME) ? s.newWorldName : s.newWorldSeed;
 }
 
-bool rowVisible(int row) { return s_advanced || (!rowIsToggle(row) && !kFieldRows[row].advancedOnly); }
+// Every field row is always visible now -- this screen no longer has a
+// collapsed/basic mode (see the header comment above CreateScreen), so
+// the old advancedOnly gate never hides anything. kFieldRows[].advancedOnly
+// stays on the struct rather than being deleted, since it costs nothing
+// to keep and documents which fields used to be advanced-only if a
+// collapsed mode ever comes back.
+bool rowVisible(int row) { (void)row; return true; }
 bool rowInLeftColumn(int row) { return !rowIsToggle(row) && row != ROW_SEED; }
 
 bool genFeaturesUsable(const MenuState& s) {
@@ -163,12 +168,6 @@ const float TOG_W   = 38.0f * PX;
 const float TOG_H   = 20.0f * PX;
 const float TOG_ROW = ROW_BOX_H + 5.0f * PX;
 
-const char* modeDescription(int gamemode) {
-    return gamemode == 1
-        ? "Easily destroy and place blocks. No damage, flying and other cool stuff."
-        : "Limited resources, you'll need tools. You may get hurt. Watch out for Monsters.";
-}
-
 void drawFieldLabel(Font& font, float x, float widgetY, const char* text) {
     fontDrawTextShadow(&font, x * UI_SCALE,
                        widgetY * UI_SCALE - 8.0f * TEXT_S - LABEL_GAP,
@@ -176,15 +175,20 @@ void drawFieldLabel(Font& font, float x, float widgetY, const char* text) {
 }
 
 struct Layout {
-    float headerH, btnH, hdrBtnY, backX, backW, advX, advW;
+    float headerH, btnH, hdrBtnY, backX, backW;
     float panelX, panelY, panelW, panelH;
     float formX, formY, formW, formH, boxW, contentH;
-    float typeY, sizeY, modeY, pillW, pillH, pill0X, pill1X;
+    float sizeY, modeY, pillW, pillH, pill0X, pill1X;
     float pillW3, pill0X3, pill1X3, pill2X3;
-    float descX, descY, descW;
+    float descX, descW;
     float createX, createY, createW, createH;
 };
 
+// One fixed layout now that the screen has no collapsed/basic mode (see
+// the header comment above CreateScreen): World Size sits where World
+// Type used to, and there is no Advanced button in the header to make
+// room for -- Back is the only header button, so the title bar can run
+// the title across the rest of its width.
 Layout layout(MenuState& s) {
     Layout L;
 
@@ -193,8 +197,6 @@ Layout layout(MenuState& s) {
     L.hdrBtnY = (L.headerH - L.btnH) / 2.0f;
     L.backW   = menuBarButtonW(s, "Back");
     L.backX   = 4.0f * MENU_PX;
-    L.advW    = menuBarButtonW(s, "Advanced");
-    L.advX    = VW - L.advW - 4.0f * MENU_PX;
 
     L.panelX = 5.0f * PX;
     L.panelY = L.headerH + 8.0f * PX;
@@ -213,7 +215,7 @@ Layout layout(MenuState& s) {
     L.pill1X = L.formX + L.pillW + 6.0f * PX;
 
     // Size row has three options, not two -- narrower pills so all three
-    // fit the same span the two-pill Type/Mode rows use (pill0X to
+    // fit the same span the two-pill Mode row uses (pill0X to
     // pill1X+pillW), rather than reusing pillW verbatim and overflowing.
     L.pillW3  = (L.pillW * 2.0f - 4.0f * PX) / 3.0f;
     L.pill0X3 = L.formX;
@@ -227,22 +229,15 @@ Layout layout(MenuState& s) {
     L.createH = 26.0f * PX;
     L.createX = L.descX;
 
-    if (s_advanced) {
-
-        L.typeY   = L.panelY + L.panelH * 0.34f;
-        L.sizeY   = L.panelY + L.panelH * 0.52f;
-        L.modeY   = L.panelY + L.panelH * 0.78f;
-        L.createY = L.modeY;
-        L.descY   = 0.0f;
-        L.formH   = L.typeY - LABEL_GAP / UI_SCALE - 4.0f * PX - L.formY;
-    } else {
-        L.typeY   = 0.0f;
-        L.sizeY   = 0.0f;
-        L.modeY   = L.panelY + L.panelH * 0.52f;
-        L.createY = L.panelY + L.panelH - L.createH - 6.0f * PX;
-        L.descY   = L.modeY;
-        L.formH   = L.modeY - LABEL_GAP / UI_SCALE - 4.0f * PX - L.formY;
-    }
+    // World Size takes the vertical slot World Type used to occupy;
+    // Game Mode keeps the last slot, with Create World! beside it in the
+    // right-hand column (createY == modeY), matching the old advanced
+    // layout's pairing rather than the old collapsed layout's separately
+    // bottom-pinned button.
+    L.sizeY   = L.panelY + L.panelH * 0.34f;
+    L.modeY   = L.panelY + L.panelH * 0.52f;
+    L.createY = L.modeY;
+    L.formH   = L.sizeY - LABEL_GAP / UI_SCALE - 4.0f * PX - L.formY;
 
     L.contentH = 0.0f;
     for (int i = 0; i < ROW_COUNT; i++)
@@ -264,72 +259,53 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
     int& sel = s.createSelected;
     if (sel < 0 || sel >= FOCUS_COUNT) sel = 0;
 
-    if (pressed & PSP_CTRL_TRIANGLE) {
-        s_advanced = !s_advanced;
-        if (!s_advanced && (sel == ROW_SEED || rowIsToggle(sel) ||
-                            sel == FOCUS_TYPE_OLD || sel == FOCUS_TYPE_FLAT ||
-                            sel == FOCUS_SIZE_512 || sel == FOCUS_SIZE_1024 ||
-                            sel == FOCUS_SIZE_INFINITE))
-            sel = ROW_NAME;
-    }
-
     const bool locked = gameModeLocked(s);
     const int  modePill = effectiveGameMode(s) ? FOCUS_CREATIVE : FOCUS_SURVIVAL;
-    const int  typePill = (s.newWorldType == WORLD_TYPE_FLAT) ? FOCUS_TYPE_FLAT : FOCUS_TYPE_OLD;
     const int  sizePill = (s.newWorldSizePreset == WORLD_SIZE_PRESET_1024) ? FOCUS_SIZE_1024
                         : (s.newWorldSizePreset == WORLD_SIZE_PRESET_INFINITE) ? FOCUS_SIZE_INFINITE
                                                                           : FOCUS_SIZE_512;
-    const bool onHeader = (sel == FOCUS_BACK || sel == FOCUS_ADVANCED);
-    const bool onType   = (sel == FOCUS_TYPE_OLD || sel == FOCUS_TYPE_FLAT);
     const bool onSize   = (sel == FOCUS_SIZE_512 || sel == FOCUS_SIZE_1024 || sel == FOCUS_SIZE_INFINITE);
     const bool onMode   = (sel == FOCUS_SURVIVAL || sel == FOCUS_CREATIVE);
 
-    const int belowType  = locked ? FOCUS_CREATE : modePill;
-    const int aboveCreate = locked ? (s_advanced ? sizePill : ROW_NAME) : modePill;
+    const int aboveCreate = locked ? sizePill : modePill;
 
     const int firstToggle = toggleStep(s, FIELD_COUNT - 1, +1);
     const bool onToggle   = (sel >= FIELD_COUNT && sel < ROW_COUNT);
 
     if (pressed & PSP_CTRL_DOWN) {
-        if (onHeader)                sel = ROW_NAME;
-        else if (sel == ROW_NAME)    sel = s_advanced ? typePill : belowType;
-        else if (sel == ROW_SEED)    sel = (firstToggle >= 0) ? firstToggle : typePill;
+        if (sel == FOCUS_BACK)       sel = ROW_NAME;
+        else if (sel == ROW_NAME)    sel = ROW_SEED;
+        else if (sel == ROW_SEED)    sel = (firstToggle >= 0) ? firstToggle : sizePill;
         else if (onToggle)           { int n = toggleStep(s, sel, +1);
-                                       sel = (n >= 0) ? n : typePill; }
-        else if (onType)             sel = sizePill;
-        else if (onSize)             sel = belowType;
+                                       sel = (n >= 0) ? n : sizePill; }
+        else if (onSize)             sel = locked ? FOCUS_CREATE : modePill;
         else if (onMode)             sel = FOCUS_CREATE;
     }
     if (pressed & PSP_CTRL_UP) {
         if (sel == FOCUS_CREATE)  sel = aboveCreate;
-        else if (onMode)          sel = s_advanced ? sizePill : ROW_NAME;
-        else if (onSize)          sel = typePill;
-        else if (onType)          sel = ROW_NAME;
+        else if (onMode)          sel = sizePill;
+        else if (onSize)          { int p = toggleStep(s, ROW_COUNT, -1);
+                                    sel = (p >= 0) ? p : ROW_SEED; }
         else if (onToggle)        { int p = toggleStep(s, sel, -1);
                                     sel = (p >= 0) ? p : ROW_SEED; }
         else if (sel == ROW_SEED) sel = ROW_NAME;
-        else if (sel == ROW_NAME) sel = s_lastHeader;
+        else if (sel == ROW_NAME) sel = FOCUS_BACK;
     }
     if (pressed & PSP_CTRL_RIGHT) {
-        if (sel == FOCUS_BACK)             sel = FOCUS_ADVANCED;
-        else if (sel == ROW_NAME && s_advanced) sel = ROW_SEED;
-        else if (sel == FOCUS_TYPE_OLD && !kFlatDisabled) { sel = FOCUS_TYPE_FLAT; s.newWorldType = WORLD_TYPE_FLAT; }
+        if (sel == ROW_NAME)                 sel = ROW_SEED;
         else if (sel == FOCUS_SIZE_512)      { sel = FOCUS_SIZE_1024; s.newWorldSizePreset = WORLD_SIZE_PRESET_1024; }
         else if (sel == FOCUS_SIZE_1024)     { sel = FOCUS_SIZE_INFINITE; s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE; }
         else if (sel == FOCUS_SURVIVAL && !locked) { sel = FOCUS_CREATIVE; s.newWorldGamemode = 1; }
         else if (sel == FOCUS_CREATIVE || (sel == FOCUS_SURVIVAL && locked)) sel = FOCUS_CREATE;
     }
     if (pressed & PSP_CTRL_LEFT) {
-        if (sel == FOCUS_ADVANCED)       sel = FOCUS_BACK;
-        else if (sel == ROW_SEED)        sel = ROW_NAME;
-        else if (onToggle)               sel = ROW_NAME;
-        else if (sel == FOCUS_TYPE_FLAT) { sel = FOCUS_TYPE_OLD; s.newWorldType = WORLD_TYPE_OLD; }
+        if (sel == ROW_SEED)        sel = ROW_NAME;
+        else if (onToggle)          sel = ROW_NAME;
         else if (sel == FOCUS_SIZE_INFINITE) { sel = FOCUS_SIZE_1024; s.newWorldSizePreset = WORLD_SIZE_PRESET_1024; }
         else if (sel == FOCUS_SIZE_1024)   { sel = FOCUS_SIZE_512;      s.newWorldSizePreset = WORLD_SIZE_PRESET_512; }
         else if (sel == FOCUS_CREATIVE && !locked) { sel = FOCUS_SURVIVAL; s.newWorldGamemode = 0; }
         else if (sel == FOCUS_CREATE)    sel = aboveCreate;
     }
-    if (sel == FOCUS_BACK || sel == FOCUS_ADVANCED) s_lastHeader = sel;
 
     if (gameModeLocked(s) && (sel == FOCUS_SURVIVAL || sel == FOCUS_CREATIVE))
         sel = FOCUS_CREATE;
@@ -343,15 +319,12 @@ void CreateScreen::handleInput(MenuState& s, unsigned int pressed, unsigned int 
         } else if (sel < ROW_COUNT) {
             const CreateRowDef& row = kFieldRows[sel];
             startOsk(row.oskTarget, row.oskPrompt, rowText(s, sel));
-        } else if (sel == FOCUS_TYPE_OLD)  { s.newWorldType = WORLD_TYPE_OLD;
-        } else if (sel == FOCUS_TYPE_FLAT) { if (!kFlatDisabled) s.newWorldType = WORLD_TYPE_FLAT;
         } else if (sel == FOCUS_SIZE_512)      { s.newWorldSizePreset = WORLD_SIZE_PRESET_512;
         } else if (sel == FOCUS_SIZE_1024)     { s.newWorldSizePreset = WORLD_SIZE_PRESET_1024;
         } else if (sel == FOCUS_SIZE_INFINITE) { s.newWorldSizePreset = WORLD_SIZE_PRESET_INFINITE;
         } else if (sel == FOCUS_SURVIVAL)  { if (!locked) s.newWorldGamemode = 0;
         } else if (sel == FOCUS_CREATIVE)  { if (!locked) s.newWorldGamemode = 1;
         } else if (sel == FOCUS_BACK)      { s.screen = SCREEN_WORLDS;
-        } else if (sel == FOCUS_ADVANCED)  { s_advanced = !s_advanced;
         } else if (sel == FOCUS_CREATE) {
             char created[64];
 
@@ -419,15 +392,10 @@ void CreateScreen::renderContent(MenuState& s) {
     sceGuDisable(GU_DEPTH_TEST);
 
     {
-        float lb = L.backX + L.backW, rb = L.advX;
-        drawMenuHeader(s, "Create a World", 0.0f, VW, L.headerH, MENU_BAR_TEXT, lb, rb - lb);
+        float lb = L.backX + L.backW;
+        drawMenuHeader(s, "Create a World", 0.0f, VW, L.headerH, MENU_BAR_TEXT, lb, VW - lb);
     }
     menuBarButton(s, L.backX, L.backW, "Back", sel == FOCUS_BACK);
-
-    guiTButton(s, L.advX, L.hdrBtnY, L.advW, L.btnH, s_advanced, MENU_BEVEL);
-
-    guiTButtonLabel(s, L.advX, L.hdrBtnY, L.advW, L.btnH, "Advanced",
-                    sel == FOCUS_ADVANCED, true, MENU_BAR_TEXT);
 
     drawNinePatch(s, GA_SS_PANEL, 3.0f, L.panelX, L.panelY, L.panelW, L.panelH, 3.0f * PX);
 
@@ -464,62 +432,38 @@ void CreateScreen::renderContent(MenuState& s) {
                  2.0f * PX * UI_SCALE, L.formH * UI_SCALE,
                  L.contentH * UI_SCALE, scroll * UI_SCALE);
 
-    if (s_advanced) {
+    drawFieldLabel(font, L.descX, L.formY + ROW_LABEL_H, rowLabel(ROW_SEED));
+    drawTextField(s, L.descX, L.formY + ROW_LABEL_H, L.boxW, ROW_BOX_H,
+                  s.newWorldSeed, kFieldRows[ROW_SEED].placeholder, sel == ROW_SEED, TEXT_S);
 
-        drawFieldLabel(font, L.descX, L.formY + ROW_LABEL_H, rowLabel(ROW_SEED));
-        drawTextField(s, L.descX, L.formY + ROW_LABEL_H, L.boxW, ROW_BOX_H,
-                      s.newWorldSeed, kFieldRows[ROW_SEED].placeholder, sel == ROW_SEED, TEXT_S);
+    {
+        float togRowY = L.formY + ROW_LABEL_H + ROW_BOX_H + 6.0f * PX;
+        for (int i = FIELD_COUNT; i < ROW_COUNT; i++, togRowY += TOG_ROW) {
+            const bool rowUsable = toggleRowUsable(s, i);
+            const bool on = rowUsable && genFeatureEnabled(s.newWorldGenMask, rowFeature(i));
 
-        {
-            float togRowY = L.formY + ROW_LABEL_H + ROW_BOX_H + 6.0f * PX;
-            for (int i = FIELD_COUNT; i < ROW_COUNT; i++, togRowY += TOG_ROW) {
-                const bool rowUsable = toggleRowUsable(s, i);
-                const bool on = rowUsable && genFeatureEnabled(s.newWorldGenMask, rowFeature(i));
-
-                fontDrawTextClipped(&font, L.descX * UI_SCALE,
-                                    (togRowY + (ROW_BOX_H - 8.0f * TEXT_S) / 2.0f) * UI_SCALE,
-                                    rowLabel(i),
-                                    !rowUsable ? GUI_DISABLED
-                                               : (sel == i ? 0xFFFFFFFFu : 0xFFE0E0E0u), TEXT_S,
-                                    (L.boxW - TOG_W - 2.0f) * UI_SCALE / TEXT_S);
-                guiOptionSwitch(s, L.descX + L.boxW - TOG_W,
-                                togRowY + (ROW_BOX_H - TOG_H) / 2.0f, TOG_W, TOG_H,
-                                on, sel == i, !rowUsable ? GUI_DISABLED : 0xFFFFFFFFu);
-            }
+            fontDrawTextClipped(&font, L.descX * UI_SCALE,
+                                (togRowY + (ROW_BOX_H - 8.0f * TEXT_S) / 2.0f) * UI_SCALE,
+                                rowLabel(i),
+                                !rowUsable ? GUI_DISABLED
+                                           : (sel == i ? 0xFFFFFFFFu : 0xFFE0E0E0u), TEXT_S,
+                                (L.boxW - TOG_W - 2.0f) * UI_SCALE / TEXT_S);
+            guiOptionSwitch(s, L.descX + L.boxW - TOG_W,
+                            togRowY + (ROW_BOX_H - TOG_H) / 2.0f, TOG_W, TOG_H,
+                            on, sel == i, !rowUsable ? GUI_DISABLED : 0xFFFFFFFFu);
         }
+    }
 
-        drawFieldLabel(font, L.formX, L.typeY, "World Type");
-        {
-            // Flat worlds are disabled for now -- shown, not hidden, same
-            // reasoning as the not-yet-available achievements in
-            // screen_achievements.cpp: hiding it would make the pill row
-            // look incomplete rather than communicating "not available
-            // yet". Only the label dims (active=false, same mechanism the
-            // Survival/Creative pills already use for gameModeLocked);
-            // the pill background keeps rendering normally since Old is
-            // still the selected/active choice either way.
-            const bool flat = (s.newWorldType == WORLD_TYPE_FLAT);
-            guiTButton(s, L.pill0X, L.typeY, L.pillW, L.pillH, !flat, BEVEL);
-            guiTButtonLabel(s, L.pill0X, L.typeY, L.pillW, L.pillH,
-                            levelSourceFor(WORLD_TYPE_OLD).label(),
-                            sel == FOCUS_TYPE_OLD, true, TEXT_S);
-            guiTButton(s, L.pill1X, L.typeY, L.pillW, L.pillH, flat, BEVEL);
-            guiTButtonLabel(s, L.pill1X, L.typeY, L.pillW, L.pillH,
-                            levelSourceFor(WORLD_TYPE_FLAT).label(),
-                            sel == FOCUS_TYPE_FLAT, !kFlatDisabled, TEXT_S);
-        }
-
-        drawFieldLabel(font, L.formX, L.sizeY, "World Size");
-        {
-            static const int kPresets[3] = { WORLD_SIZE_PRESET_512, WORLD_SIZE_PRESET_1024, WORLD_SIZE_PRESET_INFINITE };
-            static const int kFocus[3]   = { FOCUS_SIZE_512, FOCUS_SIZE_1024, FOCUS_SIZE_INFINITE };
-            const float xs[3] = { L.pill0X3, L.pill1X3, L.pill2X3 };
-            for (int i = 0; i < 3; i++) {
-                const bool active = (s.newWorldSizePreset == kPresets[i]);
-                guiTButton(s, xs[i], L.sizeY, L.pillW3, L.pillH, active, BEVEL);
-                guiTButtonLabel(s, xs[i], L.sizeY, L.pillW3, L.pillH,
-                                sizePresetLabel(kPresets[i]), sel == kFocus[i], true, TEXT_S);
-            }
+    drawFieldLabel(font, L.formX, L.sizeY, "World Size");
+    {
+        static const int kPresets[3] = { WORLD_SIZE_PRESET_512, WORLD_SIZE_PRESET_1024, WORLD_SIZE_PRESET_INFINITE };
+        static const int kFocus[3]   = { FOCUS_SIZE_512, FOCUS_SIZE_1024, FOCUS_SIZE_INFINITE };
+        const float xs[3] = { L.pill0X3, L.pill1X3, L.pill2X3 };
+        for (int i = 0; i < 3; i++) {
+            const bool active = (s.newWorldSizePreset == kPresets[i]);
+            guiTButton(s, xs[i], L.sizeY, L.pillW3, L.pillH, active, BEVEL);
+            guiTButtonLabel(s, xs[i], L.sizeY, L.pillW3, L.pillH,
+                            sizePresetLabel(kPresets[i]), sel == kFocus[i], true, TEXT_S);
         }
     }
 
@@ -535,16 +479,27 @@ void CreateScreen::renderContent(MenuState& s) {
                         sel == FOCUS_CREATIVE, !locked, TEXT_S);
     }
 
-    if (!s_advanced)
-        fontDrawTextWrapped(&font, L.descX * UI_SCALE, L.descY * UI_SCALE,
-                            modeDescription(mode), 0xFFFFFFFFu, TEXT_S,
-                            L.descW * UI_SCALE / TEXT_S);
+    // Mode description text (modeDescription) used to show here in the
+    // old collapsed/basic layout, in the space beside the Mode row. There
+    // is no collapsed layout anymore -- the screen is always fully
+    // expanded -- so that space is simply left as breathing room next to
+    // the Create World! button instead of being filled with body text
+    // most players only needed to read once.
 
     guiTButton(s, L.createX, L.createY, L.createW, L.createH, sel == FOCUS_CREATE, BEVEL);
     guiTButtonLabel(s, L.createX, L.createY, L.createW, L.createH, "Create World!",
                     sel == FOCUS_CREATE, true, TEXT_S);
 }
 
+// Called from both of screen_worlds.cpp's entry points into this screen
+// ("New" on the title-adjacent button and the "+ New World" list row) --
+// the single choke point for resetting the form, which is also why this
+// is where the screen's mode lives: it used to open collapsed, with a
+// separate "Advanced" button to reveal Seed/World Size/generation
+// toggles. That collapsed mode is gone -- there is only the one, fully
+// expanded layout now (see CreateScreen::renderContent/layout), so
+// there's nothing left here to force into an "advanced" state; every
+// field this screen has is simply always on screen.
 void createFormReset(MenuState& s) {
     s.createSelected = 0;
 

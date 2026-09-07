@@ -2,10 +2,10 @@
 
 const GenFeatureDef kGenFeatures[GEN_FEATURE_COUNT] = {
 
-    { "Generate Caves", false },
-    { "Generate Villages", true },
-    { "Generate Dungeons", true },
-    { "Generate Nether Fortresses", true },
+    { "Caves", true },
+    { "Villages", true },
+    { "Dungeons", true },
+    { "Nether Fortresses", true },
 };
 
 int genFeaturesDefaultMask() {
