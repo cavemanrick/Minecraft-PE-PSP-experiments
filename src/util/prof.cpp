@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include "platform/path.h"
 #include "platform/audio/music.h"
-#include "platform/audio/extended_sound_fx.h"
 
 extern bool g_worldBuilt;
 
@@ -26,6 +25,24 @@ static unsigned int s_maxFrame;
 static unsigned int s_maxList;
 
 static unsigned int s_minList;
+
+// Underruns are cumulative, so the interesting figure is how many landed
+// in *this* second -- the cumulative total alone means eyeballing
+// differences down the column to find the spike.
+static unsigned int s_lastBgmUnder;
+
+// Flushing to the Memory Stick every second would be self-defeating here:
+// the underrun counter exists partly to catch music stalling on Memory
+// Stick contention, and an fflush is exactly that kind of contention. So
+// the report is buffered and pushed out every PROF_FLUSH_LINES seconds
+// instead. The cost is losing up to that many seconds of report if the
+// PSP is powered off or crashes rather than exited cleanly; set it to 1
+// to get the old behaviour back when that matters more.
+#ifndef PROF_FLUSH_LINES
+#define PROF_FLUSH_LINES 15
+#endif
+static char s_fileBuf[8192];
+static int  s_sinceFlush;
 
 void profAdd(int slot, int n) { s_cnt[slot] += (unsigned int)n; }
 
@@ -75,14 +92,20 @@ void profFrameEnd(void) {
         s_fp = fopen(assetPath("prof.txt"), "w");
 
         if (!s_fp) s_fp = fopen("ms0:/prof.txt", "w");
-        if (s_fp) g_profLines = 0;
+        if (s_fp) {
+            // Large explicit buffer so a report line doesn't dribble out
+            // in whatever small chunks newlib picked by default.
+            setvbuf(s_fp, s_fileBuf, _IOFBF, sizeof(s_fileBuf));
+            g_profLines = 0;
+        }
     }
     // Cumulative since boot, deliberately NOT divided by frame count:
     // underruns are rare discrete events, and what matters is whether the
     // total is climbing and which second it climbed in.
-    unsigned int bgmUnder = 0, bgmBlocks = 0, fxUnder = 0, fxBlocks = 0;
+    unsigned int bgmUnder = 0, bgmBlocks = 0;
     musicStats(&bgmUnder, &bgmBlocks);
-    extendedSoundFXStats(&fxUnder, &fxBlocks);
+    unsigned int bgmUnderDelta = bgmUnder - s_lastBgmUnder;
+    s_lastBgmUnder = bgmUnder;
 
     FILE* fp = s_fp;
     if (fp) {
@@ -91,7 +114,7 @@ void profFrameEnd(void) {
                     "world %u (stream %u [gen %u dec %u lit %u disk %u evict %u misc %u] light %u rebuild %u [scan %u build %u (emit %u pack %u [alloc %u conv %u])] cull %u) "
                     "sky %u ent %u water %u part %u hud %u gesync %u vblank %u | other %d "
                     "| n(part %.0f sect %.1f pend %.0f strm %.2f live %.2f fb %u vert %.0f mark %.1f)"
-                    " | bgm(under %u / %u blk) extfx(under %u / %u blk)\n",
+                    " | bgm(under %u +%u / %u blk)\n",
                 f * 1000000.0f / (float)elapsed, frame, s_maxFrame, s_maxList, s_minList,
                 avg[PROF_TICK], avg[PROF_TPLAYER], avg[PROF_TWORLD],
                 avg[PROF_TRAND], avg[PROF_TPEND], avg[PROF_TENT],
@@ -107,8 +130,8 @@ void profFrameEnd(void) {
                 s_cnt[PROFC_PARTICLES] / f, s_cnt[PROFC_SECTIONS] / f, s_cnt[PROFC_PENDLIST] / f,
                 s_cnt[PROFC_STREAMIN] / f, s_cnt[PROFC_DRAWLIVE] / f, g_meshFallbacks,
                 s_cnt[PROFC_PACKVERTS] / f, s_cnt[PROFC_MARKED] / f,
-                bgmUnder, bgmBlocks, fxUnder, fxBlocks);
-        fflush(fp);
+                bgmUnder, bgmUnderDelta, bgmBlocks);
+        if (++s_sinceFlush >= PROF_FLUSH_LINES) { fflush(fp); s_sinceFlush = 0; }
     }
 
     for (int i = 0; i < PROF_N; i++) s_acc[i] = 0;

@@ -85,8 +85,10 @@ static unsigned int ringFilled(void) { return g_ringWritten - g_ringRead; }
 // Both threads used to spin: the reader polled sceKernelDelayThread(3000)
 // (~333 wakeups/sec) whenever the ring was full, and the output thread
 // pushed silence blocks through the hardware forever whether or not
-// anything was playing. Between music and extended_sound_fx that was
-// several hundred context switches per second to produce nothing.
+// anything was playing -- several hundred context switches per second to
+// produce nothing. (A second copy of this engine used to run alongside it
+// for one-shot stingers, doubling that cost; it has since been folded into
+// sound.cpp's voice mixer and deleted.)
 //
 // Semaphores rather than sceKernelSleepThread/sceKernelWakeupThread: the
 // PSP's sleep/wakeup pair is documented as counted (hence

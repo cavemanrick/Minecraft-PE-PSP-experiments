@@ -37,11 +37,3 @@ void hudChatMessage(const char* msg);
 // tutorial system to reuse rather than removed.
 void hudAchievementToast(const char* name);
 void hudKeyHintToast(const char* button, const char* action);
-
-// A single witty line announcing a biome the player just entered (e.g.
-// "Welcome to the jungle"). Called from gamemode.cpp's existing periodic
-// biome poll -- see the comment at that call site for how "just entered"
-// is detected. line should be a complete sentence/phrase; it draws as
-// the toast's only line, styled distinctly from achievements/key-hints
-// (see toastDraw in hud.cpp).
-void hudBiomeToast(const char* line);

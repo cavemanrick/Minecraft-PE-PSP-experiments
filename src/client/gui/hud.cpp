@@ -18,7 +18,7 @@
 #include <cstring>
 #include "gpu/item_icons.h"
 #include "gpu/spawn_egg_colors.h"
-#include "platform/audio/extended_sound_fx.h"
+#include "platform/audio/sound.h"
 #include "world/achievement/achievement.h"
 
 extern bool g_tradeOpen;
@@ -149,16 +149,19 @@ extern bool    g_haveGuiBlocks;
 // TOAST_KEYHINT plumbing is a reasonable starting point for that) is
 // planned separately.
 //
-// TOAST_ACHIEVEMENT and TOAST_BIOME are reachable; TOAST_KEYHINT and its
-// queue/draw/dedup handling are left in place rather than deleted, both
-// because they cost nothing sitting idle and because they're the shape a
-// future "special hint" would reuse.
-enum ToastKind { TOAST_ACHIEVEMENT, TOAST_KEYHINT, TOAST_BIOME };
+// TOAST_ACHIEVEMENT is the only kind actually reachable right now.
+// TOAST_KEYHINT and its queue/draw/dedup handling are left in place
+// rather than deleted, both because they cost nothing sitting idle and
+// because they're the shape a future "special hint" (e.g. discovering a
+// new structure) would reuse. A TOAST_BIOME kind existed briefly for a
+// biome-crossing announcement ("Welcome to the jungle") but was removed
+// after testing -- it read as noise rather than a useful notification.
+enum ToastKind { TOAST_ACHIEVEMENT, TOAST_KEYHINT };
 
 struct ToastMsg {
     ToastKind kind;
-    char      line1[40]; // achievement: "Achievement Unlocked!" / key-hint: the button / biome: the witty line itself
-    char      line2[40]; // achievement: the achievement name    / key-hint: the action  / biome: unused, always empty
+    char      line1[40]; // achievement: "Achievement Unlocked!" / key-hint: the button, e.g. "Cross"
+    char      line2[40]; // achievement: the achievement name    / key-hint: the action, e.g. "Take"
 };
 
 #define TOAST_QUEUE_MAX 4
@@ -167,18 +170,13 @@ static int      s_toastQueueHead = 0, s_toastQueueLen = 0;
 
 #define ACHV_TOAST_SHOW_S    3.0f
 #define KEYHINT_TOAST_SHOW_S 1.6f
-#define BIOME_TOAST_SHOW_S   2.5f
 static ToastKind s_toastActiveKind = TOAST_ACHIEVEMENT;
 static char      s_toastLine1[40] = "";
 static char      s_toastLine2[40] = "";
 static float     s_toastStart = -1000.0f;
 
 static float toastShowDuration(ToastKind k) {
-    switch (k) {
-        case TOAST_ACHIEVEMENT: return ACHV_TOAST_SHOW_S;
-        case TOAST_BIOME:       return BIOME_TOAST_SHOW_S;
-        default:                return KEYHINT_TOAST_SHOW_S;
-    }
+    return (k == TOAST_ACHIEVEMENT) ? ACHV_TOAST_SHOW_S : KEYHINT_TOAST_SHOW_S;
 }
 
 static void toastPush(ToastKind kind, const char* line1, const char* line2) {
@@ -224,17 +222,6 @@ void hudKeyHintToast(const char* button, const char* action) {
     toastPush(TOAST_KEYHINT, button, action);
 }
 
-// A single witty line announcing the biome the player just walked into
-// (see achvOnBiomeEntered's call site in gamemode.cpp for where the
-// actual crossing is detected). Reuses the two-line ToastMsg slot with
-// line2 left empty rather than adding a separate one-line message type --
-// toastDraw already treats an empty line2 as zero-width and simply
-// doesn't draw it, so the box sizes itself to line1 alone with no special
-// casing needed there.
-void hudBiomeToast(const char* line) {
-    toastPush(TOAST_BIOME, line, "");
-}
-
 // Ticking and drawing are separate calls (see the two calls near the
 // chat-log block further down in hotbarDraw): tick always runs so a
 // queued notification's timer keeps advancing even while an overlay is
@@ -255,7 +242,24 @@ static void toastTick() {
             s_toastStart = now;
 
             if (m.kind == TOAST_ACHIEVEMENT)
-                extendedSoundFXPlay("data/sound/achievement.raw"); // streamed from disk, not the RAM-resident sound pack
+                // Was extendedSoundFXPlay("data/sound/achievement.raw"),
+                // which streamed a separate file through a whole second
+                // copy of the BGM engine -- its own hardware channel, two
+                // threads and a 24KB ring, permanently resident, to play a
+                // 1.2s chime. The sample is already in the RAM-resident
+                // sound pack (entry "achievement", first in the index of
+                // both sounds.bin and sounds_lo.bin), so this plays it
+                // straight out of memory: no disk I/O at trigger time, no
+                // ring latency before it starts, and it runs on the SFX
+                // mixer at priority 0x12, above the main thread, where it
+                // cannot be starved. soundPlayUi rather than soundPlay so
+                // a busy moment can't drop it -- see UI_VOICE in sound.cpp.
+                //
+                // Side effect worth knowing: this now obeys the Sound
+                // Volume slider. extendedSoundFXSetVolume() was never
+                // called from anywhere, so the streamed version always
+                // played at a fixed 1.0 regardless of the audio options.
+                soundPlayUi("achievement", 1.0f);
         } else {
             s_toastStart = -1000.0f;
         }
@@ -283,9 +287,9 @@ static void toastDraw(MenuState& s) {
     float dur = toastShowDuration(s_toastActiveKind);
     if (age > dur) return;
 
-    // Quick fade in, hold, quick fade out -- 0.3s for the achievement
-    // banner's longer hold, 0.2s for the shorter key-hint/biome toasts so
-    // they still get a visible hold instead of being almost all fade.
+    // Quick fade in, hold, quick fade out -- 0.3s/0.2s tails so the short
+    // key-hint toasts still get a visible hold instead of being almost
+    // all fade.
     float fadeTail = (s_toastActiveKind == TOAST_ACHIEVEMENT) ? 0.3f : 0.2f;
     float alphaF = 1.0f;
     if (age < fadeTail) alphaF = age / fadeTail;
@@ -293,16 +297,7 @@ static void toastDraw(MenuState& s) {
     if (alphaF < 0.0f) alphaF = 0.0f; if (alphaF > 1.0f) alphaF = 1.0f;
     int alpha = (int)(255.0f * alphaF);
 
-    // Gold for achievements, cyan for key-hints (unreachable right now --
-    // see the ToastKind comment above), a soft green for biome toasts so
-    // the three read as distinct categories of notification at a glance
-    // rather than all looking like the same generic popup.
-    unsigned int titleRGB;
-    switch (s_toastActiveKind) {
-        case TOAST_ACHIEVEMENT: titleRGB = 0x00FFD700u; break;
-        case TOAST_BIOME:       titleRGB = 0x0090EE90u; break;
-        default:                titleRGB = 0x00A0FFFFu; break;
-    }
+    bool isAchv = (s_toastActiveKind == TOAST_ACHIEVEMENT);
     float tw1 = fontTextWidth(&s.font, s_toastLine1) * TOAST_S;
     float tw2 = fontTextWidth(&s.font, s_toastLine2) * TOAST_S;
     float boxW = (tw1 > tw2 ? tw1 : tw2) + 16.0f * TOAST_S;
@@ -311,7 +306,7 @@ static void toastDraw(MenuState& s) {
     float boxY = TOAST_MARGIN;
 
     guiFill(boxX, boxY, boxW, boxH, (unsigned int)((alpha / 2) << 24));
-    unsigned int col1 = titleRGB | ((unsigned int)alpha << 24);
+    unsigned int col1 = (isAchv ? 0x00FFD700u : 0x00A0FFFFu) | ((unsigned int)alpha << 24);
     unsigned int col2 = 0x00FFFFFFu | ((unsigned int)alpha << 24);
     fontDrawTextShadow(&s.font, boxX + (boxW - tw1) / 2.0f, boxY + 2.0f * TOAST_S,
                        s_toastLine1, col1, TOAST_S);

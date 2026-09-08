@@ -132,8 +132,18 @@ int emitCross(ChunkVertex* out, int n, int gx, int y, int gz, unsigned char id,
 
     unsigned int color = mulColor(bright, tint);
 
-    float x0 = gx + 0.05f, x1 = gx + 0.95f;
-    float z0 = gz + 0.05f, z1 = gz + 0.95f;
+    // Bamboo is a thin cane, not a leafy plant filling the block -- the
+    // standard 0.05..0.95 cross span (tallgrass/reeds/saplings) reads as a
+    // solid slab once textured with bamboo's fully-opaque stem texture,
+    // which has no transparent margin to fake thinness the way tallgrass's
+    // cutout does. Narrow the quad itself instead: half-width 0.13 puts
+    // each plane about 2px thick out of 16, close to real bamboo's ~2-3px
+    // stalk width. UVs are unchanged -- the full texture still maps onto
+    // the narrower quad, it just occupies less world space, so nothing is
+    // stretched or cropped, just made visually thinner.
+    float halfWidth = (id == BLOCK_BAMBOO) ? 0.13f : 0.45f;
+    float x0 = gx + 0.5f - halfWidth, x1 = gx + 0.5f + halfWidth;
+    float z0 = gz + 0.5f - halfWidth, z1 = gz + 0.5f + halfWidth;
     float yb = (float)y, yt = (float)y + 1.0f;
     const float UV[4][2] = { {u0, v0}, {u0, v1}, {u1, v1}, {u1, v0} };
 

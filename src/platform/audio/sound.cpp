@@ -13,6 +13,20 @@
 #define SAMPLE_COUNT   1024
 #define MAX_VOICES       16
 
+// The last voice is not handed out by ordinary soundPlay() calls. It
+// exists so notification sounds routed through soundPlayUi() always have
+// somewhere to go.
+//
+// This matters because the achievement sting used to own an entire
+// dedicated hardware channel (the extended_sound_fx streaming subsystem)
+// and therefore could never be dropped. Folding it into this shared pool
+// without a reservation would have made it droppable for the first time,
+// and precisely in the moments it's most likely to fire -- mining a
+// diamond with mobs nearby, where a burst of near-simultaneous sounds can
+// plausibly occupy every slot. It's also the longest sample in the pack
+// at ~1.2s, so it holds a slot far longer than a footstep does.
+#define UI_VOICE (MAX_VOICES - 1)
+
 #define NAME_LEN         24
 #define PACK_MAGIC 0x4753434DU
 
@@ -223,7 +237,7 @@ float soundAttenuate(float distSq, float volume) {
     return v > 1.0f ? 1.0f : v;
 }
 
-void soundPlay(const char* name, float volume, float pitch) {
+static void soundPlayInternal(const char* name, float volume, float pitch, bool ui) {
     if (g_channel < 0 || !name || !name[0] || g_master <= 0.0f) return;
     if (volume <= 0.0f) return;
 
@@ -238,10 +252,14 @@ void soundPlay(const char* name, float volume, float pitch) {
         variants++;
     const Entry* e = &g_index[first + (variants > 1 ? rand() % variants : 0)];
 
+    // Ordinary sounds may only take slots below UI_VOICE. UI sounds prefer
+    // a free ordinary slot -- no reason to burn the reserved one when the
+    // pool isn't busy -- and fall back to UI_VOICE, stealing it if need be.
     Voice* s = 0;
-    for (int v = 0; v < MAX_VOICES; v++) {
+    for (int v = 0; v < UI_VOICE; v++) {
         if (!g_voices[v].playing) { s = &g_voices[v]; break; }
     }
+    if (!s && ui) s = &g_voices[UI_VOICE];   // free, or stolen from an older UI sound
     if (!s) {
         if (g_voiceSema >= 0) sceKernelSignalSema(g_voiceSema, 1);
         return;
@@ -259,4 +277,12 @@ void soundPlay(const char* name, float volume, float pitch) {
     s->playing    = 1;
 
     if (g_voiceSema >= 0) sceKernelSignalSema(g_voiceSema, 1);
+}
+
+void soundPlay(const char* name, float volume, float pitch) {
+    soundPlayInternal(name, volume, pitch, false);
+}
+
+void soundPlayUi(const char* name, float volume) {
+    soundPlayInternal(name, volume, 1.0f, true);
 }

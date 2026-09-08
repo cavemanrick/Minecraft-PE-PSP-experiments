@@ -58,10 +58,13 @@ static int pauseButtonCount() {
 // comfortably on screen.
 //
 // Left column gets the extra button when the count is odd, same
-// convention as optionColumnSplit in screen_options.cpp and the create-
-// world toggle grid in screen_create.cpp, so this stays correct
-// automatically if a button is ever added or removed rather than
-// depending on a hand-picked split index that could go stale.
+// convention as the create-world toggle grid in screen_create.cpp, so
+// this stays correct automatically if a button is ever added or removed
+// rather than depending on a hand-picked split index that could go
+// stale. (screen_options.cpp used the same convention for a two-column
+// options layout at one point, but that screen was reverted back to a
+// single scrolling column -- this pause menu was the only one of the two
+// meant to change.)
 static int pauseColumnSplit() {
     return (pauseButtonCount() + 1) / 2;
 }

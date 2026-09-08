@@ -15,19 +15,8 @@
 #include "gpu/font.h"
 #include "platform/path.h"
 #include "util/prof.h"
-#include "platform/time.h"
-
-// Audio underrun logging. PROF builds get these numbers in prof.txt, but
-// PROF is off by default and the whole point of the counter is to be
-// readable on an ordinary build -- on PPSSPP this lands in the log window.
-// Silent unless the count actually moves, so an underrun-free run prints
-// nothing at all. Set to 0 to compile out.
-#ifndef AUDIO_UNDERRUN_LOG
-#define AUDIO_UNDERRUN_LOG 1
-#endif
 #include "platform/audio/sound.h"
 #include "platform/audio/music.h"
-#include "platform/audio/extended_sound_fx.h"
 #include "world/level/storage/worldlist.h"
 #include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
@@ -152,7 +141,6 @@ int main(int argc, char* argv[]) {
     srand((unsigned int)sceKernelGetSystemTimeWide());
     soundInit();
     musicInit();
-    extendedSoundFXInit();
     optionsLoad();
     achievementsInit();
 
@@ -323,24 +311,6 @@ int main(int argc, char* argv[]) {
         // title. Every non-gameplay screen is menu music now.
         musicUpdate(s.screen != SCREEN_GAME,
                     s.screen == SCREEN_GAME && g_worldBuilt);
-
-#if AUDIO_UNDERRUN_LOG
-        {
-            static float        s_nextAudioLog = 0.0f;
-            static unsigned int s_lastUnder    = 0;
-            float nowAudio = nowSeconds();
-            if (nowAudio >= s_nextAudioLog) {
-                s_nextAudioLog = nowAudio + 10.0f;
-                unsigned int under = 0, blocks = 0;
-                musicStats(&under, &blocks);
-                if (under != s_lastUnder) {
-                    printf("[music] underruns %u (+%u in last 10s) / %u blocks\n",
-                           under, under - s_lastUnder, blocks);
-                    s_lastUnder = under;
-                }
-            }
-        }
-#endif
 
         if (pressed && (screenBefore != SCREEN_GAME || g_optionsOpen || g_achievementsOpen || g_controlsOpen) &&
             (!navOnly || menuSelectionSig(s) != sigBefore))

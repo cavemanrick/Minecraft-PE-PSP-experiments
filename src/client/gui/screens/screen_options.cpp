@@ -261,39 +261,9 @@ static const float kCatIconUV[OPT_CATEGORIES][2] = {
 
 static const float kOptRowH    = 14.0f;
 static const float kOptHeaderH = 9.0f;
-
-// Two-column layout: rows [0, split) draw in the left column, [split,
-// rowCount) in the right, each column stacking its own group headers
-// independently. Splitting a category's row count in half rather than
-// hand-placing a split point per category keeps this correct
-// automatically if rows are ever added or removed -- the alternative
-// (a fixed per-category split index) would silently go stale the next
-// time someone edits g_optionRows without also updating a matching
-// split table elsewhere in this file.
-//
-// This was a single scrolling column before: on a 10-row category like
-// Graphics the content ran taller than the pane by about half the pane's
-// own height, so most of the list -- typically Mipmapping and Hide GUI
-// -- was hidden below the fold, several presses away, until a fifth
-// toggle or another header pushed it further still. Splitting into two
-// columns roughly halves the tallest category's content height, which
-// eliminates scrolling entirely at the current row counts and leaves
-// headroom for a couple more rows before it would recur.
-static int optionColumnSplit(int category) {
-    return (g_optionRowCount[category] + 1) / 2; // left column gets the extra row when odd
-}
-static bool optionRowInRightColumn(int category, int row) {
-    return row >= optionColumnSplit(category);
-}
-
-// y0 is the top of whichever column `row` is in -- both columns start
-// level with each other at the top of the pane, so the caller always
-// passes the same y0 regardless of column.
 static float optionRowY(int category, int row, float y0) {
-    int split = optionColumnSplit(category);
-    int colStart = optionRowInRightColumn(category, row) ? split : 0;
     float y = y0;
-    for (int r = colStart; r < row; r++) {
+    for (int r = 0; r < row; r++) {
         if (g_optionRows[category][r].group) y += kOptHeaderH;
         y += kOptRowH;
     }
@@ -301,18 +271,13 @@ static float optionRowY(int category, int row, float y0) {
     return y;
 }
 
-// Height of the taller of the two columns -- that's what the pane and
-// its scrollbar need to accommodate, not the sum of both (they sit side
-// by side, not stacked).
 static float optionPaneHeight(int category) {
-    int split = optionColumnSplit(category);
-    int rowCount = g_optionRowCount[category];
-    float hLeft = 0.0f, hRight = 0.0f;
-    for (int r = 0; r < rowCount; r++) {
-        float rh = kOptRowH + (g_optionRows[category][r].group ? kOptHeaderH : 0.0f);
-        if (r < split) hLeft += rh; else hRight += rh;
+    float h = 0.0f;
+    for (int r = 0; r < g_optionRowCount[category]; r++) {
+        if (g_optionRows[category][r].group) h += kOptHeaderH;
+        h += kOptRowH;
     }
-    return (hLeft > hRight) ? hLeft : hRight;
+    return h;
 }
 
 static int rowValueCount(int category, int row) {
@@ -435,17 +400,8 @@ void OptionsScreen::renderContent(MenuState& s) {
         }
 
         int rowCount = g_optionRowCount[optCategory];
-        int split = optionColumnSplit(optCategory);
         float itemsX = OPT_CAT_BTN + 20.0f;
-        float itemsFullW = VW - itemsX - 6.0f;
-
-        // Two columns side by side instead of one long scrolling list --
-        // see the comment above optionColumnSplit for why. colGap is the
-        // gutter between them; each column gets half of what's left.
-        const float colGap = 6.0f;
-        float itemsW = (itemsFullW - colGap) / 2.0f;
-        float itemsX2 = itemsX + itemsW + colGap;
-
+        float itemsW = VW - itemsX - 6.0f;
         float rowH = kOptRowH;
         float paneY0 = barBtnH + 3.0f;
 
@@ -472,12 +428,8 @@ void OptionsScreen::renderContent(MenuState& s) {
             float rY = optionRowY(optCategory, r, rowY0);
             if (rY > paneY0 + paneH || rY + rowH < paneY0 - kOptHeaderH) continue;
 
-            bool rightCol = optionRowInRightColumn(optCategory, r);
-            float rX = rightCol ? itemsX2 : itemsX;
-            float rW = itemsW;
-
             if (row.group)
-                fontDrawTextShadow(&font, (rX + 2.0f) * UI_SCALE, (rY - kOptHeaderH + 2.0f) * UI_SCALE,
+                fontDrawTextShadow(&font, (itemsX + 2.0f) * UI_SCALE, (rY - kOptHeaderH + 2.0f) * UI_SCALE,
                                    row.group, 0xFFFFFFFFu, UI_SCALE);
             bool rowHovered = (optFocus == 1 && optItemHighlight == r);
             bool rowDisabled = optionRowDisabled(optCategory, r);
@@ -485,15 +437,9 @@ void OptionsScreen::renderContent(MenuState& s) {
             unsigned int labelCol = rowDisabled ? 0xFF707070u : (rowHovered ? 0xFFFFFFFFu : 0xFFBBBBBBu);
             unsigned int togTint  = rowDisabled ? 0xFF707070u : WHITE;
 
-            const float kWidgetMargin = 4.0f;
+            const float kWidgetMargin = 6.0f;
             const float togW = 26.6f, togH = 14.0f;
-            // Sliders were sized for a full-width single column (VW ~240
-            // wide items area). Halved into two ~92px-wide columns, a
-            // 60px slider would eat almost the whole column and leave no
-            // room for its label -- shrunk to fit a column comfortably
-            // while keeping the same knob/track drawing code, which
-            // scales off sliderW rather than a hardcoded pixel count.
-            const float sliderW = 44.0f, sliderH = 20.0f;
+            const float sliderW = 60.0f, sliderH = 20.0f;
             bool isBool = optionRowIsBoolean(row);
             int  nVals  = rowValueCount(optCategory, r);
 
@@ -507,12 +453,12 @@ void OptionsScreen::renderContent(MenuState& s) {
                     valTxt = row.values[valIdx];
                 }
             }
-            float widgetX  = rX + rW - (isBool ? togW : sliderW) - kWidgetMargin;
+            float widgetX  = itemsX + itemsW - (isBool ? togW : sliderW) - kWidgetMargin;
             float valW     = valTxt ? fontTextWidth(&font, valTxt) : 0.0f;
-            float labelMax = (widgetX - rX) - (valTxt ? valW + 6.0f : 4.0f);
+            float labelMax = (widgetX - itemsX) - (valTxt ? valW + 8.0f : 4.0f);
             if (labelMax < 8.0f) labelMax = 8.0f;
 
-            fontDrawTextClipped(&font, rX * UI_SCALE, (rY + (rowH - 8.0f) / 2.0f) * UI_SCALE,
+            fontDrawTextClipped(&font, itemsX * UI_SCALE, (rY + (rowH - 8.0f) / 2.0f) * UI_SCALE,
                                 row.label, labelCol, UI_SCALE, labelMax);
 
             if (isBool) {
@@ -541,13 +487,8 @@ void OptionsScreen::renderContent(MenuState& s) {
                        11.0f * UI_SCALE, 17.0f * UI_SCALE, 225.0f, 125.0f,
                        GA_SS_SLIDER_KNOB_X, GA_SS_SLIDER_KNOB_Y, 11.0f, 17.0f, WHITE);
 
-                // Value text used to draw to the left of the slider (it
-                // has room to the right of a full-width row). In a
-                // half-width column there usually isn't space to the
-                // left either, so it now draws to the right of the
-                // slider instead, inside the same column.
                 if (valTxt)
-                    fontDrawTextShadow(&font, (sliderX + sliderW + 3.0f) * UI_SCALE,
+                    fontDrawTextShadow(&font, (sliderX - 4.0f) * UI_SCALE - valW * UI_SCALE,
                                        (rY + (rowH - 8.0f) / 2.0f) * UI_SCALE, valTxt,
                                        rowHovered ? 0xFFFFFFFFu : 0xFFBBBBBBu, UI_SCALE);
             }

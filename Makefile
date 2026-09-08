@@ -59,7 +59,6 @@ OBJS = \
 	src/platform/malloc_lock.o \
 	src/platform/audio/sound.o \
 	src/platform/audio/music.o \
-	src/platform/audio/extended_sound_fx.o \
 	src/world/level/storage/external_servers.o \
 	src/world/level/storage/worldlist.o \
 	src/world/level/storage/region_file.o \
@@ -219,7 +218,17 @@ INCDIR = src
 # grew by 64KB once and every object that wasn't touched still had the old
 # offsets). -MP adds a dummy rule per header so a DELETED header doesn't wedge
 # make with "no rule to make target".
-CFLAGS = -O2 -G0 -Wall -MMD -MP
+# Profiler. Off by default; `make PROF=1` builds the instrumented EBOOT,
+# which writes a one-line-per-second report to prof.txt next to the EBOOT
+# (falling back to ms0:/prof.txt if that directory isn't writable). The
+# instrumentation itself compiles to nothing when PROF=0 -- see prof.h --
+# so a normal build is unaffected.
+#
+# Changing PROF changes CFLAGS, so switch it with a clean build:
+#   make clean && make PROF=1
+PROF ?= 0
+
+CFLAGS = -O2 -G0 -Wall -MMD -MP -DPROF=$(PROF)
 CXXFLAGS = $(CFLAGS) -fno-exceptions -fno-rtti
 ASFLAGS = $(CFLAGS)
 
