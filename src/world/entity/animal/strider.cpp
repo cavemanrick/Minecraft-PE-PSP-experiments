@@ -3,12 +3,15 @@
 #include "world/entity/local_player.h"
 #include "world/entity/entity_types.h"
 #include "world/level/level.h"
+#include "world/level/world.h"
 #include "world/level/chunk/chunk.h"
 #include "world/level/levelgen/nether_gen.h"
 #include "world/item/item.h"
 #include "world/inventory/inventory.h"
 #include "nbt/compound_tag.h"
 #include <cmath>
+
+extern World g_world;
 
 Strider::Strider(Level* level)
 : Mob(level), rider(0), saddled(false), riderStrafe(0), riderForward(0), lavaSnapTimer(0),
