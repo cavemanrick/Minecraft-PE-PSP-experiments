@@ -158,7 +158,15 @@ void Raft::travel(float xs, float yf) {
 
     float speed = rider ? 0.10f : 0.0f;
     float rad = yRot * (float)M_PI / 180.0f;
-    xd += -sinf(rad) * yf * speed * 0.1f;
+    // Was -sinf(rad) -- inverted forward/back relative to every other
+    // mob's movement convention (compare Mob::mobMoveRelative, which all
+    // land mobs including Strider go through: xd += yf*sin, zd += yf*cos
+    // for forward). That flipped sign meant pushing forward drove the
+    // raft backward. Raft doesn't route through mobMoveRelative (it needs
+    // its own yaw-steering-via-xs behavior instead of holonomic strafe),
+    // so this hand-rolled version has to match that sign convention by
+    // hand instead of inheriting it for free.
+    xd += sinf(rad) * yf * speed * 0.1f;
     zd += cosf(rad) * yf * speed * 0.1f;
 
     move(xd, yd, zd);

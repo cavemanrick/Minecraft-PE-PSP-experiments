@@ -141,7 +141,15 @@ int emitCross(ChunkVertex* out, int n, int gx, int y, int gz, unsigned char id,
     // stalk width. UVs are unchanged -- the full texture still maps onto
     // the narrower quad, it just occupies less world space, so nothing is
     // stretched or cropped, just made visually thinner.
-    float halfWidth = (id == BLOCK_BAMBOO) ? 0.13f : 0.45f;
+    //
+    // The leafy tip (BAMBOO_LEAFY, see chunk.h) is a different texture
+    // with its own transparent cutout margin -- unlike the stem it doesn't
+    // need the geometry itself narrowed to read as thin, and squeezing it
+    // into the stem's 0.13 half-width clips the leaf sprigs down to the
+    // same sliver as the cane. Give it a wider footprint instead, fuller
+    // than the stem but still short of the old full-block 0.45 slab width.
+    float halfWidth = 0.45f;
+    if (id == BLOCK_BAMBOO) halfWidth = (data & BAMBOO_LEAFY) ? 0.32f : 0.13f;
     float x0 = gx + 0.5f - halfWidth, x1 = gx + 0.5f + halfWidth;
     float z0 = gz + 0.5f - halfWidth, z1 = gz + 0.5f + halfWidth;
     float yb = (float)y, yt = (float)y + 1.0f;

@@ -143,6 +143,7 @@ OBJS = \
 	src/client/renderer/entity/chicken_renderer.o \
 	src/client/renderer/entity/sheep_renderer.o \
 	src/client/renderer/entity/strider_renderer.o \
+	src/client/renderer/entity/raft_renderer.o \
 	src/client/renderer/entity/ghast_renderer.o \
 	src/client/renderer/entity/fireball_renderer.o \
 	src/client/renderer/entity/humanoid_renderer.o \

@@ -20,6 +20,7 @@ extern World g_world;
 #include "client/renderer/entity/spider_renderer.h"
 #include "client/renderer/entity/warped_spider_renderer.h"
 #include "client/renderer/entity/strider_renderer.h"
+#include "client/renderer/entity/raft_renderer.h"
 #include "client/renderer/entity/ghast_renderer.h"
 #include "client/renderer/entity/fireball_renderer.h"
 #include "client/renderer/entity/tripod_camera_renderer.h"
@@ -52,6 +53,7 @@ EntityRenderDispatcher::EntityRenderDispatcher() {
     assign(ER_PIGZOMBIE_RENDERER, new HumanoidRenderer("data/images/mob/pigzombie.png",
                                                        false, false, ITEM_SWORD_GOLD));
     assign(ER_STRIDER_RENDERER, new StriderRenderer());
+    assign(ER_RAFT_RENDERER, new RaftRenderer());
     assign(ER_GHAST_RENDERER, new GhastRenderer());
     assign(ER_FIREBALL_RENDERER, new FireballRenderer());
     assign(ER_CREEPER_RENDERER,   new CreeperRenderer());

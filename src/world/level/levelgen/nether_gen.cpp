@@ -1096,10 +1096,19 @@ static void decorateSoulSandValley(World* w, Random& random, int xo, int zo) {
     // a single-block feature would use, since the template extends 10
     // blocks further in +X from its anchor and reaching past this
     // chunk's own 16-wide footprint into a neighbour that may not be
-    // generated yet would corrupt worldBlock reads there.
+    // generated yet would fail every fossilSiteClear read against that
+    // neighbour (worldBlock returns BLOCK_INVISIBLE_BEDROCK for an
+    // unready chunk, which matches neither the "at" nor "below" allow-
+    // list), silently killing the roll. Anchor z needs the same
+    // treatment: the template also reaches +-2 in Z, so a z anchor near
+    // either edge of this chunk's own 16-wide span (z==0,1 or z==14,15)
+    // reached into the neighbouring chunk in Z for the same reason X is
+    // already clamped -- that neighbour is just as likely to still be
+    // unready as the X one, so z is now kept within [zo+2, zo+13] to
+    // keep the whole footprint inside this chunk in both axes.
     int fossilTries = 2 + random.nextInt(3);
     for (int t = 0; t < fossilTries; t++) {
-        int x = xo + random.nextInt(6), z = zo + random.nextInt(16);
+        int x = xo + random.nextInt(6), z = zo + 2 + random.nextInt(12);
         for (int y = NETHER_CEIL_BASE_Y; y >= NETHER_SCAN_MIN_Y; y--) {
             unsigned char id = worldBlock(w, x, y, z);
             if (id != BLOCK_SOUL_SAND && id != BLOCK_SOUL_SOIL) continue;

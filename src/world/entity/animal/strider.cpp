@@ -221,6 +221,25 @@ void Strider::travel(float xs, float yf) {
     if (lava) {
         move(xd, 0.0f, zd);
         yd = 0.0f;
+        // mobRiderAutoJump() requires onGround, which a Strider floating
+        // on a lava surface generally doesn't have set the way a land mob
+        // does (yd is forced to 0 every tick above, not settled by
+        // landing on a solid block) -- so calling the shared helper here
+        // would silently never fire. This was the actual reason a ridden
+        // Strider couldn't hop out of lava onto a raised shore: the
+        // land-only auto-jump call further down never runs while lava is
+        // true, and nothing else covered this case.
+        if (rider && horizontalCollision) {
+            float sy = sinf(yRot * 3.14159265f / 180.0f), cy = cosf(yRot * 3.14159265f / 180.0f);
+            int ax = (int)floorf(x + sy);
+            int az = (int)floorf(z + cy);
+            int stepY = (int)floorf(y + 0.05f);
+            unsigned char step = worldBlock(&g_world, ax, stepY, az);
+            if (isSolidPhys(step) && !isFence(step) && !isFenceGate(step) && !isSlab(step)
+                && !isSolidPhys(worldBlock(&g_world, ax, stepY + 1, az))
+                && !isSolidPhys(worldBlock(&g_world, ax, stepY + 2, az)))
+                yd = 0.42f;
+        }
     } else {
         // Striders can leave lava and walk on land. Keep this path cheap:
         // ordinary collision plus gravity, with no PathfinderMob machinery.
