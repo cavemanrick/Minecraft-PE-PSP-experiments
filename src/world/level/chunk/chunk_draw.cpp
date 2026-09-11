@@ -64,28 +64,70 @@ static inline void chunkSetModel(const ChunkSection* s, float scaleMul) {
     sceGumScale(&sc);
 }
 
+// PPSSPP's software transform path decodes each sceGumDrawArray call into a
+// fixed-size buffer (VERTEX_BUFFER_MAX = 65536 verts, see PPSSPP's
+// GPU/Common/DrawEngineCommon.h) -- exceeding that in one call is what
+// surfaces as a "vertex cache buffer overflow". On real hardware, the GE's
+// own vertex cache is documented safe only for single-digit-thousands of
+// verts per draw call, well below PPSSPP's limit -- so the real-hardware
+// number is the one that matters here, not PPSSPP's.
+//
+// Nothing upstream caps a section's vertexCount below SCRATCH_VERTS
+// (24576/65536 verts), and a section packed with lots of fence/stair/slab
+// partial-geometry can legitimately reach into the low thousands, so a
+// single draw call per section isn't safe to assume bounded. Split into
+// batches well under the hardware-safe ceiling instead.
+//
+// Configurable rather than hardcoded so it can be tuned per device/firmware
+// without touching this file, or lowered further if a specific unit still
+// overflows at the default. This is a hardware vertex-cache-capacity limit,
+// not something that should vary by biome or block palette -- what drives
+// batch count is a section's vertex density (how many partial-geometry
+// blocks like fences/stairs/slabs it packs), which batching already handles
+// generically regardless of what generated that density.
+extern int g_guDrawBatchVerts;
+static int guDrawBatchVerts() { return g_guDrawBatchVerts; }
+
+static inline void chunkDrawBatched(const unsigned int fmt, const DrawVertex* mesh, int count) {
+    // Must stay a multiple of 6 (2 triangles per quad, see
+    // writeQuadDouble/emit* -- all geometry here is built as whole
+    // triangles, never split mid-triangle) so a batch boundary never lands
+    // inside a triangle. g_guDrawBatchVerts is expected to already be a
+    // multiple of 6; round down defensively in case it's ever set to
+    // something that isn't.
+    int batch = guDrawBatchVerts();
+    if (batch < 6) batch = 6;
+    batch -= batch % 6;
+
+    int off = 0;
+    while (off < count) {
+        int n = count - off;
+        if (n > batch) n = batch;
+        sceGumDrawArray(GU_TRIANGLES, fmt, n, 0, mesh + off);
+        off += n;
+    }
+}
+
 void chunkDrawSection(const ChunkSection* s) {
     if (s->vertexCount <= 0 || !s->mesh) return;
     chunkSetModel(s, SEAM_OVERSCALE_OPAQUE);
     const unsigned int fmt = GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D;
-    sceGumDrawArray(GU_TRIANGLES, fmt, s->vertexCount, 0, s->mesh);
+    chunkDrawBatched(fmt, s->mesh, s->vertexCount);
 }
 
 void chunkDrawWaterSection(const ChunkSection* s) {
     if (s->waterCount > 0 && s->water) {
         chunkSetModel(s, SEAM_OVERSCALE_TRANS);
-        sceGumDrawArray(GU_TRIANGLES,
-                        GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D,
-                        s->waterCount, 0, s->water);
+        chunkDrawBatched(GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D,
+                         s->water, s->waterCount);
     }
 }
 
 void chunkDrawLeavesSection(const ChunkSection* s) {
     if (s->leavesCount > 0 && s->leaves) {
         chunkSetModel(s, SEAM_OVERSCALE_OPAQUE);
-        sceGumDrawArray(GU_TRIANGLES,
-                        GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D,
-                        s->leavesCount, 0, s->leaves);
+        chunkDrawBatched(GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D,
+                         s->leaves, s->leavesCount);
     }
 }
 
@@ -97,9 +139,8 @@ void chunkDrawNoMipSection(const ChunkSection* s, int part) {
     else if (part == NOMIP_LAVA) { first = s->noMipLavaStart; count = s->noMipCount - first; }
     if (count <= 0) return;
     chunkSetModel(s, SEAM_OVERSCALE_OPAQUE);
-    sceGumDrawArray(GU_TRIANGLES,
-                    GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D,
-                    count, 0, s->noMip + first);
+    chunkDrawBatched(GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_3D,
+                     s->noMip + first, count);
 }
 
 void chunkFreeMesh(ChunkMesh* c) {

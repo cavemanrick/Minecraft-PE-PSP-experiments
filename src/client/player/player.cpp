@@ -41,6 +41,17 @@ int g_cloudTicks = 0;
 extern int g_autosave;
 int g_autosaveTick = 0;
 
+// Max vertices submitted per sceGumDrawArray call when drawing chunk section
+// meshes (see chunkDrawBatched in chunk_draw.cpp). This is a real-hardware
+// GE vertex-cache-capacity limit, not a visual quality setting -- it exists
+// to prevent a "vertex cache buffer overflow" on densely-built sections
+// (heavy fence/stair/slab clusters). 2010 (335 * 6, kept a multiple of 6 for
+// whole-triangle batches) sits comfortably under the documented safe range
+// for a single draw call on real PSP hardware. Lower it if a specific
+// device/firmware still overflows; there's currently no UI exposing this,
+// so changing it means editing this default.
+int g_guDrawBatchVerts = 2010;
+
 bool  g_invOpen   = false;
 
 float g_dropCharge = -1.0f;

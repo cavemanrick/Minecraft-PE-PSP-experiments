@@ -198,6 +198,7 @@ void worldDraw(const World* cw, float camX, float camY, float camZ, float viewDi
     }
     profEnd(PROF_CULL);
 
+    profBegin(PROF_DRAW);
     int nOpaque = 0;
     for (int i = 0; i < WORLD_CHUNKS_X * WORLD_CHUNKS_Z; i++) {
         const ChunkMesh* c = &w->chunks[i];
@@ -321,6 +322,7 @@ void worldDraw(const World* cw, float camX, float camY, float camZ, float viewDi
         sceGuTexFilter(GU_NEAREST_MIPMAP_LINEAR, GU_NEAREST);
         textureMipAuto();
     }
+    profEnd(PROF_DRAW);
 }
 
 struct WaterSec { float d2; const ChunkSection* s; };

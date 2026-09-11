@@ -26,6 +26,7 @@ enum {
     PROF_CULL,
     PROF_RSCAN,
     PROF_RBUILD,
+    PROF_DRAW,
 
     PROF_MEMIT,
     PROF_MPACK,

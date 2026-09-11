@@ -917,6 +917,20 @@ static const int kFossilBlockCount = (int)(sizeof(kFossilTemplate) / sizeof(kFos
 // under the surface. Checked as a dry run before anything is placed, same
 // footprint-first discipline as the dungeon/fortress generators use,
 // rather than discovering a bad site block-by-block mid-placement.
+//
+// belowOk also accepts plain netherrack, not just soul sand/soil/air.
+// Floor conversion (see decorateSoulSandValley above) only ever flips the
+// single topmost exposed block of a column to soul sand/soil -- so for
+// every ground-level (dy=0) template cell, "below" is the cell directly
+// UNDER that converted surface block, which is ordinary unconverted
+// netherrack, not more soul sand. Restricting belowOk to soul sand/soil/
+// air alone meant every dy=0 cell (7 of the 24 in the template) failed
+// this check unconditionally, on every site, regardless of how flat or
+// open the terrain was -- effectively disabling fossil generation
+// entirely. What belowOk is actually meant to guard against is a
+// template cell floating unsupported over open space (a pit or ledge
+// edge); solid netherrack underneath is exactly as valid support as soul
+// sand/soil is, so it belongs in the same allow-list.
 static bool fossilSiteClear(World* w, int x, int y, int z, bool mirrorZ) {
     for (int i = 0; i < kFossilBlockCount; i++) {
         int dz = mirrorZ ? -kFossilTemplate[i].dz : kFossilTemplate[i].dz;
@@ -926,7 +940,8 @@ static bool fossilSiteClear(World* w, int x, int y, int z, bool mirrorZ) {
         unsigned char at    = worldBlock(w, bx, by, bz);
         unsigned char below = worldBlock(w, bx, by - 1, bz);
         bool atOk    = (at == BLOCK_AIR || at == BLOCK_SOUL_SAND || at == BLOCK_SOUL_SOIL);
-        bool belowOk = (below == BLOCK_SOUL_SAND || below == BLOCK_SOUL_SOIL || below == BLOCK_AIR);
+        bool belowOk = (below == BLOCK_SOUL_SAND || below == BLOCK_SOUL_SOIL ||
+                        below == BLOCK_AIR || below == BLOCK_NETHERRACK);
         if (!atOk || !belowOk) return false;
     }
     return true;
@@ -1688,11 +1703,17 @@ static bool findFloorSurfaceSpot(World* w, int xo, int zo, Random& random, int t
 // placed BLOCK_TORCH source anywhere in Nether generation. findFloorSurfaceSpot
 // is kept, since placeAmbientFires below still needs it.
 
-static void placeAmbientFires(World* w, int xo, int zo, Random& random) {
+static void placeAmbientFires(World* w, int xo, int zo, Random& random, NetherBiomeId biome) {
     // 1-3 permanent fires per chunk (infinite-burn on netherrack, see
     // fire.cpp's infiniBurn check), scattered independently of the single
     // light-source torch above.
-    int count = 1 + random.nextInt(3);
+    //
+    // Wastes gets fewer: 0-1 instead of 1-3. Wastes is the biggest of the
+    // three by land area and was the one actually reported as too busy
+    // with fire -- Soul Sand Valley and Warped Forest keep the original
+    // 1-3 roll unchanged, so this is a Wastes-only reduction rather than
+    // a global density cut.
+    int count = (biome == NB_WASTES) ? random.nextInt(2) : (1 + random.nextInt(3));
     for (int i = 0; i < count; i++) {
         int x, y, z;
         if (!findFloorSurfaceSpot(w, xo, zo, random, 4, &x, &y, &z)) continue;
@@ -1908,7 +1929,7 @@ void chunkGenerateNether(World* w, long worldSeed, int cx, int cz) {
     // overwritten by it.
     placeCeilingLavafalls(w, xo, zo, random);
     placeHillsideLavafalls(w, xo, zo, random);
-    placeAmbientFires(w, xo, zo, random);
+    placeAmbientFires(w, xo, zo, random, biome);
 
     // Quartz veins: now uses the real BLOCK_NETHER_QUARTZ_ORE id (see
     // chunk.h/tile.cpp) instead of the first pass's BLOCK_QUARTZ_BLOCK

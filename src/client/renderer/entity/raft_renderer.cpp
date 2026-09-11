@@ -1,78 +1,83 @@
 
 #include "client/renderer/entity/raft_renderer.h"
-#include "world/entity/vehicle/raft.h"
-#include "world/level/world.h"
-#include "world/level/chunk/chunk.h"
+#include "client/renderer/entity/mob_model.h"
+#include "world/entity/mob.h"
 #include "gpu/texture.h"
-#include "util/mth.h"
+#include <math.h>
 #include <pspgu.h>
-#include <pspgum.h>
 
-extern World   g_world;
-extern bool    g_haveTerrain;
-extern Texture g_terrain;
+enum { P_DECK, P_RAIL0, P_RAIL1, P_COUNT };
+static MobPart parts[P_COUNT];
+static bool    g_built = false;
+static Texture g_tex;
+static bool    g_have = false;
 
-static ChunkVertex s_mesh[36];
-static int s_meshCount = 0;
+// Texture is data/images/mob/raft.png (Bamboo_Raft__texture__JE1_BE1.png as
+// supplied), a real vanilla-style boat-model skin, not a flat icon or a
+// terrain-atlas block texture -- 128x64, with content actually confined
+// to the top-left ~80x44. Pixel bounds below were measured directly
+// against that file (row-by-row alpha scan), not guessed or taken from
+// Mojang's internal model source, which was unavailable to check against.
+//
+// Only two of vanilla's five real box parts (bottom/front/back/left/right)
+// are modeled here, per the "deck + side rails, not a full hull" decision:
+//   - P_DECK: the wide top strip (rows 0-23) is a standard box-unwrap for
+//     a flat slab. tx=0,ty=0,w=24,d=8,h=4 was chosen as the largest
+//     w/d/h combination whose unwrapped footprint (2w+2d wide, d+h tall)
+//     still fits inside that 64x24 region without reading past it into
+//     the side-rail art below.
+//   - P_RAIL0/1: vanilla's actual front/back/left/right posts each have
+//     a distinct T-shaped crossbar-plus-post silhouette (see the texture
+//     itself, rows 24-41); this uses just the plain vertical post
+//     sub-region (x=18-21, y=24-41) as a single box for both, mirrored
+//     front/back by pz sign, rather than modeling all four distinct
+//     T-shapes.
+static void build() {
+    if (g_built) return;
 
-void RaftRenderer::render(Entity* entity, float x, float y, float z, float rot, float) {
-    if (!g_haveTerrain) return;
+    // Deck: centered on its own pivot, not hanging from a joint the way a
+    // leg does, so it's built symmetrically (y0=-2,y1=2) rather than
+    // committing to a signed "away from pivot" direction at all -- there
+    // is no ambiguity to get backwards here.
+    mobBuildBox(parts[P_DECK].base, -7,-2,-9, 7,2,9, 0,0, 24,8,4, false, 0, 128.0f, 64.0f);
+    parts[P_DECK].px = 0; parts[P_DECK].py = 0; parts[P_DECK].pz = 0;
 
-    // Built once -- BLOCK_BAMBOO_PLANKS' texture never changes and neither
-    // does this shape, so there's nothing per-instance to rebuild the way
-    // FallingTileRenderer rebuilds when the falling tile id/data changes.
-    // Grid position (0,150,0) is arbitrary and unused for anything except
-    // feeding emitPartialBox a real World* to satisfy its signature --
-    // boundaryMask=0 and hiddenFaces=0 mean it never actually looks up a
-    // neighbor there, same trick FallingTileRenderer uses for its own
-    // out-of-the-way probe coordinate. The real position comes from the
-    // sceGumTranslate below, using the entity's own interpolated x/y/z.
+    // Rails: this codebase's mobRenderParts applies a global (-msXZ,-msY,
+    // msXZ) scale before any per-part pivot translate (see
+    // ghast_renderer.cpp's tentacle comment, written after a real bug
+    // where this was gotten backwards), which makes local +Y mean "away
+    // from this part's own pivot, toward the ground" -- confirmed against
+    // Strider's own leg (pivot above, box y:0..16 extending DOWN to the
+    // foot) and Pig's legs (same shape, y:0..6). A leg's pivot sits high
+    // and its geometry reaches down to the ground, so it correctly uses
+    // POSITIVE local Y.
     //
-    // Bounds are a thin platform, not a full block: 0.125-0.375 in Y
-    // (a slim deck sitting low rather than a full-height crate), and
-    // inset slightly on X/Z (0.05-0.95) so the footprint doesn't share an
-    // edge exactly with the water/ground block boundary, which reads
-    // better at this resolution than a mesh flush with the full 1x1 cell.
-    if (s_meshCount == 0) {
-        s_meshCount = emitPartialBox(&g_world, 0, 150, 0, BLOCK_BAMBOO_PLANKS, 0,
-                                      0.05f, 0.125f, 0.05f, 0.95f, 0.375f, 0.95f,
-                                      0, 0, s_mesh, 0);
-    }
-    if (s_meshCount <= 0) return;
+    // A rail post is the opposite case: its pivot sits at deck height
+    // (low) and the geometry needs to reach UP, away from the ground --
+    // so it correctly needs NEGATIVE local Y (y0=-height, y1=0), the same
+    // sign the ghast bug used incorrectly for a tentacle that was
+    // supposed to hang down from a high pivot. Same sign, opposite
+    // situation: there it was wrong because the part needed to go down
+    // from a high pivot; here it's right because the part needs to go up
+    // from a low one. The rule is about which way the geometry actually
+    // needs to extend, not a fixed sign to copy.
+    mobBuildBox(parts[P_RAIL0].base, -1,-9,-1, 1,0,1, 18,24, 2,9,2, false, 0, 128.0f, 64.0f);
+    parts[P_RAIL0].px = 0; parts[P_RAIL0].py = 2; parts[P_RAIL0].pz = -8;
 
-    int br = lightRawAt(&g_world, Mth::floor(x), Mth::floor(y), Mth::floor(z));
-    unsigned int brCol = g_brightColor[br];
+    mobBuildBox(parts[P_RAIL1].base, -1,-9,-1, 1,0,1, 18,24, 2,9,2, false, 0, 128.0f, 64.0f);
+    parts[P_RAIL1].px = 0; parts[P_RAIL1].py = 2; parts[P_RAIL1].pz = 8;
 
-    ChunkVertex* mesh = (ChunkVertex*)sceGuGetMemory(s_meshCount * sizeof(ChunkVertex));
-    for (int i = 0; i < s_meshCount; i++) {
-        mesh[i] = s_mesh[i];
-        mesh[i].color = mulColor(s_mesh[i].color, brCol);
-    }
+    g_built = true;
+}
 
-    sceGumMatrixMode(GU_MODEL);
-    sceGumPushMatrix();
-    sceGumLoadIdentity();
-
-    // Undo the (0,150,0) probe position (the mesh's own local vertices are
-    // baked relative to that grid cell's corner, same as
-    // FallingTileRenderer's -0.5f/-150.5f/-0.5f correction below), then
-    // place at the raft's real interpolated position and face it along
-    // its interpolated yaw.
-    ScePspFVector3 tr = { x - 0.5f - g_relBaseX, y - 150.5f - g_relBaseY, z - 0.5f - g_relBaseZ };
-    sceGumTranslate(&tr);
-    // Matches the sign/offset convention mob_model.cpp and
-    // tripod_camera_renderer.cpp use for yaw-driven rotation
-    // ((yaw + 180) * DEG2RAD), not a negated angle -- a plain box has no
-    // inherent "front" face so the +180 offset doesn't change how it
-    // looks, but the sign does, and this keeps the raft consistent with
-    // every other yaw-following renderer in the codebase rather than
-    // introducing an unverified new convention.
-    sceGumRotateY((rot + 180.0f) * (3.14159265f / 180.0f));
-
-    textureBind(&g_terrain);
-    sceGumDrawArray(GU_TRIANGLES,
-                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
-                    s_meshCount, 0, mesh);
-
-    sceGumPopMatrix();
+void RaftRenderer::render(Entity* e, float x, float y, float z, float rot, float a) {
+    if (!g_have) { g_have = textureLoad16("data/images/mob/raft.png", &g_tex, GU_PSM_5551); if (!g_have) return; }
+    build();
+    Mob* mob = (Mob*)e;
+    // mobAnimSetup also computes headYaw/pitch/walk-cycle speed & pos --
+    // all unused here (the raft has no head to swivel and no walk cycle),
+    // but its bodyRot handles the +-180 wraparound case correctly, which
+    // reimplementing just that one line by hand would have skipped.
+    MobAnim m = mobAnimSetup(mob, rot, a);
+    mobRenderParts(mob, parts, P_COUNT, &g_tex, x, y, z, m.bodyRot, a, 0xFFFFFFFFu);
 }

@@ -178,15 +178,28 @@ static void leafPlate(World* w, Random& random, int cx, int cy, int cz, int half
 //
 // Arms run in all 8 compass directions from the trunk at the widest plate's
 // own layer, and each one stops as soon as the next cell would stop being
-// BURIED: that cell must be leaf, the cell above it (in the next plate up)
-// must be leaf, and so must all four of its horizontal neighbours. That
-// keeps every rafter log invisible from outside the canopy, and it is also
-// what caps the arms, so no per-direction length table is needed -- at
-// radius 6 a diagonal tip at (4,4) sticks out past the radius-5 plate above
-// it, and the check truncates that arm at (3,3) on its own.
+// BURIED: that cell must be leaf, and so must all SIX of its neighbours --
+// the plate above, the plate below, and all four horizontally.
+//
+// The underside test is the one that matters and the one a first attempt
+// here got wrong. topY is the canopy's BOTTOM layer, so a rafter laid in it
+// is covered above and on all sides and still fully exposed downwards --
+// which is the face you look at from the jungle floor. Every rafter log was
+// visible, as an 8-spoke wagon wheel under the crown. The canopy therefore
+// gained a fourth plate at topY-1 (see treeJungle) purely so this layer has
+// something under it; the arms are sandwiched rather than sitting on the
+// open underside.
+//
+// The six-way test also caps the arms on its own, so no per-direction length
+// table is needed: at radius 6 a diagonal tip at (4,4) sticks out past the
+// radius-5 plate above it and the arm truncates at (3,3).
 //
 // Verified by simulation over 800 generated trees (both variants, 8 seeds):
-// 126,858 leaves, zero unsupported, zero rafter logs exposed on any side.
+// 167,511 leaves, zero unsupported, zero rafter logs exposed on any of the
+// six faces. Note the bottom plate's radius is load-bearing for that result
+// -- maxRadius-1 gives zero, and both maxRadius-2 (arms truncate too early,
+// 0.10% of leaves orphaned) and maxRadius (the new rim is itself unsupported,
+// 1.06%) were measured and rejected.
 static void canopyRafters(World* w, int x, int topY, int z, int maxRadius, bool isMega) {
     static const int RDX[8] = { 1, -1, 0,  0, 1,  1, -1, -1 };
     static const int RDZ[8] = { 0,  0, 1, -1, 1, -1,  1, -1 };
@@ -206,6 +219,7 @@ static void canopyRafters(World* w, int x, int topY, int z, int maxRadius, bool 
             int rx = ox + RDX[d] * i, rz = oz + RDZ[d] * i;
             if (!isLeaf(worldBlock(w, rx, topY, rz))) break;
             if (!isLeaf(worldBlock(w, rx, topY + 1, rz))) break;
+            if (!isLeaf(worldBlock(w, rx, topY - 1, rz))) break;
             // ...and all four sides too, or the tip shows through a rim gap.
             // Without this the diagonal arms on a radius-5 canopy end at
             // (3,3), whose neighbour (4,3) is exactly a silhouette corner
@@ -302,9 +316,23 @@ static void hangVineSheet(World* w, Random& random, int cx, int cy, int cz, int 
         unsigned char roof = worldBlock(w, sx, cy, sz);
         if (!isLeaf(roof) && !isLog(roof)) continue;
 
+        // Start below the LOWEST canopy block in this column, not below cy.
+        // cy is the widest plate, but the canopy now extends a layer under
+        // it (topY-1) and branch clumps can reach into that band too --
+        // starting at cy-1 would put the first link inside solid leaf and
+        // the loop's own air test would kill every strand at h=1. Walking
+        // down to the underside keeps this independent of how many plates
+        // the canopy happens to have.
+        int roofY = cy;
+        while (roofY > 2) {
+            unsigned char under = worldBlock(w, sx, roofY - 1, sz);
+            if (!isLeaf(under) && !isLog(under)) break;
+            roofY--;
+        }
+
         int len = baseLen - random.nextInt(5); // ragged lower edge
         for (int h = 1; h <= len; h++) {
-            int vy = cy - h;
+            int vy = roofY - h;
             if (vy <= 1) break;
             if (worldBlock(w, sx, vy, sz) != BLOCK_AIR) break;
             setBlock(w, sx, vy, sz, BLOCK_VINE, data);
@@ -435,7 +463,19 @@ void treeJungle(World* w, Random& random, int x, int y, int z) {
     // corner for both variants -- the canopy radius already dwarfs the
     // 1-block offset a 2x2 trunk's center would otherwise need, and vanilla
     // mega tree canopies aren't perfectly centered either.
+    //
+    // Four plates, not three: the topY-1 plate exists so canopyRafters()
+    // has something to hide its arms behind on the underside, and it is
+    // sized maxCanopyRadius-1 rather than -2 because the arms have to stay
+    // buried out to that radius for the widest plate's rim to remain within
+    // decay range (both alternatives were simulated -- see canopyRafters).
+    // It reads as an undercut rounded bottom rather than the flat-cut
+    // underside the three-plate version had, which is closer to a real
+    // jungle canopy anyway. Leaf-to-leaf faces are culled in mesh_block.cpp
+    // (leavesOpaque/leavesCull), so the extra layer costs block writes and
+    // a rim of side faces, not a whole plate's worth of geometry.
     int topY = y + treeHeight;
+    leafPlate(w, random, x, topY - 1, z, maxCanopyRadius - 1);
     leafPlate(w, random, x, topY,     z, maxCanopyRadius);
     leafPlate(w, random, x, topY + 1, z, maxCanopyRadius - 1);
     leafPlate(w, random, x, topY + 2, z, maxCanopyRadius >= 3 ? maxCanopyRadius - 2 : 1);

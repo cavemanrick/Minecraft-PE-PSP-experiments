@@ -104,6 +104,20 @@ bool Raft::playerInteract() {
 void Raft::aiStep() {
     if (rider && rider->getVehicle() != this) rider = 0;
 
+    // Keep body-facing snapped straight to yRot every tick, no lag.
+    // mobAnimSetup() (used by RaftRenderer via mobRenderParts) derives its
+    // rendered body angle from yBodyRot/yBodyRotO, which Animal/
+    // PathfinderMob normally update on their own smoothing timer so a
+    // mob's body visibly catches up to a quick head turn. Raft has none
+    // of that update logic (it isn't an Animal), so without this,
+    // yBodyRot stays at its default 0 forever and the model would render
+    // facing a fixed direction regardless of which way the raft actually
+    // turns. A raft has no head/body distinction to lag in the first
+    // place, so snapping instead of smoothing is correct here, not a
+    // simplification of something that should ease in.
+    yBodyRotO = yBodyRot;
+    yBodyRot = yRot;
+
     // Unridden rafts despawn at range like other lightweight entities.
     // Never removed while ridden -- the rider being nearby is definitionally
     // guaranteed, same guard Strider::aiStep uses.

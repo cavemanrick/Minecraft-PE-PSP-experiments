@@ -4,12 +4,13 @@
 
 #include "client/renderer/entity/entity_renderer.h"
 
-// Draws the raft as a thin, yaw-rotated box textured straight off
-// terrain.png's Bamboo Planks cell -- no dedicated raft skin sheet exists
-// (unlike Pig/Strider's data/images/mob/*.png), so this reuses the block
-// texture that's already loaded for world rendering, the same way
-// FallingTileRenderer and PrimedTntRenderer draw entity geometry off
-// g_terrain rather than a separate sheet.
+// Built the same way Pig/Strider are (mobBuildBox + mobRenderParts against
+// a dedicated skin sheet), not the old flat-plank-box-off-terrain.png
+// approach this replaces. Deck (P_DECK) plus two bow/stern rail posts
+// (P_RAIL0/1) -- a simplified stand-in for vanilla's actual 5-piece
+// bottom/front/back/left/right boat model, whose real UV islands on this
+// same texture are more detailed (per-side crossbars, paddle mounts) than
+// this raft's silhouette needs.
 class RaftRenderer : public EntityRenderer {
 public:
     RaftRenderer() { shadowRadius = 0.6f; shadowStrength = 1.0f; }
